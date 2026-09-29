@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Live quiz{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% macro player() %}
+<div class="card" style="max-width:720px;margin:0 auto" id="stage">
+  <div class="btn-row" style="justify-content:space-between"><strong id="title">{{ s.quiz.title }}</strong><span class="badge accent" id="me"></span></div>
+  <div id="wait" class="center mt"><div style="font-size:2.4rem">⏳</div><p class="muted" id="waitmsg">You're in! Waiting for the host to start…</p></div>
+  <div id="question" hidden data-math>
+    <div class="btn-row mt" style="justify-content:space-between"><span class="small muted" id="qnum"></span><span class="timer" id="timer"></span></div>
+    <h2 id="qtext" class="mt"></h2>
+    <div class="live-choices" id="choices"></div>
+    <p class="center mt" id="feedback"></p>
+  </div>
+  <div id="done" hidden class="center mt"><h2>🏁 Game over</h2><p id="final"></p><ol id="board" class="small" style="text-align:left;display:inline-block"></ol></div>
+</div>
+{% endmacro %}
+{% block content %}{{ player() }}{% endblock %}
+{% block public %}<div style="padding:24px 16px">{{ player() }}</div>{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const stateUrl = "{{ url_for('live.state', code=s.code) }}", answerUrl = "{{ url_for('live.answer', code=s.code) }}";
+  const $ = (id) => document.getElementById(id);
+  let lastKey = "";
+
+  async function pick(i) {
+    document.querySelectorAll("#choices button").forEach((b, j) => { b.disabled = true; if (j === i) b.classList.add("picked"); });
+    try { await hh.post(answerUrl, { choice: i }); $("feedback").textContent = "Answer locked in!"; }
+    catch (e) { $("feedback").textContent = e.message; }
+  }
+
+  function render(st) {
+    if (st.me) $("me").textContent = `${st.me.nickname} · ${st.me.score} pts · #${st.me.rank}`;
+    $("wait").hidden = st.state !== "lobby";
+    $("question").hidden = !["question", "reveal"].includes(st.state);
+    $("done").hidden = st.state !== "finished";
+    if (st.state === "finished") {
+      $("final").textContent = st.me ? `You finished #${st.me.rank} with ${st.me.score} points.` : "";
+      $("board").innerHTML = st.leaderboard.map((p) => `<li>${hh.escape(p.nickname)} — ${p.score}</li>`).join("");
+      return;
+    }
+    if (!st.question) return;
+    $("qnum").textContent = `Question ${st.index + 1} of ${st.total}`;
+    $("timer").textContent = st.state === "question" ? Math.ceil(st.time_left) + "s" : "";
+    const key = `${st.index}:${st.state}`;
+    if (key === lastKey) return;
+    lastKey = key;
+    $("qtext").textContent = st.question.text;
+    const you = st.you || {};
+    $("choices").innerHTML = "";
+    st.question.choices.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.textContent = c + (st.state === "reveal" && st.correct === i ? " ✓" : "");
+      b.disabled = st.state !== "question" || you.answered;
+      if (you.choice === i) b.classList.add("picked");
+      if (st.state === "reveal" && st.correct !== i) b.style.opacity = ".35";
+      b.onclick = () => pick(i);
+      $("choices").appendChild(b);
+    });
+    $("feedback").textContent = st.state === "reveal"
+      ? (you.answered ? (you.correct ? `✅ Correct! +${you.points}` : "❌ Not quite.") : "⏰ Time's up.") + (st.explanation ? ` ${st.explanation}` : "")
+      : (you.answered ? "Answer locked in!" : "");
+    hh.renderMath($("question"));
+  }
+  async function tick() { try { render(await hh.get(stateUrl)); } catch { $("waitmsg").textContent = "Reconnecting…"; } }
+  tick(); setInterval(tick, 1000);
+})();
+</script>
+{% endblock %}

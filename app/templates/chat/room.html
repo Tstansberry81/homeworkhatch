@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Chat · {{ course.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="small muted"><a href="{{ url_for('chat.index') }}">Class chat</a></div><h1>{{ course.name }}</h1>
+    <p class="small muted">{{ members|length }} member{{ 's' if members|length != 1 }}: {{ members|map(attribute='display_name')|join(', ') }}</p></div>
+  <a class="btn btn-ghost" href="{{ url_for('courses.detail', course_id=course.id) }}">Class page</a>
+</div>
+{% if members|length < 2 %}<div class="flash">You're the first one here. Classmates join automatically when they connect their Canvas to Homework Hatch.</div>{% endif %}
+<div class="card chat">
+  <div class="chat-log" id="log"><p class="muted center small" id="loading">Loading…</p></div>
+  <form class="composer" id="composer">
+    <textarea id="input" maxlength="1000" placeholder="Message {{ course.name }}… Be kind; reports go to moderators."></textarea>
+    <button class="btn">Send</button>
+  </form>
+  <p class="small" id="err" style="color:var(--err)"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const url = "{{ url_for('chat.messages', course_id=course.id) }}";
+  const log = document.getElementById("log"), input = document.getElementById("input"), err = document.getElementById("err");
+  let lastId = 0;
+
+  function add(m) {
+    document.getElementById("loading")?.remove();
+    const div = document.createElement("div");
+    div.className = "msg" + (m.mine ? " mine" : "");
+    div.dataset.id = m.id;
+    const action = m.mine ? `<button class="linklike" data-del="${m.id}">delete</button>` : `<button class="linklike" data-report="${m.id}">report</button>`;
+    div.innerHTML = `<div class="meta"><strong>${hh.escape(m.author)}</strong><span>${hh.escape(m.date)} ${hh.escape(m.time)}</span>${action}</div>${hh.escape(m.body).replace(/\n/g, "<br>")}`;
+    log.appendChild(div);
+    lastId = Math.max(lastId, m.id);
+  }
+  async function poll() {
+    try {
+      const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+      const data = await hh.get(`${url}${lastId ? `?after=${lastId}` : ""}`);
+      data.messages.forEach(add);
+      if (!lastId && !data.messages.length) { document.getElementById("loading").textContent = "No messages yet. Say hi 👋"; }
+      if (data.messages.length && nearBottom) log.scrollTop = log.scrollHeight;
+    } catch { /* keep polling */ }
+  }
+  document.getElementById("composer").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    const body = input.value.trim();
+    if (!body) return;
+    try { await hh.post(url, { body }); input.value = ""; await poll(); log.scrollTop = log.scrollHeight; }
+    catch (ex) { err.textContent = ex.message; }
+  });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("composer").requestSubmit(); } });
+  log.addEventListener("click", async (e) => {
+    const del = e.target.dataset.del, rep = e.target.dataset.report;
+    try {
+      if (del && confirm("Delete your message?")) { await hh.post(`{{ url_for('chat.index') }}messages/${del}/delete`); e.target.closest(".msg").remove(); }
+      if (rep) {
+        const reason = prompt("Why are you reporting this message? (optional)");
+        if (reason === null) return;
+        await hh.post(`{{ url_for('chat.index') }}messages/${rep}/report`, { reason });
+        e.target.textContent = "reported";
+        e.target.disabled = true;
+      }
+    } catch (ex) { err.textContent = ex.message; }
+  });
+  poll().then(() => { log.scrollTop = log.scrollHeight; });
+  setInterval(poll, 2500);
+})();
+</script>
+{% endblock %}

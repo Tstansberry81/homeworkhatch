@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ deck.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · {{ deck.course.name }}{% endif %}</div><h1>{{ deck.title }}</h1>
+    {% if deck.description %}<p class="muted">{{ deck.description }}</p>{% endif %}</div>
+  <div class="btn-row">
+    <a class="btn" href="{{ url_for('study.review', deck_id=deck.id) }}">{{ 'Review ' ~ due ~ ' due' if due else 'Review' }}</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.cram', deck_id=deck.id) }}">Cram all</a>
+  </div>
+</div>
+<div class="card">
+  <h2>{{ deck.cards|length }} cards</h2>
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th style="width:40%">Front</th><th>Back</th><th class="right">Next review</th><th></th></tr></thead>
+    <tbody>
+    {% for c in deck.cards %}
+      <tr>
+        <td colspan="2">
+          <form method="post" class="form-row" style="grid-template-columns:1fr 1.4fr auto;align-items:start">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="card_id" value="{{ c.id }}">
+            <textarea name="front" style="min-height:44px">{{ c.front }}</textarea>
+            <textarea name="back" style="min-height:44px">{{ c.back }}</textarea>
+            <button class="btn btn-ghost btn-sm" title="Save">Save</button>
+          </form>
+        </td>
+        <td class="right small muted nowrap">{{ c.due_at|ago if c.due_at > now_utc() else 'now' }}</td>
+        <td class="right"><form method="post" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="delete_card"><input type="hidden" name="card_id" value="{{ c.id }}"><button class="linklike small" title="Delete card">✕</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+<div class="grid grid-2">
+  <form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="add">
+    <h2>Add cards</h2>
+    <textarea name="cards" placeholder="front :: back (one per line)"></textarea>
+    <button class="btn mt">Add</button>
+  </form>
+  <div class="card">
+    <h2>Deck settings</h2>
+    <form method="post" class="btn-row"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="rename">
+      <input name="title" type="text" value="{{ deck.title }}" style="flex:1"><button class="btn btn-ghost">Rename</button></form>
+    <form method="post" class="mt" data-confirm="Reset all review progress for this deck?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="reset"><button class="btn btn-ghost">Reset progress</button></form>
+    <form method="post" action="{{ url_for('study.delete_deck', deck_id=deck.id) }}" class="mt" data-confirm="Delete this deck and all its cards?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger">Delete deck</button></form>
+  </div>
+</div>
+{% endblock %}

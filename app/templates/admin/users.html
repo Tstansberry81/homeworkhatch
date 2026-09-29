@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Users · Admin{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.overview') }}">Admin</a></div><h1>Users</h1></div>
+  <form class="btn-row"><input type="search" name="q" value="{{ q }}" placeholder="Search email, username, name"><button class="btn btn-ghost">Search</button></form></div>
+<div class="card table-wrap">
+  <table class="table">
+    <thead><tr><th>User</th><th>Plan</th><th>Joined</th><th>Last seen</th><th>Status</th></tr></thead>
+    <tbody>{% for u in users %}
+      <tr><td><a href="{{ url_for('admin.user_detail', user_id=u.id) }}">{{ u.username }}</a>{% if u.is_admin %} <span class="badge accent">admin</span>{% endif %}<div class="small muted">{{ u.email }}</div></td>
+        <td>{{ u.plan }}{% if u.plan_comped %} <span class="badge">comped</span>{% endif %}</td><td class="small">{{ u.created_at|ago }}</td><td class="small">{{ u.last_seen_at|ago }}</td>
+        <td>{% if not u.active %}<span class="badge err">disabled</span>{% elif not u.is_approved %}<span class="badge warn">pending</span>{% else %}<span class="badge ok">active</span>{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ game.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="small muted"><a href="{{ url_for('coins.arcade') }}">Arcade</a></div><h1>{{ game.name }}</h1><p class="muted">{{ game.blurb }}</p></div>
+  <span class="coins-chip">🪙 <span id="balance">{{ coin_balance }}</span></span>
+</div>
+<div class="grid grid-main">
+  <div class="card">
+    <div class="game-stage" id="stage" data-game="{{ slug }}">
+      <p class="muted">Costs {{ game.cost }} coins per play.{% if personal %} Your best: <strong>{{ personal }}</strong>.{% endif %}</p>
+      <button class="btn" id="start">Play ({{ game.cost }} 🪙)</button>
+    </div>
+    <p class="center" id="msg"></p>
+  </div>
+  <div class="card"><h2>Leaderboard</h2>
+    <ol class="small">{% for name, score in board %}<li><strong>{{ name }}</strong> — {{ score }}</li>{% else %}<li class="muted">Be the first!</li>{% endfor %}</ol></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+window.HH_GAME = { slug: "{{ slug }}", startUrl: "{{ url_for('coins.start', slug=slug) }}", scoreUrl: "{{ url_for('coins.score', slug=slug) }}" };
+</script>
+<script src="{{ url_for('static', filename='js/games.js') }}"></script>
+{% endblock %}

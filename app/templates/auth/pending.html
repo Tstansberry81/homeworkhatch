@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Almost there{% endblock %}
+{% block public %}
+<div class="auth-wrap">
+  <div class="auth-card card center">
+    <div style="font-size:2.4rem">🥚</div>
+    <h1>You're on the list</h1>
+    <p class="muted">Your account is waiting for an admin to approve it. Try signing in again once you've heard back.</p>
+    <a class="btn btn-ghost" href="{{ url_for('auth.login') }}">Back to sign in</a>
+  </div>
+</div>
+{% endblock %}

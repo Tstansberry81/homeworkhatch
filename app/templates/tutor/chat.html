@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Tutor · {{ conv.title }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+<div class="tutor-layout">
+  <aside>
+    <form method="post" action="{{ url_for('tutor.new') }}" class="card" style="padding:12px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <select name="course_id"><option value="">All my classes</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>
+      <button class="btn btn-block mt">+ New conversation</button>
+    </form>
+    <nav class="convo-list mt">
+      {% for c in conversations %}<a href="{{ url_for('tutor.conversation', conversation_id=c.id) }}" class="{{ 'active' if c.id == conv.id }}" title="{{ c.title }}">{{ c.title }}</a>{% endfor %}
+    </nav>
+  </aside>
+  <section>
+    <div class="page-head">
+      <div><h1 style="font-size:1.25rem">{{ conv.title }}</h1><p class="small muted">{{ 'About ' ~ conv.course.name if conv.course else 'Across all your classes' }}{% if remaining is not none %} · <span id="remaining">{{ remaining }}</span> AI actions left this month{% endif %}</p></div>
+      <form method="post" action="{{ url_for('tutor.delete', conversation_id=conv.id) }}" data-confirm="Delete this conversation?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost btn-sm">Delete</button></form>
+    </div>
+    <div class="card chat">
+      <div class="chat-log" id="log">
+        {% for m in conv.messages %}
+        <div class="msg {{ 'mine' if m.role == 'user' else 'assistant' }}"><div class="prose" data-math>{{ tutor_render(m)|safe }}</div></div>
+        {% else %}
+        <div class="empty" id="starter"><p>Ask anything. Try:</p>
+          <div class="btn-row" style="justify-content:center">
+            {% for s in ["Explain the main idea of this week's material", "Quiz me on the last unit", "What's on the syllabus about late work?", "Help me understand where I'm stuck"] %}
+            <button class="btn btn-ghost btn-sm" data-suggest="{{ s }}">{{ s }}</button>{% endfor %}
+          </div></div>
+        {% endfor %}
+      </div>
+      <form class="composer" id="composer">
+        <textarea id="input" placeholder="Ask a question… (Enter to send, Shift+Enter for a new line)" {{ 'disabled' if not ai_available }}></textarea>
+        <button class="btn" id="send" {{ 'disabled' if not ai_available }}>Send</button>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const log = document.getElementById("log"), input = document.getElementById("input"), send = document.getElementById("send");
+  const url = "{{ url_for('tutor.message', conversation_id=conv.id) }}";
+  const scroll = () => { log.scrollTop = log.scrollHeight; };
+  scroll();
+
+  function bubble(cls, html) {
+    document.getElementById("starter")?.remove();
+    const div = document.createElement("div");
+    div.className = `msg ${cls}`;
+    div.innerHTML = `<div class="prose">${html}</div>`;
+    log.appendChild(div);
+    scroll();
+    return div.firstChild;
+  }
+
+  async function ask(text) {
+    if (!text.trim()) return;
+    bubble("mine", hh.escape(text).replace(/\n/g, "<br>"));
+    input.value = ""; send.disabled = true; input.disabled = true;
+    const out = bubble("assistant", '<span class="muted">Thinking…</span>');
+    let raw = "";
+    try {
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRFToken": hh.csrf }, body: JSON.stringify({ text }) });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Something went wrong."); }
+      const reader = res.body.getReader(), decoder = new TextDecoder();
+      let buffer = "";
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) >= 0) {
+          const block = buffer.slice(0, idx); buffer = buffer.slice(idx + 2);
+          const event = /^event: (.*)$/m.exec(block)?.[1], data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] || "{}");
+          if (event === "delta") { raw += data.text; out.textContent = raw; scroll(); }
+          else if (event === "done") {
+            out.innerHTML = data.html; hh.renderMath(out); scroll();
+            const rem = document.getElementById("remaining"); if (rem && data.remaining != null) rem.textContent = data.remaining;
+          } else if (event === "error") { throw new Error(data.message); }
+        }
+      }
+    } catch (e) {
+      out.innerHTML = `<span style="color:var(--err)">${hh.escape(e.message)}</span>`;
+    } finally {
+      send.disabled = false; input.disabled = false; input.focus();
+    }
+  }
+
+  document.getElementById("composer").addEventListener("submit", (e) => { e.preventDefault(); ask(input.value); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(input.value); } });
+  document.querySelectorAll("[data-suggest]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.suggest)));
+})();
+</script>
+{% endblock %}

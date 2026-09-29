@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Connect Canvas{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>🔌 Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension, using the same login you already use. Your school password never reaches us, and it works even at schools that block student API tokens.</p></div></div>
+
+{% if accounts %}
+<div class="card mb" style="border-color:var(--ok)">
+  <h2>✅ Connected</h2>
+  <ul class="list">{% for a in accounts %}<li><div class="grow"><div class="title">{{ a.host }}</div><div class="small muted">as {{ a.canvas_name or 'you' }} · last sync {{ a.last_sync_at|ago }}</div></div>
+    {% if a.restricted %}<span class="small muted" title="Tabs your instructors hid in Canvas">{{ a.restricted|length }} hidden sections</span>{% endif %}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<div class="grid grid-main">
+  <div class="card">
+    <h2>Set it up (about 2 minutes)</h2>
+    <ol>
+      <li class="mb"><strong>Download the extension.</strong> <a class="btn btn-sm" href="{{ url_for('main.extension_zip') }}">Download .zip</a><br>
+        <span class="small muted">Unzip it somewhere you'll keep it (e.g. your Documents folder).</span></li>
+      <li class="mb"><strong>Load it in Chrome</strong> (or Edge, Brave, Arc): go to <code>chrome://extensions</code>, turn on <em>Developer mode</em>, click <em>Load unpacked</em>, and pick the unzipped folder.</li>
+      <li class="mb"><strong>Connect your school:</strong> open your Canvas in a tab, click the Homework Hatch icon, then <em>Connect</em>.</li>
+      <li class="mb"><strong>Link it to your account:</strong> in the extension's <em>Settings</em>, set <em>Homework Hatch server</em> to<br>
+        <code id="server">{{ server_url }}</code> <button class="btn btn-ghost btn-sm" data-copy="#server">Copy</button><br>
+        and paste a <em>server token</em> from the box on the right. Then click <em>Sync now</em>.</li>
+    </ol>
+    <p class="small muted">After that it syncs every hour while Chrome is open, including new files, grades and announcements. Hidden tabs, locked files and outside tools (WebAssign, Gradescope…) can't be read.</p>
+  </div>
+  <div>
+    <form method="post" action="{{ url_for('settings.create_token') }}" class="card">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h2>Server tokens</h2>
+      <label for="name">Name</label><input id="name" name="name" type="text" value="My laptop" maxlength="80">
+      <button class="btn btn-block mt">Create a token</button>
+      {% if tokens %}
+      <ul class="list mt small">{% for t in tokens %}
+        <li><div class="grow"><strong>{{ t.name }}</strong> <code>{{ t.prefix }}…</code><div class="muted">{{ 'used ' ~ (t.last_used_at|ago) if t.last_used_at else 'never used' }}</div></div>
+          <button class="linklike" form="revoke{{ t.id }}">revoke</button></li>{% endfor %}</ul>
+      {% endif %}
+    </form>
+    {% for t in tokens %}<form id="revoke{{ t.id }}" method="post" action="{{ url_for('settings.revoke_token', token_id=t.id) }}" data-confirm="Revoke this token? That extension will stop syncing."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"></form>{% endfor %}
+    {% if runs %}
+    <div class="card"><h2>Recent syncs</h2>
+      <ul class="list small">{% for r in runs %}<li><div class="grow">{{ r.received_at|ago }} · {{ (r.stats or {}).get('courses', 0) }} classes{% if (r.stats or {}).get('coins') %} · +{{ r.stats.coins }} 🪙{% endif %}</div>
+        <span class="muted">{{ r.files_uploaded }}/{{ r.files_needed }} files{% if r.failed %} · {{ r.failed|length }} failed{% endif %}</span></li>{% endfor %}</ul></div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% from "_macros.html" import assignment_row, grade_text, status_badge, empty %}
+{% block title %}{{ course.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="small muted">{{ course.term_name or '' }}{% if course.course_code %} · {{ course.course_code }}{% endif %}</div>
+    <h1>{{ course.name }}</h1>
+  </div>
+  <div class="btn-row">
+    {% if ai_available %}
+    <form method="post" action="{{ url_for('tutor.new') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn">🤖 Ask about this class</button></form>
+    {% endif %}
+    <a class="btn btn-ghost" href="{{ url_for('chat.room', course_id=course.id) }}">💬 Class chat</a>
+    {% if course.html_url %}<a class="btn btn-ghost" href="{{ course.html_url }}" target="_blank" rel="noopener">Open in Canvas ↗</a>{% endif %}
+  </div>
+</div>
+
+<nav class="tabs">
+  {% for key, label in [("overview", "Overview"), ("assignments", "Assignments"), ("grades", "Grades"), ("modules", "Modules"), ("pages", "Pages"), ("files", "Files"), ("announcements", "Announcements")] %}
+  <a href="{{ url_for('courses.detail', course_id=course.id, tab=key) }}" class="{{ 'active' if tab == key }}">{{ label }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab == "overview" %}
+<div class="grid grid-main">
+  <div class="card">
+    <h2>Coming up</h2>
+    {% if upcoming %}<ul class="list">{% for a in upcoming %}{{ assignment_row(a, show_course=false) }}{% endfor %}</ul>
+    {% else %}{{ empty("✅", "Nothing due in this class for the next two weeks.") }}{% endif %}
+  </div>
+  <div>
+    <div class="card stat"><div class="value">{{ grade_text(course) }}</div><div class="label">current grade in Canvas</div></div>
+    {% if course.syllabus_html %}
+    <div class="card"><h2>Syllabus</h2><div class="prose small" style="max-height:340px;overflow:auto">{{ course.syllabus_html|canvas_html(base_url)|safe }}</div></div>
+    {% endif %}
+  </div>
+</div>
+
+{% elif tab == "assignments" %}
+<div class="card">
+  {% if course.assignments %}
+  <ul class="list">{% for a in course.assignments if a.due_at %}{{ assignment_row(a, show_course=false) }}{% endfor %}
+    {% for a in course.assignments if not a.due_at %}{{ assignment_row(a, show_course=false) }}{% endfor %}</ul>
+  {% else %}{{ empty("📭", "No assignments synced for this class.") }}{% endif %}
+</div>
+
+{% elif tab == "grades" %}
+<div class="grid grid-main">
+  <div class="card">
+    <h2>What-if calculator</h2>
+    <p class="small muted">Type a hypothetical score for anything (graded or not) to see how your grade would move. Nothing is saved or sent to Canvas.</p>
+    <div class="table-wrap">
+    <table class="table" id="whatif">
+      <thead><tr><th>Assignment</th><th>Group</th><th class="right">Score</th><th class="right">Out of</th></tr></thead>
+      <tbody>
+      {% for a in course.assignments if a.points_possible is not none and not a.excused %}
+      <tr>
+        <td><a href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a> {% if a.id in (grade.groups|map(attribute='dropped')|sum(start=[])) %}<span class="badge">dropped</span>{% endif %}</td>
+        <td class="small muted">{% for g in course.groups if g.canvas_id == a.group_canvas_id %}{{ g.name }}{% endfor %}</td>
+        <td class="right"><input type="number" step="any" style="width:90px;text-align:right" data-aid="{{ a.id }}" placeholder="{{ '%g' % a.score if a.score is not none and a.status == 'graded' else '—' }}"></td>
+        <td class="right">{{ '%g' % a.points_possible }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  <div>
+    <div class="card stat">
+      <div class="label">Calculated from synced scores</div>
+      <div class="value" id="calc">{{ '%.2f' % grade.percent ~ '%' if grade.percent is not none else '—' }}</div>
+      <div class="small muted">Canvas says {{ grade_text(course) }}. {% if grade.weighted %}Weighted by group.{% else %}Total points.{% endif %}</div>
+    </div>
+    <div class="card">
+      <h3>Groups</h3>
+      <ul class="list small" id="groups">
+        {% for g in grade.groups %}<li><span class="grow">{{ g.name }}{% if g.weight %} <span class="muted">({{ '%g' % g.weight }}%)</span>{% endif %}</span><strong>{{ '%.1f' % g.percent ~ '%' if g.percent is not none else '—' }}</strong></li>{% endfor %}
+      </ul>
+    </div>
+    <div class="card">
+      <h3>What do I need?</h3>
+      <label for="need-a">On this assignment</label>
+      <select id="need-a">{% for a in course.assignments if a.points_possible and a.status != 'graded' %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select>
+      <label for="need-goal">To finish with at least (%)</label>
+      <input id="need-goal" type="number" value="90" step="any">
+      <button class="btn btn-block mt" id="need-go">Calculate</button>
+      <p id="need-out" class="mt"></p>
+    </div>
+  </div>
+</div>
+
+{% elif tab == "modules" %}
+{% for m in course.modules %}
+<div class="card">
+  <h2>{{ m.name }}</h2>
+  <ul class="list">
+    {% for it in m.items or [] %}
+    <li><div class="grow">
+      {% if it.type == "Page" %}{% set p = course.pages|selectattr('slug', 'equalto', it.page_url)|first %}{% endif %}
+      {% if it.type == "Page" and p %}<a href="{{ url_for('courses.page', page_id=p.id) }}">📄 {{ it.title }}</a>
+      {% elif it.type == "File" %}{% set f = course.files|selectattr('canvas_id', 'equalto', it.content_id)|first %}
+        {% if f %}<a href="{{ url_for('courses.file_detail', file_id=f.id) }}">📎 {{ it.title }}</a>{% else %}📎 {{ it.title }}{% endif %}
+      {% elif it.type == "Assignment" %}{% set a = course.assignments|selectattr('canvas_id', 'equalto', it.content_id)|first %}
+        {% if a %}<a href="{{ url_for('courses.assignment', assignment_id=a.id) }}">📝 {{ it.title }}</a>{% else %}📝 {{ it.title }}{% endif %}
+      {% elif it.type == "ExternalUrl" and it.external_url %}<a href="{{ it.external_url }}" target="_blank" rel="noopener">🔗 {{ it.title }}</a>
+      {% elif it.type == "SubHeader" %}<strong>{{ it.title }}</strong>
+      {% else %}{% if it.html_url %}<a href="{{ it.html_url }}" target="_blank" rel="noopener">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %} <span class="small muted">{{ it.type }}</span>{% endif %}
+    </div>{% if it.completed %}<span class="badge ok">✓</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% else %}<div class="card">{{ empty("🧩", "No modules in this class (or the tab is hidden).") }}</div>{% endfor %}
+
+{% elif tab == "pages" %}
+<div class="card">
+  {% if course.pages %}
+  <ul class="list">{% for p in course.pages %}<li><a class="grow title" href="{{ url_for('courses.page', page_id=p.id) }}">{{ p.title }}</a><span class="small muted">{{ p.canvas_updated_at|ago }}</span></li>{% endfor %}</ul>
+  {% else %}{{ empty("📄", "No pages synced for this class.") }}{% endif %}
+</div>
+
+{% elif tab == "files" %}
+<div class="card">
+  {% if course.files %}
+  <p class="small muted">{{ course.files|selectattr('storage_key')|list|length }} of {{ course.files|length }} files stored.{% if course.files_tab_hidden %} This class hides its Files tab; these were found through modules and links.{% endif %}</p>
+  <ul class="list">
+    {% for f in course.files %}
+    <li><div class="grow"><a class="title" href="{{ url_for('courses.file_detail', file_id=f.id) }}">{{ f.name }}</a>
+      <div class="small muted">{% if f.size %}{{ (f.size / 1024)|round(0)|int }} KB{% endif %}{% if f.text_status == 'ok' %} · readable by AI{% endif %}</div></div>
+      {% if f.storage_key %}<a class="btn btn-ghost btn-sm" href="{{ url_for('courses.download', file_id=f.id) }}">Download</a>{% else %}<span class="badge">not uploaded yet</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% else %}{{ empty("📎", "No files synced for this class.") }}{% endif %}
+</div>
+
+{% elif tab == "announcements" %}
+{% for n in course.announcements %}
+<div class="card"><h2>{{ n.title }}</h2><div class="small muted mb">{{ n.author or '' }} · {{ n.posted_at|dt('long') }}</div>
+  <div class="prose">{{ n.message_html|canvas_html(base_url)|safe }}</div></div>
+{% else %}<div class="card">{{ empty("📣", "No recent announcements.") }}</div>{% endfor %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if tab == "grades" %}
+<script>
+(() => {
+  const inputs = document.querySelectorAll("#whatif input[data-aid]");
+  let timer;
+  const run = () => {
+    const scores = {};
+    inputs.forEach((i) => { if (i.value !== "") scores[i.dataset.aid] = i.value; });
+    hh.post("{{ url_for('courses.what_if', course_id=course.id) }}", { scores }).then((r) => {
+      document.getElementById("calc").textContent = r.percent == null ? "—" : r.percent.toFixed(2) + "%";
+      document.getElementById("groups").innerHTML = r.groups.map((g) =>
+        `<li><span class="grow">${hh.escape(g.name)}${g.weight ? ` <span class="muted">(${g.weight}%)</span>` : ""}</span><strong>${g.percent == null ? "—" : g.percent.toFixed(1) + "%"}</strong></li>`).join("");
+    }).catch(() => {});
+  };
+  inputs.forEach((i) => i.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(run, 250); }));
+  document.getElementById("need-go")?.addEventListener("click", async () => {
+    const out = document.getElementById("need-out");
+    try {
+      const r = await hh.post("{{ url_for('courses.needed', course_id=course.id) }}",
+        { assignment_id: document.getElementById("need-a").value, goal: document.getElementById("need-goal").value });
+      out.textContent = r.needed == null ? "Not reachable with this assignment alone, even with a perfect score." : `You need at least ${r.needed} points.`;
+    } catch (e) { out.textContent = e.message; }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

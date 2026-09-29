@@ -1,0 +1,33 @@
+{% macro status_badge(a) -%}
+{%- set s = a.effective_status -%}
+{%- set labels = {"graded": "Graded", "submitted": "Submitted", "submitted_late": "Late", "missing": "Missing",
+   "past_due": "Past due", "upcoming": "To do", "excused": "Excused", "no_submission": "In class", "done": "Done"} -%}
+<span class="badge {{ s }}">{{ labels.get(s, s) }}</span>
+{%- endmacro %}
+
+{% macro csrf() -%}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{%- endmacro %}
+
+{% macro grade_text(course) -%}
+{%- if course.current_score is not none -%}{{ '%g' % course.current_score }}%{% if course.current_grade %} ({{ course.current_grade }}){% endif %}{%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{% macro assignment_row(a, show_course=true) %}
+<li>
+  <div class="grow">
+    <a class="title" href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a>
+    <div class="small muted">{% if show_course %}{{ a.course.name }} · {% endif %}{% if a.due_at %}due {{ a.due_at|dt }} ({{ a.due_at|ago }}){% else %}no due date{% endif %}{% if a.points_possible %} · {{ '%g' % a.points_possible }} pts{% endif %}</div>
+  </div>
+  <div class="btn-row">
+    {{ status_badge(a) }}
+    {% if a.effective_status in ('upcoming', 'past_due', 'missing', 'no_submission', 'done') %}
+    <form method="post" action="{{ url_for('main.toggle_done', assignment_id=a.id) }}" class="inline">
+      {{ csrf() }}<button class="btn btn-ghost btn-sm" title="Mark done (e.g. handed in on paper)">{{ 'Undo' if a.user_done else '✓' }}</button>
+    </form>
+    {% endif %}
+  </div>
+</li>
+{% endmacro %}
+
+{% macro empty(icon, text, action_url=None, action_label=None) %}
+<div class="empty"><div class="big">{{ icon }}</div><p>{{ text }}</p>{% if action_url %}<a class="btn" href="{{ action_url }}">{{ action_label }}</a>{% endif %}</div>
+{% endmacro %}

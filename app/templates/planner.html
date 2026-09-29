@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Study plan{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Study plan</h1><p class="muted">Your next two weeks of work, spread out so nothing lands on one night. Earliest deadline first, finished a day early when possible.</p></div>
+  <form method="post" class="btn-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="minutes" style="margin:0">Minutes per day</label>
+    <input id="minutes" name="minutes" type="number" min="15" max="720" step="15" value="{{ plan.minutes_per_day }}" style="width:100px">
+    <button class="btn btn-ghost">Update</button>
+  </form>
+</div>
+{% if plan.at_risk %}
+<div class="card mb" style="border-color:var(--err)">
+  <h2>⚠️ Won't fit</h2>
+  <p class="small">At {{ plan.minutes_per_day }} minutes a day, these need more time than is left before they're due. Raise your daily time or start now.</p>
+  <ul class="list">{% for r in plan.at_risk %}<li><a class="grow title" href="{{ url_for('courses.assignment', assignment_id=r.assignment.id) }}">{{ r.assignment.name }}</a><span class="small muted">short {{ r.short_minutes }} min · due {{ r.due_local.strftime('%a %-I:%M %p') }}</span></li>{% endfor %}</ul>
+</div>
+{% endif %}
+<div class="grid grid-2">
+{% for d in plan.days %}
+  <div class="card">
+    <h3 style="display:flex;justify-content:space-between">{{ 'Today' if d.day == today else d.day.strftime('%A, %b %-d') }} <span class="small muted">{{ d.used }} / {{ d.capacity }} min</span></h3>
+    <div class="progress mb"><span style="width:{{ (100 * d.used / d.capacity)|round|int }}%"></span></div>
+    {% if d.items %}
+    <ul class="list small">
+      {% for item in d.items %}
+      <li><div class="grow"><a href="{{ url_for('courses.assignment', assignment_id=item.assignment.id) }}">{{ item.assignment.name }}</a>
+        <div class="muted">{{ item.assignment.course.name }} · due {{ item.due_local.strftime('%a %-I:%M %p') }}</div></div><strong class="nowrap">{{ item.minutes }} min</strong></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="small muted">Free — review flashcards or get ahead.</p>{% endif %}
+  </div>
+{% endfor %}
+</div>
+<p class="small muted mt">Estimates: tests 3 h, quizzes 1 h, other work scales with points. Items you mark ✓ done drop out.</p>
+{% endblock %}

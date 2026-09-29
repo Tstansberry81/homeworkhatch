@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Homework Hatch</h1>
+    <span id="state" class="pill">…</span>
+  </header>
+
+  <section id="setup" hidden>
+    <p id="setupMsg"></p>
+    <button id="connect" hidden>Connect</button>
+    <details>
+      <summary>Enter your Canvas address instead</summary>
+      <label>Canvas URL <input id="manualUrl" type="url" placeholder="https://yourschool.instructure.com"></label>
+      <button id="connectManual" class="secondary">Connect</button>
+    </details>
+  </section>
+
+  <div id="main" hidden>
+    <p id="summary" class="muted"></p>
+    <p id="error" class="error" hidden></p>
+
+    <div class="row">
+      <button id="sync">Sync now</button>
+      <button id="download" class="secondary">Download files</button>
+      <button id="export" class="secondary">Export JSON</button>
+      <button id="open" class="secondary" hidden>Open Canvas</button>
+    </div>
+
+    <section>
+      <h2>Due in the next 14 days</h2>
+      <ul id="upcoming"></ul>
+    </section>
+
+    <section>
+      <h2>Grades</h2>
+      <table id="grades"></table>
+    </section>
+
+    <details>
+      <summary>Courses shown</summary>
+      <p class="muted">Defaults to the courses on your Canvas dashboard.</p>
+      <div id="courses"></div>
+    </details>
+
+    <details>
+      <summary>What synced</summary>
+      <div id="counts" class="muted"></div>
+      <div id="restricted" class="muted"></div>
+    </details>
+
+    <details>
+      <summary>Settings</summary>
+      <label>Canvas URL <input id="baseUrl" type="url"></label>
+      <label>Sync every (minutes) <input id="intervalMinutes" type="number" min="15"></label>
+      <label>Homework Hatch server <input id="endpointUrl" type="url" placeholder="https://your-homework-hatch-site"></label>
+      <label>Server token <input id="endpointToken" type="password" placeholder="hh_…"></label>
+      <p class="muted">Get both from “Connect Canvas” on the Homework Hatch site. Every sync (manual or hourly) then sends your classes and any new files there.</p>
+      <button id="save" class="secondary">Save</button>
+      <span id="saved" class="muted"></span>
+    </details>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

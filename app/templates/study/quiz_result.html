@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Results · {{ quiz.title }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+{% set pct = (100 * attempt.score / attempt.total)|round|int if attempt.total else 0 %}
+<div class="page-head">
+  <div><div class="small muted"><a href="{{ url_for('study.take_quiz', quiz_id=quiz.id) }}">{{ quiz.title }}</a></div><h1>{{ attempt.score }} / {{ attempt.total }} ({{ pct }}%)</h1>
+    <p class="muted">{{ "🎯 Perfect!" if pct == 100 else ("Nice work!" if pct >= 80 else "Review the explanations below, then try again.") }}</p></div>
+  <div class="btn-row"><a class="btn" href="{{ url_for('study.take_quiz', quiz_id=quiz.id) }}">Try again</a><a class="btn btn-ghost" href="{{ url_for('study.index') }}">All quizzes</a></div>
+</div>
+<div data-math>
+{% for q in quiz.questions %}
+  {% set picked = attempt.answers[loop.index0] %}
+  <div class="card">
+    <h3>{{ '✅' if picked == q.answer else '❌' }} {{ loop.index }}. {{ q.question }}</h3>
+    {% for c in q.choices %}
+      <div class="choice {{ 'correct' if loop.index0 == q.answer else ('wrong' if loop.index0 == picked else '') }}">{{ c }}{% if loop.index0 == picked %} <span class="small muted">— your answer</span>{% endif %}</div>
+    {% endfor %}
+    {% if q.explanation %}<p class="small muted mt">{{ q.explanation }}</p>{% endif %}
+  </div>
+{% endfor %}
+</div>
+{% endblock %}

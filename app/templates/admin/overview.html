@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+<div class="page-head"><h1>🛡️ Admin</h1><div class="btn-row"><a class="btn btn-ghost" href="{{ url_for('admin.users') }}">Users</a><a class="btn btn-ghost" href="{{ url_for('admin.reports') }}">Reports{% if stats.open_reports %} ({{ stats.open_reports }}){% endif %}</a></div></div>
+<div class="grid grid-4 mb">
+  {% for label, key in [("Users", "users"), ("Active (7 days)", "active_7d"), ("Syncs (24 h)", "syncs_24h"), ("Active classes", "courses"),
+                         ("AI actions this month", "ai_month"), ("AI tokens this month", "tokens_month"), ("Coins in circulation", "coins"), ("Pending approval", "pending")] %}
+  <div class="card stat"><div class="value">{{ '{:,}'.format(stats[key] or 0) }}</div><div class="label">{{ label }}</div></div>
+  {% endfor %}
+</div>
+<div class="grid grid-2">
+  <div class="card"><h2>Plans</h2><ul class="list">{% for plan, n in plans.items() %}<li><span>{{ plan }}</span><strong>{{ n }}</strong></li>{% endfor %}</ul></div>
+  <div class="card"><h2>Waiting for approval</h2>
+    {% if pending %}<ul class="list">{% for u in pending %}<li><div class="grow"><a href="{{ url_for('admin.user_detail', user_id=u.id) }}">{{ u.username }}</a> <span class="small muted">{{ u.email }} · {{ u.created_at|ago }}</span></div>
+      <form method="post" action="{{ url_for('admin.user_detail', user_id=u.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="approve"><button class="btn btn-sm">Approve</button></form></li>{% endfor %}</ul>
+    {% else %}<p class="muted small">Nobody waiting.{% if not config.REQUIRE_APPROVAL %} (Approval is off: set REQUIRE_APPROVAL=1 to require it.){% endif %}</p>{% endif %}</div>
+</div>
+{% endblock %}

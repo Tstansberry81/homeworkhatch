@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_macros.html" import grade_text, empty %}
+{% block title %}Classes{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Classes</h1><p class="muted">Everything synced from Canvas. Hidden classes stay out of your dashboard, planner and downloads.</p></div></div>
+{% if courses %}
+<div class="grid grid-3">
+  {% for c in courses %}
+  <div class="card" style="{{ 'opacity:.6' if c.hidden }}">
+    <div class="small muted">{{ c.term_name or '' }}{% if c.course_code %} · {{ c.course_code }}{% endif %}</div>
+    <h3 class="mt" style="margin-top:4px"><a href="{{ url_for('courses.detail', course_id=c.id) }}">{{ c.name }}</a></h3>
+    <div class="btn-row" style="justify-content:space-between">
+      <strong>{{ grade_text(c) }}</strong>
+      <form method="post" action="{{ url_for('courses.toggle_hidden', course_id=c.id) }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-ghost btn-sm">{{ 'Show' if c.hidden else 'Hide' }}</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">{{ empty("📚", "No classes yet. Connect Canvas to bring them in.", url_for('settings.sync'), "Connect Canvas") }}</div>
+{% endif %}
+{% endblock %}

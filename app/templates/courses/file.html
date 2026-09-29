@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ f.name }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>{% if course %}<div class="small muted"><a href="{{ url_for('courses.detail', course_id=course.id, tab='files') }}">{{ course.name }}</a></div>{% endif %}<h1>{{ f.name }}</h1>
+    <p class="muted small">{{ f.content_type or 'file' }}{% if f.size %} · {{ (f.size / 1024)|round(0)|int }} KB{% endif %}{% if f.stored_at %} · stored {{ f.stored_at|ago }}{% endif %}</p></div>
+  <div class="btn-row">
+    {% if f.storage_key %}<a class="btn" href="{{ url_for('courses.download', file_id=f.id) }}">Download</a>{% endif %}
+    {% if ai_available and f.text %}
+    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='file', ref=f.id, output='deck') }}">🃏 Flashcards</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='file', ref=f.id, output='quiz') }}">❓ Quiz</a>
+    {% endif %}
+  </div>
+</div>
+<div class="grid grid-main">
+  <div class="card">
+    {% if f.storage_key and (f.content_type or '').startswith('application/pdf') %}
+      <iframe src="{{ url_for('courses.download', file_id=f.id, inline=1) }}" style="width:100%;height:70vh;border:0;border-radius:8px" title="{{ f.name }}"></iframe>
+    {% elif f.storage_key and (f.content_type or '').startswith('image/') %}
+      <img src="{{ url_for('courses.download', file_id=f.id, inline=1) }}" alt="{{ f.name }}">
+    {% elif f.text %}
+      <pre style="white-space:pre-wrap;max-height:70vh;overflow:auto">{{ f.text[:20000] }}{% if f.text|length > 20000 %}…{% endif %}</pre>
+    {% elif not f.storage_key %}
+      <p class="muted">This file hasn't been uploaded yet. It'll arrive with the next sync from the extension.</p>
+    {% else %}
+      <p class="muted">No preview for this type. Download it to open.</p>
+    {% endif %}
+  </div>
+  <div class="card">
+    <h2>AI summary</h2>
+    {% if summary %}<div class="prose small" data-math>{{ render_markdown(summary.content)|safe }}</div>{% endif %}
+    {% if not f.text %}
+      <p class="small muted">{% if f.text_status == 'empty' %}No text layer in this file (a scan or image), so AI tools can't read it.{% elif f.text_status == 'unsupported' %}AI tools can read PDF, Word, PowerPoint and text files.{% elif f.text_status == 'too_large' %}This file is too large to read.{% else %}Text will be available after upload.{% endif %}</p>
+    {% elif ai_available %}
+    <form method="post" action="{{ url_for('courses.summarize', kind='file', ident=f.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn {{ 'btn-ghost' if summary }} btn-block mt">{{ 'Regenerate' if summary else '✨ Summarize this file' }}</button>
+    </form>
+    {% else %}<p class="small muted">AI isn't enabled on this server yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Quizzes</a>{% if quiz.course %} · {{ quiz.course.name }}{% endif %}</div><h1>{{ quiz.title }}</h1></div>
+  <div class="btn-row">
+    <form method="post" action="{{ url_for('live.create', quiz_id=quiz.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost">⚡ Host live</button></form>
+    <a class="btn btn-ghost" href="{{ url_for('study.edit_quiz', quiz_id=quiz.id) }}">Edit</a>
+  </div>
+</div>
+<form method="post" data-math>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% for q in quiz.questions %}
+  <div class="card">
+    <h3>{{ loop.index }}. {{ q.question }}</h3>
+    {% set qi = loop.index0 %}
+    {% for c in q.choices %}
+    <label class="choice"><input type="radio" name="q{{ qi }}" value="{{ loop.index0 }}"> <span>{{ c }}</span></label>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  <button class="btn btn-block mt" type="submit">Check answers</button>
+</form>
+{% endblock %}

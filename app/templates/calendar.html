@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Calendar{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>{{ first.strftime('%B %Y') }}</h1><p class="muted">Due dates and Canvas events in your time zone ({{ current_user.timezone }}).</p></div>
+  <div class="btn-row">
+    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', y=prev_month.year, m=prev_month.month) }}">←</a>
+    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view') }}">Today</a>
+    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', y=next_month.year, m=next_month.month) }}">→</a>
+  </div>
+</div>
+<div class="card" style="padding:10px">
+  <table class="cal">
+    <thead><tr>{% for d in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] %}<th>{{ d }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for week in weeks %}
+      <tr>
+      {% for day in week %}
+        <td class="{{ 'other' if day.month != first.month }} {{ 'today' if day == today }}">
+          <div class="day">{{ day.day }}</div>
+          {% for kind, item in by_day.get(day, []) %}
+            {% if kind == 'assignment' %}
+              <a class="item {{ item.effective_status }}" href="{{ url_for('courses.assignment', assignment_id=item.id) }}" title="{{ item.name }} — {{ item.course.name }} ({{ item.due_at|dt('time') }})">{{ item.due_at|dt('time') }} {{ item.name }}</a>
+            {% else %}
+              <span class="item event" title="{{ item.title }}{% if item.location %} @ {{ item.location }}{% endif %}">{{ item.start_at|dt('time') }} {{ item.title }}</span>
+            {% endif %}
+          {% endfor %}
+        </td>
+      {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="card">
+  <h2>Add to your phone's calendar</h2>
+  <p class="small muted">Subscribe to this private link in Google Calendar ("From URL"), Apple Calendar ("New Calendar Subscription") or Outlook. It updates on its own. Anyone with the link can see your due dates, so keep it to yourself.</p>
+  <div class="btn-row"><code id="feed" style="overflow-wrap:anywhere">{{ feed_url }}</code><button class="btn btn-ghost btn-sm" data-copy="#feed">Copy</button></div>
+  <form method="post" action="{{ url_for('main.reset_feed') }}" class="mt" data-confirm="Reset the link? Calendars using the old one will stop updating.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="linklike small">Reset link</button>
+  </form>
+</div>
+{% endblock %}

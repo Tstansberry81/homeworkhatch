@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty %}
+{% block title %}Flashcards & quizzes{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Flashcards & quizzes</h1><p class="muted">Spaced repetition for memorizing, practice quizzes for testing yourself, and live quizzes for playing with classmates.</p></div>
+  <div class="btn-row">
+    {% if ai_available %}<a class="btn" href="{{ url_for('study.generate') }}">✨ Generate from my materials</a>{% endif %}
+    <a class="btn btn-ghost" href="{{ url_for('study.new_deck') }}">+ Deck</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.new_quiz') }}">+ Quiz</a>
+  </div>
+</div>
+<div class="grid grid-2">
+  <div class="card">
+    <h2>Decks</h2>
+    {% if decks %}
+    <ul class="list">
+      {% for d in decks %}
+      <li><div class="grow"><a class="title" href="{{ url_for('study.deck', deck_id=d.id) }}">{{ d.title }}</a>
+        <div class="small muted">{{ d.cards|length }} cards{% if d.course %} · {{ d.course.name }}{% endif %}{% if d.source == 'ai' %} · ✨ AI{% endif %}</div></div>
+        {% if due[d.id] %}<a class="btn btn-sm" href="{{ url_for('study.review', deck_id=d.id) }}">Review {{ due[d.id] }}</a>{% else %}<span class="badge ok">All caught up</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ empty("🃏", "No decks yet.") }}{% endif %}
+  </div>
+  <div class="card">
+    <h2>Practice quizzes</h2>
+    {% if quizzes %}
+    <ul class="list">
+      {% for q in quizzes %}
+      <li><div class="grow"><a class="title" href="{{ url_for('study.take_quiz', quiz_id=q.id) }}">{{ q.title }}</a>
+        <div class="small muted">{{ q.questions|length }} questions{% if q.course %} · {{ q.course.name }}{% endif %}{% if best.get(q.id) is not none %} · best {{ best[q.id]|round|int }}%{% endif %}</div></div>
+        <form method="post" action="{{ url_for('live.create', quiz_id=q.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost btn-sm" title="Host it live for classmates">⚡ Host live</button></form></li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ empty("❓", "No quizzes yet.") }}{% endif %}
+  </div>
+</div>
+{% endblock %}

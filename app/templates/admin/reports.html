@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Reports · Admin{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.overview') }}">Admin</a></div><h1>Reported chat messages</h1>
+  <p class="muted">Messages with 3 reports in a day are hidden automatically until reviewed.</p></div></div>
+<div class="card">
+  {% if reports %}
+  <ul class="list">{% for r in reports %}
+    <li style="align-items:flex-start"><div class="grow">
+      <div class="small muted">{{ r.message.user.display_name }} in {{ r.message.room_key }} · {{ r.message.created_at|ago }}{% if r.message.deleted %} · <span class="badge warn">hidden</span>{% endif %}</div>
+      <div>{{ r.message.body }}</div>
+      {% if r.reason %}<div class="small muted">Reason: {{ r.reason }}</div>{% endif %}</div>
+      <div class="btn-row">
+        {% for act, label, cls in [("remove", "Remove", "btn-danger"), ("restore" if r.message.deleted else "dismiss", "Restore" if r.message.deleted else "Dismiss", "btn-ghost")] %}
+        <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="report_id" value="{{ r.id }}"><input type="hidden" name="action" value="{{ act }}"><button class="btn {{ cls }} btn-sm">{{ label }}</button></form>
+        {% endfor %}
+      </div></li>{% endfor %}</ul>
+  {% else %}<div class="empty"><div class="big">🧹</div><p>No open reports.</p></div>{% endif %}
+</div>
+{% endblock %}

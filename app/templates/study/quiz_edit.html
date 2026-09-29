@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit quiz' if quiz else 'New quiz' }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>{{ 'Edit quiz' if quiz else 'New practice quiz' }}</h1></div>
+<form method="post" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-row">
+    <div><label for="title">Title</label><input id="title" name="title" type="text" value="{{ title }}" maxlength="200" required></div>
+    {% if quiz %}
+    <div><label for="seconds">Seconds per question <span class="hint">(live mode)</span></label><input id="seconds" name="seconds" type="number" min="5" max="120" value="{{ quiz.seconds_per_question }}"></div>
+    {% else %}
+    <div><label for="course_id">Class <span class="hint">(optional)</span></label>
+      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+    {% endif %}
+  </div>
+  <label for="body">Questions</label>
+  <textarea id="body" name="body" rows="18" style="font-family:var(--mono);font-size:.9rem" placeholder="Q: What is the derivative of x²?
+- x
+* 2x
+- x²/2
+- 2
+E: Power rule: bring down the exponent and subtract one.
+
+Q: Next question…">{{ body }}</textarea>
+  <p class="help">Start each question with <code>Q:</code>. List choices with <code>-</code>, and mark the right one with <code>*</code>. An optional <code>E:</code> line explains the answer.</p>
+  <div class="btn-row mt"><button class="btn" type="submit">Save quiz</button>
+    {% if quiz %}<a class="btn btn-ghost" href="{{ url_for('study.take_quiz', quiz_id=quiz.id) }}">Cancel</a>{% endif %}</div>
+</form>
+{% if quiz %}
+<form method="post" action="{{ url_for('study.delete_quiz', quiz_id=quiz.id) }}" class="mt" data-confirm="Delete this quiz?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger">Delete quiz</button></form>
+{% endif %}
+{% endblock %}

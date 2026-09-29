@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ user.username }} · Admin{% endblock %}
+{% macro action(name, label, cls="btn-ghost", confirm=None) %}
+<form method="post" class="inline" {% if confirm %}data-confirm="{{ confirm }}"{% endif %}><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="{{ name }}"><button class="btn {{ cls }} btn-sm">{{ label }}</button></form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.users') }}">Users</a></div><h1>{{ user.display_name }} <span class="muted">@{{ user.username }}</span></h1>
+  <p class="muted small">{{ user.email }} · joined {{ user.created_at|dt('long') }} · {{ courses }} classes · {{ ai_used }} AI actions this month · 🪙 {{ balance }}</p></div></div>
+<div class="grid grid-2">
+  <div class="card">
+    <h2>Account</h2>
+    <div class="btn-row">
+      {% if not user.is_approved %}{{ action("approve", "Approve", "") }}{% endif %}
+      {% if user.id != current_user.id %}
+        {{ action("toggle_active", "Disable account" if user.active else "Re-enable account", "btn-danger" if user.active else "") }}
+        {{ action("toggle_admin", "Remove admin" if user.is_admin else "Make admin", confirm="Change admin rights for this user?") }}
+      {% endif %}
+      {{ action("reset_password", "Reset password", confirm="Generate a temporary password for this user?") }}
+    </div>
+    <form method="post" class="btn-row mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="plan">
+      <label style="margin:0">Plan</label><select name="plan" style="max-width:180px">{% for key, p in plans.items() %}<option value="{{ key }}" {{ 'selected' if user.plan == key }}>{{ p.name }}</option>{% endfor %}</select>
+      <button class="btn btn-ghost btn-sm">Set (comped)</button></form>
+    <p class="small muted">Setting a paid plan here grants it without payment. Current: {{ user.plan }}{% if user.plan_comped %} (comped){% endif %}, Stripe status {{ user.plan_status or '—' }}.</p>
+    <form method="post" class="btn-row mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="coins">
+      <input name="amount" type="number" placeholder="± coins" style="max-width:120px"><input name="reason" type="text" placeholder="Reason" style="flex:1"><button class="btn btn-ghost btn-sm">Adjust coins</button></form>
+  </div>
+  <div class="card"><h2>Activity</h2>
+    <table class="table small"><tbody>{% for a in activity %}<tr><td>{{ a.event }}</td><td class="muted">{{ a.detail or '' }}</td><td class="nowrap muted">{{ a.created_at|ago }}</td></tr>{% else %}<tr><td class="muted">No activity yet.</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}

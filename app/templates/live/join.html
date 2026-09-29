@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Join a live quiz{% endblock %}
+{% macro join_form() %}
+<form method="post" action="{{ url_for('live.join') }}" class="card" style="max-width:420px;margin:0 auto">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h1 class="center">⚡ Join a live quiz</h1>
+  {% include "_flashes.html" %}
+  <label for="code">Game code</label>
+  <input id="code" name="code" type="text" value="{{ code }}" maxlength="6" autocomplete="off" style="text-transform:uppercase;font:700 1.4rem var(--mono);letter-spacing:.15em;text-align:center" required>
+  <label for="nickname">Nickname</label>
+  <input id="nickname" name="nickname" type="text" maxlength="40" value="{{ current_user.display_name if current_user.is_authenticated else '' }}" required>
+  <button class="btn btn-block mt" type="submit">Join</button>
+  {% if current_user.is_authenticated %}<p class="small muted mt center">Want to host? Open one of your <a href="{{ url_for('study.index') }}">practice quizzes</a> and hit “Host live”.</p>{% endif %}
+</form>
+{% endmacro %}
+{% block content %}{{ join_form() }}{% endblock %}
+{% block public %}<div class="auth-wrap">{{ join_form() }}</div>{% endblock %}

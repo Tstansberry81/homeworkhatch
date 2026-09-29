@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
+{% block title %}{{ a.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="small muted"><a href="{{ url_for('courses.detail', course_id=course.id, tab='assignments') }}">{{ course.name }}</a></div>
+    <h1>{{ a.name }}</h1>
+    <div class="btn-row">{{ status_badge(a) }}<span class="muted small">{% if a.due_at %}Due {{ a.due_at|dt('long') }}{% else %}No due date{% endif %}{% if a.points_possible is not none %} · {{ '%g' % a.points_possible }} points{% endif %}</span></div>
+  </div>
+  <div class="btn-row">
+    <form method="post" action="{{ url_for('main.toggle_done', assignment_id=a.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost">{{ 'Unmark done' if a.user_done else '✓ Mark done' }}</button></form>
+    {% if a.html_url %}<a class="btn" href="{{ a.html_url }}" target="_blank" rel="noopener">Open in Canvas ↗</a>{% endif %}
+  </div>
+</div>
+<div class="grid grid-main">
+  <div>
+    <div class="card prose">
+      {% if a.description_html %}{{ a.description_html|canvas_html(base_url)|safe }}{% else %}<p class="muted">No description.</p>{% endif %}
+    </div>
+    {% if a.rubric %}
+    <div class="card">
+      <h2>Rubric</h2>
+      <table class="table">
+        <thead><tr><th>Criterion</th><th class="right">Points</th>{% if a.rubric_assessment %}<th class="right">You</th>{% endif %}</tr></thead>
+        <tbody>{% for r in a.rubric %}
+          <tr><td><strong>{{ r.description }}</strong>{% if r.long_description %}<div class="small muted">{{ r.long_description }}</div>{% endif %}
+            {% if r.ratings %}<div class="small muted">{% for x in r.ratings %}{{ x.description }} ({{ '%g' % x.points }}){{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}</td>
+            <td class="right">{{ '%g' % r.points if r.points is not none else '' }}</td>
+            {% if a.rubric_assessment %}<td class="right">{{ (a.rubric_assessment.get(r.id) or {}).get('points', '—') }}</td>{% endif %}</tr>
+        {% endfor %}</tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+  <div>
+    <div class="card">
+      <h2>Your submission</h2>
+      {% if a.score is not none %}<div class="stat"><div class="value">{{ '%g' % a.score }}{% if a.points_possible %}<span class="muted" style="font-size:1rem"> / {{ '%g' % a.points_possible }}</span>{% endif %}</div><div class="label">{{ a.percent }}%</div></div>{% endif %}
+      <p class="small">{% if a.submitted_at %}Submitted {{ a.submitted_at|dt('long') }}{% if a.late %} (late){% endif %}.{% elif a.effective_status == 'no_submission' %}Nothing to turn in online.{% else %}Not submitted yet.{% endif %}</p>
+      {% if a.attachments %}<h3>Files you turned in</h3><ul class="small">{% for f in a.attachments %}<li>{{ f.name }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+    {% if a.comments %}
+    <div class="card"><h2>Feedback</h2>
+      {% for c in a.comments %}<div class="card-flat mb"><div class="small muted">{{ c.author }} · {{ c.created_at|replace('T', ' ')|truncate(16, true, '') }}</div>{{ c.comment }}</div>{% endfor %}
+    </div>
+    {% endif %}
+    {% if ai_available and a.description_html %}
+    <div class="card"><h2>Study help</h2>
+      <p class="small muted">The tutor can explain the concepts behind this assignment and check your reasoning. It won't write it for you.</p>
+      <form method="post" action="{{ url_for('tutor.new') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn btn-block">🤖 Open the tutor for this class</button></form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

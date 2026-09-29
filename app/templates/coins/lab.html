@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Probability Lab{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>🎲 Probability Lab</h1><p class="muted">An 18+ simulation for exploring odds and expected value with virtual Buddy Coins. No money, no prizes. The table below shows the exact probability and payout for every bet.</p></div>
+  <span class="coins-chip">🪙 <span id="balance">{{ coin_balance }}</span></span>
+</div>
+<div class="grid grid-main">
+  <div class="card">
+    <h2>Roll two dice</h2>
+    <p class="small">Pick a target. You win if the two dice add up to at least the target. Payouts are fair odds minus a {{ (edge * 100)|round|int }}% edge, so the expected value of every bet is slightly negative. That's the lesson.</p>
+    <div class="form-row">
+      <div><label for="target">Target (sum ≥)</label><select id="target">{% for row in table %}<option value="{{ row.target }}" {{ 'selected' if row.target == 7 }}>{{ row.target }}</option>{% endfor %}</select></div>
+      <div><label for="wager">Wager (1–{{ max_wager }})</label><input id="wager" type="number" min="1" max="{{ max_wager }}" value="5"></div>
+    </div>
+    <button class="btn btn-block mt" id="roll">Roll</button>
+    <div class="center mt"><div class="dice" id="dice">🎲🎲</div><p id="out"></p></div>
+  </div>
+  <div class="card">
+    <h2>The math</h2>
+    <table class="table small"><thead><tr><th>≥ Target</th><th>P(win)</th><th>Pays</th><th>EV per coin</th></tr></thead>
+      <tbody>{% for row in table %}<tr><td>{{ row.target }}</td><td>{{ '%.1f' % (row.p * 100) }}%</td><td>{{ row.payout }}×</td><td>{{ '%+.2f' % (row.p * row.payout - 1) }}</td></tr>{% endfor %}</tbody></table>
+    <p class="small muted">EV = P(win) × payout − 1. Every row is negative. Over many rolls, the house wins. Daily limit applies.</p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const faces = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+  document.getElementById("roll").addEventListener("click", async () => {
+    const out = document.getElementById("out");
+    try {
+      const r = await hh.post("{{ url_for('coins.lab_roll') }}", { wager: document.getElementById("wager").value, target: document.getElementById("target").value });
+      document.getElementById("dice").textContent = faces[r.dice[0]] + faces[r.dice[1]];
+      document.getElementById("balance").textContent = r.balance;
+      out.innerHTML = r.won ? `Sum ${r.dice[0] + r.dice[1]}: <strong style="color:var(--ok)">won ${r.payout}</strong>` : `Sum ${r.dice[0] + r.dice[1]}: lost`;
+      out.innerHTML += `<br><span class="small muted">P(win) was ${(r.p * 100).toFixed(1)}%; expected value of that bet: ${r.expected_value} coins.</span>`;
+    } catch (e) { out.textContent = e.message; }
+  });
+})();
+</script>
+{% endblock %}

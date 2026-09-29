@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Your data{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Your data</h1><p class="muted">Your academic data is yours. It isn't shared with teachers, schools or parents.</p></div></div>
+<div class="grid grid-2">
+  <div class="card">
+    <h2>Export</h2>
+    <p class="small">Download your classes, assignments, grades, flashcards, quizzes, tutor conversations, chat messages and coin history as JSON.</p>
+    <a class="btn" href="{{ url_for('settings.export') }}">Download my data</a>
+  </div>
+  <form method="post" action="{{ url_for('settings.delete_account') }}" class="card" style="border-color:var(--err)" data-confirm="This permanently deletes your account and everything in it. Continue?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h2>Delete account</h2>
+    <p class="small">Permanently deletes your account, synced Canvas data and files, study sets and messages. This can't be undone.</p>
+    <label for="confirm">Type your username (<code>{{ current_user.username }}</code>)</label><input id="confirm" name="confirm" type="text" autocomplete="off">
+    <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
+    <button class="btn btn-danger mt">Delete everything</button>
+  </form>
+</div>
+{% endblock %}

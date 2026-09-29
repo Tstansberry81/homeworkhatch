@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Buddy Coins{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>🪙 Buddy Coins</h1><p class="muted">Earned by turning in work (assignment 10, quiz 20, test 30, plus a bonus for your grade; half for late work), studying, live-quiz wins and daily check-ins. Spend them in the <a href="{{ url_for('coins.arcade') }}">arcade</a>.</p></div>
+</div>
+<div class="grid grid-3 mb">
+  <div class="card stat"><div class="value">{{ coin_balance }}</div><div class="label">balance</div></div>
+  <div class="card stat"><div class="value">{{ lifetime }}</div><div class="label">earned all time</div></div>
+  <div class="card stat"><div class="value">{{ achievements|selectattr('earned')|list|length }} / {{ achievements|length }}</div><div class="label">achievements</div></div>
+</div>
+<div class="grid grid-main">
+  <div>
+    <div class="card">
+      <h2>Achievements</h2>
+      <div class="grid grid-2">
+        {% for a in achievements %}
+        <div class="card-flat" style="{{ '' if a.earned else 'opacity:.55' }}">
+          <div style="font-size:1.6rem">{{ a.icon }}</div><strong>{{ a.name }}</strong>
+          <div class="small muted">{{ a.description }}</div>
+          <div class="small">{{ '✓ Earned' if a.earned else a.progress }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card">
+      <h2>History</h2>
+      <table class="table"><tbody>
+        {% for t in history %}<tr><td>{{ t.reason }}</td><td class="small muted nowrap">{{ t.created_at|ago }}</td><td class="right nowrap" style="color:{{ 'var(--ok)' if t.amount > 0 else 'var(--err)' }}">{{ '+' if t.amount > 0 }}{{ t.amount }}</td></tr>
+        {% else %}<tr><td class="muted">No coins yet. Turn in some work!</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Top earners</h2>
+    <ol class="small">{% for name, earned in leaders %}<li><strong>{{ name }}</strong> — {{ earned }}</li>{% else %}<li class="muted">Nobody yet.</li>{% endfor %}</ol>
+    <p class="small muted">Only people who opted in (Settings) appear here.</p>
+  </div>
+</div>
+{% endblock %}

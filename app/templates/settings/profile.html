@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head"><h1>⚙️ Settings</h1><a class="btn btn-ghost" href="{{ url_for('settings.data') }}">Your data</a></div>
+<div class="grid grid-2">
+  <form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="profile">
+    <h2>Profile</h2>
+    <div class="form-row">
+      <div><label for="display_name">Display name</label><input id="display_name" name="display_name" type="text" value="{{ current_user.display_name }}" maxlength="80"></div>
+      <div><label for="username">Username</label><input id="username" name="username" type="text" value="{{ current_user.username }}"></div>
+    </div>
+    <label>Email</label><input type="email" value="{{ current_user.email }}" disabled>
+    <div class="form-row">
+      <div><label for="grade_level">Grade / year</label><input id="grade_level" name="grade_level" type="text" value="{{ current_user.grade_level or '' }}"></div>
+      <div><label for="birth_year">Birth year</label><input id="birth_year" name="birth_year" type="number" value="{{ current_user.birth_year or '' }}"></div>
+    </div>
+    <label for="timezone">Time zone</label>
+    <select id="timezone" name="timezone">{% for tz in timezones() %}<option value="{{ tz }}" {{ 'selected' if tz == current_user.timezone }}>{{ tz }}</option>{% endfor %}<option value="UTC" {{ 'selected' if current_user.timezone == 'UTC' }}>UTC</option></select>
+    <label class="check mt"><input type="checkbox" name="show_on_leaderboards" {{ 'checked' if current_user.show_on_leaderboards }}> Show my display name on coin and arcade leaderboards</label>
+    <button class="btn mt">Save</button>
+  </form>
+  <form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="password">
+    <h2>Password</h2>
+    <label for="current">Current password</label><input id="current" name="current" type="password" autocomplete="current-password" required>
+    <label for="new">New password</label><input id="new" name="new" type="password" minlength="8" autocomplete="new-password" required>
+    <button class="btn mt">Change password</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Hosting · {{ s.quiz.title }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="small muted">Hosting</div><h1>{{ s.quiz.title }}</h1></div>
+  <div class="btn-row"><button class="btn" id="advance">Start</button><button class="btn btn-ghost" id="reveal" hidden>Reveal answer</button>
+    <button class="btn btn-ghost" id="finish">End game</button></div>
+</div>
+<div class="grid grid-main">
+  <div class="card" id="stage">
+    <div id="lobby" class="center">
+      <p class="muted">Players join at <strong>{{ url_for('live.join', _external=True) }}</strong> with code</p>
+      <div class="live-code">{{ s.code }}</div>
+      <p class="muted small">Or share <span id="joinurl">{{ join_url }}</span> <button class="btn btn-ghost btn-sm" data-copy="#joinurl">Copy link</button></p>
+      <p id="names" class="mt"></p>
+    </div>
+    <div id="question" hidden data-math>
+      <div class="btn-row" style="justify-content:space-between"><span class="badge accent" id="qnum"></span><span class="timer" id="timer"></span></div>
+      <h2 id="qtext" class="mt"></h2>
+      <div class="live-choices" id="choices"></div>
+      <p class="small muted mt" id="answered"></p>
+      <p class="mt" id="explain"></p>
+    </div>
+    <div id="done" hidden class="center"><h2>🏁 Final results</h2><p class="muted">Top signed-in players earn Buddy Coins (with at least two players).</p></div>
+  </div>
+  <div class="card"><h2>Leaderboard <span class="small muted" id="count"></span></h2><ol id="board" class="small"></ol></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const stateUrl = "{{ url_for('live.state', code=s.code) }}", controlUrl = "{{ url_for('live.control', code=s.code) }}";
+  const $ = (id) => document.getElementById(id);
+  let lastKey = "";
+  const control = (action) => hh.post(controlUrl, { action }).then(tick);
+  $("advance").onclick = () => control("next");
+  $("reveal").onclick = () => control("reveal");
+  $("finish").onclick = () => { if (confirm("End the game now?")) control("finish"); };
+
+  function render(st) {
+    $("board").innerHTML = st.leaderboard.map((p) => `<li><strong>${hh.escape(p.nickname)}</strong> — ${p.score}</li>`).join("");
+    $("count").textContent = `${st.players} player${st.players === 1 ? "" : "s"}`;
+    $("lobby").hidden = st.state !== "lobby";
+    $("question").hidden = !["question", "reveal"].includes(st.state);
+    $("done").hidden = st.state !== "finished";
+    $("reveal").hidden = st.state !== "question";
+    $("advance").hidden = st.state === "finished";
+    $("advance").textContent = st.state === "lobby" ? "Start" : (st.index + 1 >= st.total ? "Show results" : "Next question");
+    if (st.state === "lobby") $("names").textContent = (st.names || []).join(" · ") || "Waiting for players…";
+    if (st.question) {
+      $("qnum").textContent = `Question ${st.index + 1} of ${st.total}`;
+      $("timer").textContent = st.state === "question" ? Math.ceil(st.time_left) + "s" : "";
+      $("answered").textContent = `${st.answered} of ${st.players} answered`;
+      const key = `${st.index}:${st.state}`;
+      if (key !== lastKey) {
+        lastKey = key;
+        $("qtext").textContent = st.question.text;
+        $("choices").innerHTML = st.question.choices.map((c, i) => {
+          const n = st.distribution ? ` (${st.distribution[i]})` : "";
+          const mark = st.correct === i ? " ✓" : "";
+          return `<button disabled style="${st.state === "reveal" && st.correct !== i ? "opacity:.35" : ""}">${hh.escape(c)}${mark}${n}</button>`;
+        }).join("");
+        $("explain").textContent = st.explanation || "";
+        hh.renderMath($("question"));
+      }
+    }
+  }
+  async function tick() { try { render(await hh.get(stateUrl)); } catch { /* keep polling */ } }
+  tick(); setInterval(tick, 1000);
+})();
+</script>
+{% endblock %}

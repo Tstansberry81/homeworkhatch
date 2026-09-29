@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}New deck{% endblock %}
+{% block content %}
+<div class="page-head"><h1>New flashcard deck</h1></div>
+<form method="post" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-row">
+    <div><label for="title">Title</label><input id="title" name="title" type="text" maxlength="200" required></div>
+    <div><label for="course_id">Class <span class="hint">(optional)</span></label>
+      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+  </div>
+  <label for="description">Description <span class="hint">(optional)</span></label>
+  <input id="description" name="description" type="text" maxlength="1000">
+  <label for="cards">Cards <span class="hint">— one per line as <code>front :: back</code> (tab-separated from a spreadsheet works too)</span></label>
+  <textarea id="cards" name="cards" rows="10" placeholder="mitochondria :: powerhouse of the cell&#10;derivative of sin x :: cos x"></textarea>
+  <button class="btn mt" type="submit">Create deck</button>
+</form>
+{% endblock %}

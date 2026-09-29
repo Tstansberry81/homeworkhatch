@@ -1,0 +1,261 @@
+import { upcoming, isVisible, zipPlan } from "./canvas.js";
+
+const $ = (id) => document.getElementById(id);
+const FIELDS = ["baseUrl", "intervalMinutes", "endpointUrl", "endpointToken"];
+const DEFAULTS = { baseUrl: "", intervalMinutes: 60, endpointUrl: "", endpointToken: "", courseVisibility: {} };
+const STATE_LABEL = {
+  ok: "Synced", syncing: "Syncing…", error: "Error", logged_out: "Logged out", not_connected: "Not connected",
+};
+
+const ago = (iso) => {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+};
+const when = (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+function el(tag, props = {}, ...kids) {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...kids);
+  return n;
+}
+
+let settings = { ...DEFAULTS };
+let snapshot = null;
+
+async function saveSettings(patch) {
+  settings = { ...settings, ...patch };
+  await chrome.storage.local.set({ settings });
+}
+
+// ---------- connecting to a school's Canvas ----------
+
+// Opening the popup grants activeTab, so we can ask the current tab whether it is a
+// Canvas instance — any school, instructure.com or a custom domain — by calling the
+// Canvas API from inside it.
+async function probeTab(tab) {
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: async () => {
+        try {
+          const r = await fetch("/api/v1/users/self", { headers: { Accept: "application/json" } });
+          const body = JSON.parse((await r.text()).replace(/^\s*while\(1\);/, ""));
+          if (r.status === 200 && body.id != null) return { canvas: true, loggedIn: true, name: body.name };
+          if (r.status === 401 && body.status === "unauthenticated") return { canvas: true, loggedIn: false };
+        } catch {}
+        return { canvas: false };
+      },
+    });
+    return result;
+  } catch {
+    return { canvas: false }; // chrome:// pages, the web store, etc.
+  }
+}
+
+let detected = null; // { origin, loggedIn, name }
+
+async function detectCanvas() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  let origin = null;
+  try { origin = new URL(tab?.url).origin; } catch {}
+  if (!origin?.startsWith("http")) return null;
+  const probe = await probeTab(tab);
+  return probe.canvas ? { origin, ...probe } : null;
+}
+
+// Chrome's permission prompt usually closes this popup before request() resolves, so
+// nothing after it can be relied on. We record the pending origin first and let the
+// background worker finish the connection when the grant lands (permissions.onAdded).
+function connect(origin) {
+  chrome.storage.local.set({ pendingConnect: origin }); // not awaited: keep the user gesture
+  chrome.permissions.request({ origins: [`${origin}/*`] })
+    .then(async (granted) => {
+      if (!granted) {
+        $("setupMsg").textContent = "Permission is needed to read your Canvas. Nothing was saved.";
+        return;
+      }
+      // Already-granted origins fire no onAdded event, so nudge the worker directly.
+      await chrome.runtime.sendMessage({ type: "connect" });
+      render();
+    })
+    .catch((e) => { $("setupMsg").textContent = `Couldn't request access: ${e.message}`; });
+}
+
+$("connect").onclick = () => detected && connect(detected.origin);
+$("connectManual").onclick = () => {
+  let origin;
+  try { origin = new URL($("manualUrl").value.trim()).origin; } catch {}
+  if (!origin?.startsWith("http")) {
+    $("setupMsg").textContent = "That doesn't look like a web address.";
+    return;
+  }
+  connect(origin);
+};
+
+async function renderSetup() {
+  $("setup").hidden = false;
+  $("main").hidden = true;
+  $("state").textContent = STATE_LABEL.not_connected;
+  $("state").className = "pill not_connected";
+  $("setupMsg").textContent = "Checking this tab…";
+  detected = await detectCanvas();
+  if (detected) {
+    const host = new URL(detected.origin).host;
+    $("setupMsg").textContent = detected.loggedIn
+      ? `Found Canvas at ${host}, signed in as ${detected.name}.`
+      : `Found Canvas at ${host}. Connect, then log in as usual.`;
+    $("connect").hidden = false;
+    $("connect").textContent = `Connect ${host}`;
+  } else {
+    $("setupMsg").textContent = "Open your school's Canvas in this tab, then click the extension icon again.";
+    $("connect").hidden = true;
+  }
+}
+
+// ---------- synced view ----------
+
+function renderStatus(status = {}) {
+  $("state").textContent = STATE_LABEL[status.state] || "Not synced";
+  $("state").className = `pill ${status.state || ""}`;
+  $("sync").disabled = status.state === "syncing";
+  const p = status.progress;
+  $("summary").textContent =
+    status.state === "syncing" && p?.step === "course" ? `Course ${p.index}/${p.total}: ${p.name}`
+    : status.state === "syncing" && p?.step === "upload" ? `Uploading files ${p.index}/${p.total}…`
+    : status.state === "syncing" ? `Fetching ${p?.step || "…"}`
+    : status.lastSync ? `${status.user} · last sync ${ago(status.lastSync)}${pushSummary(status.lastPush)}`
+    : "Not synced yet.";
+  const dl = status.downloading;
+  $("download").disabled = Boolean(dl) || !snapshot;
+  $("download").textContent = dl ? `Zipping ${dl.done}/${dl.total}…` : downloadLabel();
+  if (!dl && status.lastDownload && status.state !== "syncing") {
+    const { done, failed, filename } = status.lastDownload;
+    $("summary").textContent += ` · ${done} files zipped to ${filename}${failed ? ` (${failed} couldn't be included)` : ""}`;
+  }
+  const err = status.error || status.pushError || status.downloadError;
+  $("error").hidden = !err;
+  $("error").textContent = err || "";
+  $("open").hidden = status.state !== "logged_out";
+}
+
+function pushSummary(push) {
+  if (!push) return "";
+  const n = push.uploaded;
+  return ` · sent to Homework Hatch${n ? ` (${n} new file${n === 1 ? "" : "s"})` : ""}`;
+}
+
+const mb = (bytes) => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+
+function downloadLabel() {
+  if (!snapshot) return "Download files";
+  const jobs = zipPlan(snapshot, settings.courseVisibility);
+  if (!jobs.length) return "No files to download";
+  return `Download ${jobs.length} files (.zip, ~${mb(jobs.reduce((s, j) => s + (j.file.size || 0), 0))})`;
+}
+
+const pct = (g) => g.current_score == null ? "—" : `${g.current_score}%${g.current_grade ? ` (${g.current_grade})` : ""}`;
+
+function renderSnapshot() {
+  if (!snapshot) return;
+  const vis = settings.courseVisibility;
+  const due = upcoming(snapshot, 14, Date.now(), vis);
+  const tag = { upcoming: "", no_submission: "in class · ", past_due: "past due · ", missing: "MISSING · " };
+  $("upcoming").replaceChildren(...(due.length ? due.map((a) =>
+    el("li", { className: a.status },
+      el("a", { href: a.html_url, target: "_blank", textContent: `${a.course} · ${a.name}` }),
+      el("span", { className: "when", textContent: `${tag[a.status] ?? ""}${when(a.due_at)}` })))
+    : [el("li", { className: "muted", textContent: "Nothing due." })]));
+
+  // One row per class: sections sharing a class_key merge, and the section that
+  // carries the grade wins.
+  const classes = new Map();
+  for (const c of snapshot.courses.filter((c) => isVisible(c, vis))) {
+    const prev = classes.get(c.class_key);
+    if (!prev || (prev.grade.current_score == null && c.grade.current_score != null)) classes.set(c.class_key, c);
+  }
+  $("grades").replaceChildren(...[...classes.values()].map((c) =>
+    el("tr", {}, el("td", { textContent: c.name }), el("td", { textContent: pct(c.grade) }))));
+
+  $("courses").replaceChildren(...snapshot.courses.map((c) => {
+    const box = el("input", { type: "checkbox", checked: isVisible(c, vis) });
+    box.onchange = async () => {
+      await saveSettings({ courseVisibility: { ...settings.courseVisibility, [c.id]: box.checked } });
+      renderSnapshot();
+      if (!$("download").disabled) $("download").textContent = downloadLabel();
+    };
+    return el("label", { className: "check" }, box, ` ${c.name}`, el("span", { className: "muted", textContent: c.term?.name ? ` · ${c.term.name}` : "" }));
+  }));
+
+  const n = (k) => snapshot.courses.reduce((s, c) => s + (c[k]?.length || 0), 0);
+  const allFiles = snapshot.courses.flatMap((c) => c.files || []);
+  const viaLinks = allFiles.filter((f) => !f.sources?.includes("files_tab")).length;
+  const pageBodies = snapshot.courses.reduce((s, c) => s + c.pages.filter((p) => p.body_html).length, 0);
+  $("counts").textContent = `${snapshot.courses.length} courses · ${n("assignments")} assignments · ${n("modules")} modules · ` +
+    `${allFiles.length} files (${viaLinks} found via links/modules) · ${pageBodies} pages · ${n("announcements")} announcements · ` +
+    `${snapshot.planner.length} planner items · ${snapshot.missing.length} missing`;
+  $("restricted").textContent = snapshot.restricted.length
+    ? `Hidden by instructors (normal): ${snapshot.restricted.map((r) => r.endpoint).join(", ")}` : "";
+}
+
+async function render() {
+  const stored = await chrome.storage.local.get(["status", "snapshot", "settings"]);
+  settings = { ...DEFAULTS, ...stored.settings };
+  snapshot = stored.snapshot || null;
+  if (!settings.baseUrl) return renderSetup();
+  $("setup").hidden = true;
+  $("main").hidden = false;
+  renderStatus(stored.status);
+  renderSnapshot();
+  for (const f of FIELDS) $(f).value = settings[f];
+}
+
+$("sync").onclick = () => chrome.runtime.sendMessage({ type: "sync" });
+$("download").onclick = () => chrome.runtime.sendMessage({ type: "download" });
+$("open").onclick = () => chrome.tabs.create({ url: settings.baseUrl });
+
+$("export").onclick = () => {
+  if (!snapshot) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" }));
+  el("a", { href: url, download: `canvas-${snapshot.synced_at.slice(0, 10)}.json` }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+$("save").onclick = () => {
+  const s = Object.fromEntries(FIELDS.map((f) => [f, $(f).value.trim()]));
+  let origins;
+  try {
+    s.baseUrl = s.baseUrl ? new URL(s.baseUrl).origin : "";
+    origins = [s.baseUrl, s.endpointUrl].filter(Boolean).map((u) => `${new URL(u).origin}/*`);
+  } catch {
+    $("saved").textContent = "Invalid URL — not saved.";
+    return;
+  }
+  // Same popup-closing problem as connect(): write first (without awaiting, so the
+  // click's user gesture survives), then ask for access. The worker re-syncs on grant.
+  const switched = s.baseUrl !== settings.baseUrl;
+  settings = { ...settings, ...s, ...(switched ? { courseVisibility: {} } : {}) };
+  chrome.storage.local.set({ settings });
+  if (switched) chrome.storage.local.remove("snapshot");
+  const request = origins.length ? chrome.permissions.request({ origins }) : Promise.resolve(true);
+  request.then(async (granted) => {
+    $("saved").textContent = granted ? "Saved." : "Saved, but access was denied — sync will fail until you allow it.";
+    await chrome.runtime.sendMessage({ type: "reschedule" });
+    if (switched) {
+      chrome.runtime.sendMessage({ type: "sync" });
+      render();
+    }
+  }).catch((e) => { $("saved").textContent = `Couldn't request access: ${e.message}`; });
+};
+
+// Deliberately not async: an async listener returns a Promise, which Chrome treats as a
+// reply to *every* message — including ones meant for the worker or offscreen page.
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type !== "status" || !settings.baseUrl) return;
+  (async () => {
+    if (msg.status.state === "ok") snapshot = (await chrome.storage.local.get("snapshot")).snapshot;
+    renderStatus(msg.status);
+    if (msg.status.state === "ok") renderSnapshot();
+  })();
+});
+
+render();

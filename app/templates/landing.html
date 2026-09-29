@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Study smarter with your own Canvas{% endblock %}
+{% block public %}
+<nav class="landing-nav">
+  <a class="brand" href="/"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""> Homework Hatch</a>
+  <div class="btn-row"><a class="btn btn-ghost" href="{{ url_for('auth.login') }}">Sign in</a><a class="btn" href="{{ url_for('auth.register') }}">Get started</a></div>
+</nav>
+<section class="hero">
+  <div>
+    <h1>Your classes, organized. Your studying, supercharged.</h1>
+    <p class="lead">Homework Hatch syncs your own Canvas: assignments, grades, files and pages. Then it builds your
+      study plan, flashcards, practice quizzes and an AI tutor that actually knows your course.</p>
+    <div class="btn-row mt"><a class="btn" href="{{ url_for('auth.register') }}">Create a free account</a>
+      <a class="btn btn-ghost" href="#how">How it works</a></div>
+    <p class="small muted mt">Works with any school on Canvas, even ones that block student API tokens. You log in to Canvas as usual; we never see your school password.</p>
+  </div>
+  <div class="hero-art">
+    <h3>Due this week</h3>
+    <ul class="list">
+      <li><div class="grow"><div class="title">Problem Set 4</div><div class="small muted">Calculus I · due Thu 11:59 PM</div></div><span class="badge upcoming">To do</span></li>
+      <li><div class="grow"><div class="title">Lab 3: Loops</div><div class="small muted">Intro to Programming · due Fri</div></div><span class="badge submitted">Submitted</span></li>
+      <li><div class="grow"><div class="title">Reading response</div><div class="small muted">Ethics · was due Mon</div></div><span class="badge missing">Missing</span></li>
+    </ul>
+    <div class="card-flat mt small">🤖 <strong>Tutor:</strong> “The chain rule says the derivative of f(g(x)) is f′(g(x))·g′(x). Your Lesson 13 notes work through this exact case <a class="cite" href="#">S1</a>…”</div>
+  </div>
+</section>
+<section class="features" id="how">
+  <div class="grid grid-3">
+    <div class="card feature"><div class="ico">🔌</div><h3>One-click Canvas sync</h3><p class="muted">A small browser extension reads your Canvas the way the Canvas website does and keeps everything up to date every hour, including files your teachers post.</p></div>
+    <div class="card feature"><div class="ico">🤖</div><h3>A tutor that knows your class</h3><p class="muted">Ask about anything. Answers cite your own syllabus, slides and pages. It teaches instead of doing your homework for you.</p></div>
+    <div class="card feature"><div class="ico">🃏</div><h3>Instant study sets</h3><p class="muted">Turn any file or topic into flashcards with spaced repetition, or a practice quiz you can play live with classmates.</p></div>
+    <div class="card feature"><div class="ico">🗓️</div><h3>A plan that fits your week</h3><p class="muted">Your deadlines are spread into daily study time, with a heads-up when something won't fit.</p></div>
+    <div class="card feature"><div class="ico">💬</div><h3>Class chat</h3><p class="muted">A room for every class, shared only with classmates who are in it. No teachers or admins required.</p></div>
+    <div class="card feature"><div class="ico">🪙</div><h3>Buddy Coins</h3><p class="muted">Earn coins for turning work in and studying, then spend them in the arcade. Achievements included.</p></div>
+  </div>
+  <p class="center small muted mt"><a href="{{ url_for('main.terms') }}">Terms</a> · <a href="{{ url_for('main.privacy') }}">Privacy</a></p>
+</section>
+{% endblock %}

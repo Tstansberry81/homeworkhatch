@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block public %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    <a class="brand" href="/" style="justify-content:center"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""> Homework Hatch</a>
+    <div class="card">
+      <h1>Welcome back</h1>
+      {% include "_flashes.html" %}
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="identifier">Email or username</label>
+        <input id="identifier" name="identifier" type="text" value="{{ identifier }}" autocomplete="username" required autofocus>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <label class="check"><input type="checkbox" name="remember" checked> Keep me signed in</label>
+        <button class="btn btn-block mt" type="submit">Sign in</button>
+      </form>
+      <p class="small muted mt">New here? <a href="{{ url_for('auth.register') }}">Create an account</a>. Forgot your password? Ask your Homework Hatch admin to reset it.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Welcome{% endblock %}
+{% block content %}
+<div style="max-width:560px;margin:0 auto">
+  <div class="page-head"><div><h1>Welcome to Homework Hatch 🐣</h1><p class="muted">A few quick details, then we'll connect your Canvas.</p></div></div>
+  <form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="display_name">What should we call you?</label>
+    <input id="display_name" name="display_name" type="text" value="{{ current_user.display_name }}" maxlength="80" required>
+    <div class="form-row">
+      <div>
+        <label for="grade_level">Grade / year <span class="hint">(optional)</span></label>
+        <select id="grade_level" name="grade_level">
+          <option value="">—</option>
+          {% for g in ["Middle school", "9th grade", "10th grade", "11th grade", "12th grade", "College freshman", "College sophomore", "College junior", "College senior", "Graduate student", "Other"] %}
+          <option {{ 'selected' if current_user.grade_level == g }}>{{ g }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="birth_year">Birth year <span class="hint">(optional)</span></label>
+        <input id="birth_year" name="birth_year" type="number" min="1900" max="{{ now_utc().year - 13 }}" value="{{ current_user.birth_year or '' }}">
+      </div>
+    </div>
+    <p class="help">Birth year is only used to confirm you're 13+ and to unlock 18+ features. It's never shown to anyone.</p>
+    <label for="timezone">Time zone</label>
+    <select id="timezone" name="timezone" data-timezone data-current="{{ current_user.timezone }}">
+      {% for tz in timezones() %}<option value="{{ tz }}" {{ 'selected' if tz == current_user.timezone }}>{{ tz }}</option>{% endfor %}
+      <option value="UTC" {{ 'selected' if current_user.timezone == 'UTC' }}>UTC</option>
+    </select>
+    <button class="btn btn-block mt" type="submit">Continue to Canvas setup →</button>
+  </form>
+</div>
+{% endblock %}

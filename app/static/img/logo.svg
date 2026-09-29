@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Homework Hatch">
+  <ellipse cx="32" cy="38" rx="20" ry="22" fill="#fde7c7"/>
+  <path d="M12 36 L19 29 L25 36 L32 28 L39 36 L45 29 L52 36 C52 50 43 60 32 60 C21 60 12 50 12 36 Z" fill="#f4c27a"/>
+  <circle cx="32" cy="24" r="11" fill="#ffcf3d"/>
+  <circle cx="28.5" cy="22" r="1.6" fill="#1f1b16"/>
+  <circle cx="35.5" cy="22" r="1.6" fill="#1f1b16"/>
+  <path d="M29.5 26.5 L32 29 L34.5 26.5 Z" fill="#dd5a12"/>
+  <path d="M25 13 Q27 9 30 12 Q32 8 34 12 Q37 9 39 13" fill="none" stroke="#dd5a12" stroke-width="2" stroke-linecap="round"/>
+</svg>

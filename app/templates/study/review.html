@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Review · {{ deck.title }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('study.deck', deck_id=deck.id) }}">{{ deck.title }}</a></div><h1>Review</h1></div>
+  <span class="badge accent">{{ remaining }} left</span></div>
+{% if card %}
+<div class="flashcard" id="card" tabindex="0" aria-label="Flashcard. Press space to flip.">
+  <div class="inner">
+    <div class="face front" data-math>{{ card.front }}</div>
+    <div class="face back" data-math>{{ card.back }}</div>
+  </div>
+</div>
+<p class="center small muted" id="hint">Click the card or press <kbd>Space</kbd> to see the answer.</p>
+<form method="post" class="ratings hidden" id="ratings">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="card_id" value="{{ card.id }}">
+  <button class="btn btn-danger" name="rating" value="again" title="1">Again</button>
+  <button class="btn btn-ghost" name="rating" value="hard" title="2">Hard</button>
+  <button class="btn" name="rating" value="good" title="3">Good</button>
+  <button class="btn btn-ghost" name="rating" value="easy" title="4">Easy</button>
+</form>
+<p class="center small muted mt">Keys: <kbd>1</kbd> again · <kbd>2</kbd> hard · <kbd>3</kbd> good · <kbd>4</kbd> easy</p>
+{% else %}
+<div class="card empty"><div class="big">🎉</div><p>No cards due in this deck. Come back later — spaced repetition works best a little at a time.</p>
+  <div class="btn-row" style="justify-content:center"><a class="btn" href="{{ url_for('study.index') }}">Back to decks</a><a class="btn btn-ghost" href="{{ url_for('study.cram', deck_id=deck.id) }}">Cram anyway</a></div></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if card %}
+<script>
+(() => {
+  const card = document.getElementById("card"), ratings = document.getElementById("ratings");
+  const flip = () => { card.classList.toggle("flipped"); ratings.classList.remove("hidden"); document.getElementById("hint").hidden = true; };
+  card.addEventListener("click", flip);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === " ") { e.preventDefault(); flip(); }
+    const map = { "1": "again", "2": "hard", "3": "good", "4": "easy" };
+    if (map[e.key] && !ratings.classList.contains("hidden")) ratings.querySelector(`[value=${map[e.key]}]`).click();
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

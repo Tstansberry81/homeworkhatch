@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Generate study materials{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>✨ Generate study materials</h1><p class="muted">Pick a source from your synced classes (or paste notes) and get flashcards or a practice quiz in seconds.</p></div>
+  {% if remaining is not none %}<span class="badge accent">{{ remaining }} AI actions left this month</span>{% endif %}</div>
+{% if not ai_available %}<div class="flash warning">AI isn't enabled on this server yet.</div>{% endif %}
+<form method="post" class="card" id="gen">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Make</label>
+  <div class="btn-row">
+    <label class="check"><input type="radio" name="output" value="deck" {{ 'checked' if preset.output != 'quiz' }}> Flashcards</label>
+    <label class="check"><input type="radio" name="output" value="quiz" {{ 'checked' if preset.output == 'quiz' }}> Practice quiz</label>
+  </div>
+  <label>From</label>
+  <div class="btn-row">
+    {% for key, label in [("file", "A file"), ("page", "A page"), ("course", "A topic in a class"), ("paste", "Pasted notes")] %}
+    <label class="check"><input type="radio" name="kind" value="{{ key }}" {{ 'checked' if preset.kind == key }}> {{ label }}</label>
+    {% endfor %}
+  </div>
+  <div data-kind="file">
+    <label for="file_id">File <span class="hint">(files with readable text)</span></label>
+    <select id="file_id" name="file_id">
+      {% for f in options.files %}<option value="{{ f.id }}" {{ 'selected' if preset.kind == 'file' and preset.ref|string == f.id|string }}>{{ course_by_id(f.course_id).name if f.course_id }} — {{ f.name }}</option>{% else %}<option value="">No readable files synced yet</option>{% endfor %}
+    </select>
+  </div>
+  <div data-kind="page">
+    <label for="page_id">Page</label>
+    <select id="page_id" name="page_id">
+      {% for p in options.pages %}<option value="{{ p.id }}" {{ 'selected' if preset.kind == 'page' and preset.ref|string == p.id|string }}>{{ course_by_id(p.course_id).name }} — {{ p.title }}</option>{% else %}<option value="">No pages synced yet</option>{% endfor %}
+    </select>
+  </div>
+  <div data-kind="course">
+    <div class="form-row">
+      <div><label for="course_id">Class</label>
+        <select id="course_id" name="course_id">{% for c in options.courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+      <div><label for="topic">Topic</label><input id="topic" name="topic" type="text" placeholder="e.g. chain rule, Reconstruction, for loops"></div>
+    </div>
+    <p class="help">We search that class's synced pages, files and assignments for the topic and build from the best matches.</p>
+  </div>
+  <div data-kind="paste">
+    <label for="pasted">Your notes</label>
+    <textarea id="pasted" name="pasted" placeholder="Paste lecture notes, a reading, a study guide…"></textarea>
+  </div>
+  <label for="count">How many</label>
+  <input id="count" name="count" type="number" min="3" max="50" value="{{ 10 if preset.output == 'quiz' else 15 }}" style="width:110px">
+  <button class="btn btn-block mt" type="submit" {{ 'disabled' if not ai_available }}>Generate</button>
+  <p class="help center" id="busy" hidden>Working on it… this usually takes 10–40 seconds.</p>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const form = document.getElementById("gen");
+  const sync = () => {
+    const kind = form.querySelector("input[name=kind]:checked")?.value || "file";
+    form.querySelectorAll("[data-kind]").forEach((el) => el.hidden = el.dataset.kind !== kind);
+  };
+  form.addEventListener("change", sync);
+  sync();
+  form.addEventListener("submit", () => {
+    form.querySelector("button[type=submit]").disabled = true;
+    document.getElementById("busy").hidden = false;
+  });
+})();
+</script>
+{% endblock %}

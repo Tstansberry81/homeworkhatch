@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}AI tutor{% endblock %}
+{% block content %}
+<div style="max-width:620px;margin:40px auto" class="card center">
+  <div style="font-size:2.6rem">🤖</div>
+  <h1>Your AI tutor</h1>
+  <p class="muted">Ask about anything in your classes. The tutor reads your synced syllabus, pages, files and assignments, cites them, and helps you understand, rather than doing the work for you.</p>
+  {% if not ai_available %}<div class="flash warning">AI isn't enabled on this server yet.</div>{% endif %}
+  <form method="post" action="{{ url_for('tutor.new') }}" class="btn-row mt" style="justify-content:center">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="course_id" style="max-width:280px"><option value="">All my classes</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>
+    <button class="btn" {{ 'disabled' if not ai_available }}>Start a conversation</button>
+  </form>
+</div>
+{% endblock %}
