@@ -97,6 +97,12 @@ def run_migrations_online():
     connectable = get_engine()
 
     with connectable.connect() as connection:
+        # SQLite drops a column by rebuilding the table; with foreign keys on (app/extensions.py), dropping
+        # the old `user` table cascade-deletes every row that points at it. Postgres alters in place.
+        sqlite = connection.dialect.name == "sqlite"
+        if sqlite:
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
@@ -110,6 +116,8 @@ def run_migrations_online():
                 from app.services.dbsecurity import lock_down_public_schema
 
                 lock_down_public_schema(connection)
+        if sqlite:
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
 if context.is_offline_mode():
