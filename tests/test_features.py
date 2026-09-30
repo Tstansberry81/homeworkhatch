@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import func, select
 
 from app.extensions import db
@@ -292,3 +293,31 @@ def test_scanned_pdf_can_be_read_with_ai(synced_user, client, fake_ai):
     assert db.session.scalar(select(AIUsage.kind).where(AIUsage.kind == "transcribe")) == "transcribe"
     other = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
     assert client.post(f"/courses/files/{other.id}/transcribe").status_code == 302  # not a PDF: refused politely
+
+
+def test_ai_cost_is_logged_with_cache_tokens_and_models_are_per_feature(app, synced_user, client, fake_ai):
+    from types import SimpleNamespace
+
+    from app.services.ai import AIResult, AnthropicProvider
+
+    message = SimpleNamespace(model="claude-haiku-4-5-20251001", usage=SimpleNamespace(
+        input_tokens=1_000, output_tokens=500, cache_creation_input_tokens=2_000, cache_read_input_tokens=10_000))
+    result = AnthropicProvider._result(message, "hi")
+    assert (result.cache_write_tokens, result.cache_read_tokens) == (2_000, 10_000)
+    row = ai.reserve(synced_user, "tutor")
+    ai.finish(row, result)
+    expected = (1_000 * 1.00 + 500 * 5.00 + 2_000 * 1.00 * 1.25 + 10_000 * 0.10) / 1e6  # Haiku prices, dated id
+    assert row.cost_usd == pytest.approx(expected) and row.cache_read_tokens == 10_000
+    assert ai.cost_usd("claude-sonnet-5-5", 1_000_000, 0) == 2.00
+
+    provider = AnthropicProvider.__new__(AnthropicProvider)
+    provider.model = "claude-opus-5-5"
+    opus = provider._params("s", [], 100, "low")
+    haiku = provider._params("s", [], 100, "low", model="claude-haiku-4-5")
+    assert opus["output_config"] == {"effort": "low"} and opus["fallbacks"] == "default"
+    assert "output_config" not in haiku and "fallbacks" not in haiku, "Haiku 4.5 takes neither"
+
+    app.config["AI_MODELS"] = {"flashcards": "claude-sonnet-5-5"}
+    client.post("/study/generate", data={"output": "deck", "mode": "paste", "pasted": "Notes about limits " * 5})
+    client.post("/study/generate", data={"output": "quiz", "mode": "paste", "pasted": "Notes about limits " * 5})
+    assert [c["model"] for c in fake_ai.calls[-2:]] == ["claude-sonnet-5-5", app.config["AI_MODEL"]]
