@@ -115,7 +115,7 @@ async function syncOnce(trigger) {
     let lastPush = null;
     let pushError = null;
     if (s.endpointUrl && !s.endpointToken) {
-      pushError = `Not linked to Homework Hatch yet: create a token at ${s.endpointUrl}/settings/sync and paste it under Settings.`;
+      pushError = `Not linked to Homework Hatch yet: open ${s.endpointUrl}/settings/sync while signed in and it links itself.`;
     } else {
       try {
         lastPush = await push(snapshot, s, onProgress);
@@ -351,6 +351,36 @@ chrome.tabs.onUpdated.addListener(async (_id, info, tab) => {
   if (!s.baseUrl || !tab.url.startsWith(new URL(s.baseUrl).origin)) return;
   const { status = {} } = await chrome.storage.local.get("status");
   if (status.state === "logged_out") runSync("canvas_tab");
+});
+
+// The Homework Hatch site (only the origins in the manifest's externally_connectable) asks
+// whether the extension is installed and linked, hands it a sync token, or starts a sync. The
+// server is always the site that sent the token, and nothing is ever sent back but status.
+chrome.runtime.onMessageExternal.addListener((msg, sender, reply) => {
+  const origin = sender.origin || (sender.url ? new URL(sender.url).origin : null);
+  if (!origin) return;
+  (async () => {
+    let s = await settings();
+    if (msg?.type === "link") {
+      if (!/^hh_[\w-]{20,}$/.test(msg.token || "")) return reply({ error: "bad token" });
+      s = { ...s, endpointUrl: origin, endpointToken: msg.token };
+      await chrome.storage.local.set({ settings: s });
+      if (s.baseUrl) runSync("link");
+    } else if (msg?.type === "sync") {
+      if (s.baseUrl && s.endpointToken && s.endpointUrl === origin) runSync("site");
+    } else if (msg?.type !== "ping") {
+      return reply({ error: "unknown message" });
+    }
+    const { status = {} } = await chrome.storage.local.get("status");
+    reply({
+      version: chrome.runtime.getManifest().version,
+      linked: Boolean(s.endpointToken) && s.endpointUrl === origin,
+      canvas: s.baseUrl || null,
+      state: running ? "syncing" : status.state || null,
+      lastSync: status.lastSync || null,
+    });
+  })();
+  return true;
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {

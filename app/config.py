@@ -142,6 +142,11 @@ def load_config(env_name: str) -> dict:
         # College acceptance calculator: free key from https://api.data.gov/signup/
         "COLLEGE_SCORECARD_API_KEY": os.environ.get("COLLEGE_SCORECARD_API_KEY", ""),
 
+        # Chrome extension ids the Connect Canvas page links automatically: the Web Store id
+        # first (its store page is the install link), then any unpacked/dev ids.
+        "EXTENSION_IDS": [x.strip() for x in os.environ.get("EXTENSION_IDS", "plnbpopfekhdcbllmdcmkjgcemikllch").split(",")
+                          if x.strip()],
+
         # The account registered with this email becomes an admin (production has no
         # "first user is admin" shortcut). `flask create-admin` works too.
         "ADMIN_EMAIL": os.environ.get("ADMIN_EMAIL", ""),

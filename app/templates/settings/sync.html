@@ -12,18 +12,31 @@
 {% endif %}
 
 <div class="grid grid-main">
-  <div class="card">
-    <h2>Set it up (about 2 minutes)</h2>
-    <ol>
-      <li class="mb"><strong>Download the extension.</strong> <a class="btn btn-sm" href="{{ url_for('main.extension_zip') }}">Download .zip</a><br>
-        <span class="small muted">Unzip it somewhere you'll keep it (e.g. your Documents folder).</span></li>
-      <li class="mb"><strong>Load it in Chrome</strong> (or Edge, Brave, Arc): go to <code>chrome://extensions</code>, turn on <em>Developer mode</em>, click <em>Load unpacked</em>, and pick the unzipped folder.</li>
-      <li class="mb"><strong>Connect your school:</strong> open your Canvas in a tab, click the Homework Hatch icon, then <em>Connect</em>.</li>
-      <li class="mb"><strong>Link it to your account:</strong> in the extension's <em>Settings</em>, set <em>Homework Hatch server</em> to<br>
-        <code id="server">{{ server_url }}</code> <button class="btn btn-ghost btn-sm" data-copy="#server">Copy</button><br>
-        and paste a <em>server token</em> from the box on the right. Then click <em>Sync now</em>.</li>
-    </ol>
-    <p class="small muted">After that it syncs every hour while Chrome is open, including new files, grades and announcements. Hidden tabs, locked files and outside tools (WebAssign, Gradescope…) can't be read.</p>
+  <div>
+    <div class="card" id="ext" data-ids='{{ config.EXTENSION_IDS|tojson }}' data-token-url="{{ url_for('settings.extension_token') }}"
+         data-canvas='{{ (accounts|map(attribute="host")|list)[:1]|tojson }}'>
+      <h2>Chrome extension</h2>
+      <p id="ext-status" class="muted">Looking for the extension…</p>
+      <div class="btn-row">
+        <a id="ext-install" class="btn" href="https://chromewebstore.google.com/detail/{{ config.EXTENSION_IDS[0] }}" target="_blank" rel="noopener" hidden>Add to Chrome</a>
+        <a id="ext-canvas" class="btn" target="_blank" rel="noopener" hidden>Open Canvas</a>
+        <button id="ext-sync" class="btn btn-ghost" hidden>Sync now</button>
+      </div>
+      <p id="ext-hint" class="small muted" hidden></p>
+    </div>
+    <details class="card">
+      <summary><strong>Set it up by hand</strong> <span class="muted small">(Edge, Brave, Arc, or without the Chrome Web Store)</span></summary>
+      <ol class="mt">
+        <li class="mb"><strong>Download the extension.</strong> <a class="btn btn-sm" href="{{ url_for('main.extension_zip') }}">Download .zip</a><br>
+          <span class="small muted">Unzip it somewhere you'll keep it (e.g. your Documents folder).</span></li>
+        <li class="mb"><strong>Load it</strong>: go to <code>chrome://extensions</code>, turn on <em>Developer mode</em>, click <em>Load unpacked</em>, and pick the unzipped folder.</li>
+        <li class="mb"><strong>Connect your school:</strong> open your Canvas in a tab, click the Homework Hatch icon, then <em>Connect</em>.</li>
+        <li class="mb"><strong>Link it to your account:</strong> in the extension's <em>Settings</em>, the server is
+          <code id="server">{{ server_url }}</code> <button class="btn btn-ghost btn-sm" data-copy="#server">Copy</button>;
+          paste a <em>server token</em> from the box on the right. Then click <em>Sync now</em>.</li>
+      </ol>
+    </details>
+    <p class="small muted">Once set up it syncs every hour while Chrome is open: new files, grades and announcements, and never a file it already has. Hidden tabs, locked files and outside tools (WebAssign, Gradescope…) can't be read.</p>
   </div>
   <div>
     <form method="post" action="{{ url_for('settings.create_token') }}" class="card">
@@ -45,4 +58,65 @@
     {% endif %}
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const card = document.getElementById("ext");
+  const ids = JSON.parse(card.dataset.ids), knownCanvas = JSON.parse(card.dataset.canvas)[0];
+  const $ = (id) => document.getElementById(id);
+  const show = (id, on = true) => { $(id).hidden = !on; };
+  const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+  // chrome.runtime exists on this page only when an extension lists this site in externally_connectable.
+  const ask = (id, msg) => new Promise((resolve) => {
+    if (!window.chrome?.runtime?.sendMessage) return resolve(null);
+    try { chrome.runtime.sendMessage(id, msg, (res) => { void chrome.runtime.lastError; resolve(res || null); }); }
+    catch { resolve(null); }
+  });
+  let ext = null;
+  async function find() {
+    for (const id of ids) { const r = await ask(id, { type: "ping" }); if (r?.version) return { id, ...r }; }
+    return null;
+  }
+  function render() {
+    ["ext-install", "ext-canvas", "ext-sync", "ext-hint"].forEach((id) => show(id, false));
+    if (!ext) {
+      $("ext-status").textContent = "Not installed in this browser. Add it from the Chrome Web Store; it links to your account on its own.";
+      show("ext-install");
+      return;
+    }
+    if (!ext.linked) { $("ext-status").textContent = "Linking the extension to your account…"; return; }
+    if (!ext.canvas) {
+      $("ext-status").textContent = `✅ Extension ${ext.version} is linked to your account. One step left: connect your school's Canvas.`;
+      $("ext-hint").textContent = "Open your Canvas, click the Homework Hatch icon in the toolbar (under the puzzle piece if it isn't pinned), then Connect.";
+      show("ext-hint");
+      if (knownCanvas) { $("ext-canvas").href = `https://${knownCanvas}`; show("ext-canvas"); }
+      return;
+    }
+    const host = new URL(ext.canvas).host;
+    $("ext-status").textContent = ext.state === "syncing" ? `🔄 Syncing from ${host}…`
+      : `✅ Linked and syncing from ${host}${ext.lastSync ? ` · last sync ${ago(ext.lastSync)}` : ""} · extension ${ext.version}`;
+    if (["error", "logged_out"].includes(ext.state)) {
+      $("ext-hint").textContent = ext.state === "logged_out" ? "The last sync found you logged out of Canvas. Log in, then click Sync now." : "The last sync hit an error. Open the extension for details, or click Sync now.";
+      show("ext-hint");
+    }
+    show("ext-sync", ext.state !== "syncing");
+  }
+  async function refresh() {
+    ext = await find();
+    if (ext && !ext.linked) {
+      try {
+        const { token } = await hh.post(card.dataset.tokenUrl);
+        const r = await ask(ext.id, { type: "link", token });
+        if (r?.linked) ext = { id: ext.id, ...r };
+      } catch (e) { $("ext-status").textContent = `Couldn't link the extension: ${e.message}`; return; }
+    }
+    render();
+  }
+  $("ext-sync").onclick = async () => { const r = await ask(ext.id, { type: "sync" }); if (r) ext = { id: ext.id, ...r, state: "syncing" }; render(); };
+  refresh();
+  setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+})();
+</script>
 {% endblock %}

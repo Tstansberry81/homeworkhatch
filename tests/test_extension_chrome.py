@@ -7,6 +7,7 @@ dev dependencies:
     CHROME_PATH=".../Google Chrome for Testing" pytest tests/test_extension_chrome.py
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -23,7 +24,7 @@ from app import create_app
 from app.extensions import db
 from app.models import CanvasFile
 
-from .conftest import FakeAI, api_token, make_user
+from .conftest import FakeAI, make_user
 
 ROOT = Path(__file__).resolve().parent.parent
 CHROME = os.environ.get("CHROME_PATH")
@@ -55,14 +56,19 @@ def test_extension_in_chrome(tmp_path):
 
         hits[f"{request.method} {request.url_rule.rule if request.url_rule else request.path}"] += 1
 
+    # Chrome gives an unpacked extension an id derived from its folder's path.
+    ext_dir = tmp_path / "extension"
+    app.config["EXTENSION_IDS"] = [
+        "".join(chr(ord("a") + int(c, 16)) for c in hashlib.sha256(p.encode()).hexdigest()[:32])
+        for p in {str(ext_dir), os.path.realpath(ext_dir)}]
     with app.app_context():
         db.create_all()
-        token = api_token(make_user("chrome"))
+        make_user("chrome")
     server = make_server("127.0.0.1", 0, app, threaded=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         run = subprocess.run(["node", str(ROOT / "tests/js/extension_chrome.mjs"), f"http://127.0.0.1:{server.server_port}",
-                              token, CHROME], capture_output=True, text=True, timeout=240)
+                              "chrome", "password123", CHROME, str(ext_dir)], capture_output=True, text=True, timeout=240)
         assert run.returncode == 0, run.stderr[-3000:]
         r = json.loads(run.stdout.strip().splitlines()[-1])
     finally:
@@ -70,7 +76,10 @@ def test_extension_in_chrome(tmp_path):
         s3.stop()
 
     assert r["opened_setup_page"], "first install opens the token page"
-    assert r["default_server"] == "https://homeworkhatch.onrender.com"
+    server_url = f"http://127.0.0.1:{server.server_port}"
+    assert r["default_server"] == server_url, "the hosted server is the built-in default"
+    assert r["linked"] == {"server": server_url, "token_looks_right": True}, "the site linked the extension by itself"
+    assert "Linked and syncing from 127.0.0.1" in r["site_status"] and "last sync" in r["site_status"], r["site_status"]
     assert r["alarm_minutes"] == 60, "hourly auto-sync is scheduled"
 
     # Mock Canvas: 5 distinct files, plus notes.pdf posted again under another Canvas id.

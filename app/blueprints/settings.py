@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, logout_user
 from sqlalchemy import func, select
 
@@ -89,6 +89,22 @@ def create_token():
     db.session.commit()
     # Shown exactly once; only the hash is stored.
     return render_template("settings/token_created.html", token=token, server_url=server_url())
+
+
+EXTENSION_TOKEN_NAME = "Chrome extension (linked automatically)"
+
+
+@bp.route("/extension-token", methods=["POST"])
+@login_required
+def extension_token():
+    """A sync token the Connect Canvas page hands straight to the installed extension, so
+    nobody copies a server address or token. The extension only accepts it from this site
+    (externally_connectable) and syncs to the origin that sent it."""
+    token = "hh_" + secrets.token_urlsafe(32)
+    db.session.add(ApiToken(user_id=current_user.id, name=EXTENSION_TOKEN_NAME, token_hash=hash_token(token),
+                            prefix=token[:10]))
+    db.session.commit()
+    return jsonify({"token": token})
 
 
 @bp.route("/tokens/<int:token_id>/revoke", methods=["POST"])

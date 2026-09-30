@@ -34,8 +34,9 @@ Syncs your own Canvas classes, deadlines, grades and files to Homework Hatch usi
     and practice quizzes made from your own course material, and an AI tutor that knows
     your classes.
 
-    Setup: sign up at https://homeworkhatch.onrender.com, create a sync token on the
-    "Connect Canvas" page, open your Canvas tab, click the extension and press Connect.
+    Setup: add the extension, sign in at https://homeworkhatch.onrender.com and open
+    "Connect Canvas" (the extension links itself to your account), then open your Canvas,
+    click the extension and press Connect.
 
 **Category:** Education
 **Language:** English
@@ -69,6 +70,10 @@ files) to their Homework Hatch account so they can plan and study.
 
 **Remote code:** No, I am not using remote code. All code ships in the package.
 
+**Externally connectable** (if asked): only https://homeworkhatch.onrender.com can message the
+extension, to link it to the signed-in account (it hands over a sync token) and to show sync status.
+The extension never sends Canvas data or the token back to the page.
+
 **Data usage.** Tick these:
 - Personally identifiable information (the user's name and Canvas user ID)
 - Authentication information (the Homework Hatch sync token, stored in the extension)
@@ -88,9 +93,9 @@ lending.
 ## Notes for the reviewer (Test instructions tab)
 
     The extension only does something on a Canvas LMS site. To try it: create a free account at
-    https://canvas.instructure.com, sign up at https://homeworkhatch.onrender.com, create a sync
-    token on the "Connect Canvas" page, then open Canvas, click the extension, press Connect, and
-    paste the server address and token in Settings.
+    https://canvas.instructure.com, sign up at https://homeworkhatch.onrender.com and open the
+    "Connect Canvas" page (the extension links itself to the account there), then open Canvas,
+    click the extension and press Connect.
 
 New sign-ups wait for approval (`REQUIRE_APPROVAL=1`), so approve the reviewer's account under
 Admin if one shows up while the extension is in review.
