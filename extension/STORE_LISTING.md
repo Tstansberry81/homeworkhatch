@@ -85,6 +85,9 @@ lending.
 
 **Privacy policy URL:** https://homeworkhatch.onrender.com/privacy
 
+**Homepage URL:** https://homeworkhatch.onrender.com
+**Support URL:** https://homeworkhatch.onrender.com/support
+
 ## Distribution tab
 
 - **Visibility:** Unlisted, so only people with the link can install it. Switch to Public later.

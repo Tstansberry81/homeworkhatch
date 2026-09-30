@@ -147,6 +147,10 @@ def load_config(env_name: str) -> dict:
         "EXTENSION_IDS": [x.strip() for x in os.environ.get("EXTENSION_IDS", "plnbpopfekhdcbllmdcmkjgcemikllch").split(",")
                           if x.strip()],
 
+        # Shown on /support (and used as the Chrome Web Store support contact). Without it the
+        # page points to GitHub issues.
+        "SUPPORT_EMAIL": os.environ.get("SUPPORT_EMAIL", "").strip(),
+
         # The account registered with this email becomes an admin (production has no
         # "first user is admin" shortcut). `flask create-admin` works too.
         "ADMIN_EMAIL": os.environ.get("ADMIN_EMAIL", ""),

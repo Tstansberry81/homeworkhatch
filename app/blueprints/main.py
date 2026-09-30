@@ -56,6 +56,11 @@ def privacy():
     return render_template("legal/privacy.html")
 
 
+@bp.route("/support")
+def support():
+    return render_template("legal/support.html")
+
+
 @bp.route("/welcome", methods=["GET", "POST"])
 @login_required
 def onboarding():

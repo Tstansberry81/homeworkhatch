@@ -16,7 +16,7 @@ from .conftest import login, make_user
 
 
 def test_public_pages(client):
-    for path in ("/", "/login", "/register", "/terms", "/privacy", "/live/join", "/health"):
+    for path in ("/", "/login", "/register", "/terms", "/privacy", "/support", "/live/join", "/health"):
         r = client.get(path)
         assert r.status_code == 200, path
     assert client.get("/dashboard").status_code == 302, "login required"

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Support{% endblock %}
+{% macro body() %}
+<div class="card prose" style="max-width:820px;margin:0 auto">
+  <h1>Support</h1>
+  <p>Questions, bugs or a class that won't sync:
+    {% if config.SUPPORT_EMAIL %}email <a href="mailto:{{ config.SUPPORT_EMAIL }}">{{ config.SUPPORT_EMAIL }}</a>.
+    {% else %}<a href="https://github.com/Tstansberry81/homeworkhatch/issues" target="_blank" rel="noopener">report it here</a>.{% endif %}
+    Include your school's Canvas address and what the extension's popup says.</p>
+
+  <h2>Setting up</h2>
+  <ol>
+    <li>Add the Homework Hatch extension to Chrome. It opens the <a href="{{ url_for('settings.sync') }}">Connect Canvas</a> page.</li>
+    <li>Sign in (or sign up). The extension links itself to your account on that page.</li>
+    <li>Open your school's Canvas, click the Homework Hatch icon in the toolbar and press <em>Connect</em>, then allow access.</li>
+  </ol>
+  <p>From then on it syncs every hour while Chrome is open, and only downloads files it doesn't already have.</p>
+
+  <h2>Common problems</h2>
+  <ul>
+    <li><strong>"Logged out":</strong> log in to Canvas in any tab; the next sync picks up from there. Keeping a Canvas tab open helps at schools with strict sign-in.</li>
+    <li><strong>"Not linked to Homework Hatch yet":</strong> open <a href="{{ url_for('settings.sync') }}">Connect Canvas</a> while signed in.</li>
+    <li><strong>"A file couldn't be uploaded":</strong> it's retried automatically at the next sync.</li>
+    <li><strong>A class is missing:</strong> the popup's <em>Courses shown</em> list controls which classes sync; it starts with your Canvas dashboard.</li>
+    <li><strong>"Hidden by instructors":</strong> normal. Some classes turn off tabs like Files or Pages; the extension reads everything else, including files linked from modules and pages.</li>
+  </ul>
+
+  <h2>Your data</h2>
+  <p>Export or delete everything from Settings → Your data. Revoking the extension's token on the Connect Canvas page stops syncing immediately. See the <a href="{{ url_for('main.privacy') }}">Privacy Policy</a>.</p>
+</div>
+{% endmacro %}
+{% block content %}{{ body() }}{% endblock %}
+{% block public %}<div style="padding:32px 16px">{{ body() }}</div>{% endblock %}
