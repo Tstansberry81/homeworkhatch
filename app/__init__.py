@@ -12,7 +12,7 @@ from flask import Flask, render_template, request
 from flask_login import current_user
 from sqlalchemy import select
 
-from .config import BASE_DIR, config_for
+from .config import BASE_DIR, load_config, validate_production
 from .extensions import csrf, db, login_manager, migrate
 from .models import User, utcnow
 
@@ -22,11 +22,13 @@ load_dotenv(BASE_DIR / ".env")
 def create_app(env_name: str | None = None, overrides: dict | None = None) -> Flask:
     env_name = env_name or os.environ.get("HH_ENV", "development")
     app = Flask(__name__, instance_path=str(BASE_DIR / "instance"))
-    app.config.from_object(config_for(env_name))
+    app.config.update(load_config(env_name))
     if overrides:
         app.config.update(overrides)
-    if env_name == "production" and app.config["SECRET_KEY"] == "dev-insecure-change-me":
-        raise RuntimeError("Set SECRET_KEY in production.")
+    if env_name == "production":
+        problems = validate_production(app.config)
+        if problems and os.environ.get("HH_ALLOW_UNSAFE_CONFIG") != "1":
+            raise RuntimeError("Unsafe production config:\n- " + "\n- ".join(problems))
     os.makedirs(app.instance_path, exist_ok=True)
     logging.basicConfig(level=logging.INFO)
 
@@ -160,6 +162,63 @@ def _register_cli(app: Flask) -> None:
             db.session.commit()
         seed(user)
         click.echo("Demo account ready: demo / demo12345")
+
+    @app.cli.command("check-deploy")
+    def check_deploy():
+        """Verify a deployment end to end: config, database + migrations, file storage, AI."""
+        import sys
+        import uuid
+
+        import requests
+        from sqlalchemy import text
+
+        from .services import ai as ai_service
+        from .services.storage import get_storage
+
+        failures = 0
+
+        def report(ok: bool, label: str, detail: str = ""):
+            nonlocal failures
+            failures += 0 if ok else 1
+            click.echo(f"{'✓' if ok else '✗'} {label}{': ' + detail if detail else ''}")
+
+        problems = validate_production(app.config)
+        report(not problems, "production config", "; ".join(problems) or "ok")
+        try:
+            db.session.execute(text("SELECT 1"))
+            report(True, "database", db.engine.dialect.name)
+            from alembic.migration import MigrationContext
+            from alembic.script import ScriptDirectory
+            from flask_migrate import Migrate  # noqa: F401  (ensures extension config is loaded)
+
+            script = ScriptDirectory.from_config(app.extensions["migrate"].migrate.get_config())
+            with db.engine.connect() as conn:
+                current = MigrationContext.configure(conn).get_current_revision()
+            head = script.get_current_head()
+            report(current == head, "migrations", f"at {current}, head {head}")
+            if db.engine.dialect.name == "postgresql":
+                exposed = db.session.execute(text(
+                    "SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND NOT rowsecurity")).scalar()
+                report(exposed == 0, "row level security", f"{exposed} public tables without RLS")
+        except Exception as exc:
+            report(False, "database", str(exc).splitlines()[0])
+        try:
+            st = get_storage()
+            key = f"healthcheck/{uuid.uuid4().hex}/probe.txt"
+            st.put_bytes(key, b"homework hatch storage probe", "text/plain")
+            round_trip = st.read(key) == b"homework hatch storage probe"
+            url = st.signed_url(key, "probe.txt", "text/plain", True, 60)
+            signed_ok = url is None or requests.get(url, timeout=15).content == b"homework hatch storage probe"
+            st.delete_prefix(key)
+            report(round_trip and signed_ok, "file storage", f"{app.config['STORAGE_BACKEND']} "
+                   f"(write/read {'ok' if round_trip else 'FAILED'}, signed URL {'ok' if signed_ok else 'FAILED'})")
+        except Exception as exc:
+            report(False, "file storage", str(exc).splitlines()[0])
+        if ai_service.available():
+            report(True, "AI", app.config["AI_MODEL"])
+        else:
+            click.echo("! AI: off (no ANTHROPIC_API_KEY) — AI features are hidden until it's set")
+        sys.exit(1 if failures else 0)
 
     @app.cli.command("init-db")
     def init_db():

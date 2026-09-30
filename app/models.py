@@ -529,7 +529,7 @@ class ChatReport(db.Model):
     __table_args__ = (UniqueConstraint("message_id", "reporter_id"),)
 
 
-# ---------------------------------------------------------------- coins & games
+# ---------------------------------------------------------------- coins
 
 
 class CoinTransaction(db.Model):
@@ -542,27 +542,6 @@ class CoinTransaction(db.Model):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "ref"),)
-
-
-class ArcadeScore(db.Model):
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
-    game: Mapped[str] = mapped_column(String(40), index=True)
-    score: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-
-    user: Mapped[User] = relationship()
-
-
-class ArcadeRun(db.Model):
-    """A paid game start; a score can only be submitted against an unused run."""
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
-    game: Mapped[str] = mapped_column(String(40))
-    token: Mapped[str] = mapped_column(String(64), unique=True, default=lambda: secrets.token_urlsafe(16))
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    finished: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 # ---------------------------------------------------------------- college

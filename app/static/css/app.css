@@ -278,12 +278,5 @@ a.cite { display: inline-block; font-size: .72rem; font-weight: 700; padding: 0 
 .convo-list a.active, .convo-list a:hover { background: var(--surface-2); text-decoration: none; }
 @media (max-width: 860px) { .tutor-layout { grid-template-columns: 1fr; } .tutor-layout aside { display: none; } }
 
-/* ---------- games ---------- */
-.game-stage { display: grid; place-items: center; gap: 12px; padding: 12px; }
-.game-stage canvas { background: var(--surface-2); border-radius: 12px; max-width: 100%; touch-action: none; }
-.memory-grid { display: grid; grid-template-columns: repeat(4, 76px); gap: 10px; }
-.memory-grid button { height: 76px; font-size: 1.8rem; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; }
-.memory-grid button.up { background: var(--surface); }
-.memory-grid button.matched { background: var(--ok-soft); cursor: default; }
-@media (max-width: 420px) { .memory-grid { grid-template-columns: repeat(4, 64px); } .memory-grid button { height: 64px; } }
+/* ---------- probability lab ---------- */
 .dice { font-size: 3rem; letter-spacing: .1em; }

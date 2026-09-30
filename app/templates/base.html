@@ -37,7 +37,6 @@
       <div class="nav-group">
         <div class="nav-label">More</div>
         <a href="{{ url_for('coins.wallet') }}" class="{{ 'active' if ep == 'coins.wallet' }}"><span class="ico">🪙</span> Buddy Coins</a>
-        <a href="{{ url_for('coins.arcade') }}" class="{{ 'active' if ep in ('coins.arcade', 'coins.game') }}"><span class="ico">🕹️</span> Arcade</a>
         {% if feature_simulations and current_user.is_adult %}
         <a href="{{ url_for('coins.lab') }}" class="{{ 'active' if ep == 'coins.lab' }}"><span class="ico">🎲</span> Probability Lab</a>
         {% endif %}

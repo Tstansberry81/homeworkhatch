@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Same major version as new Supabase projects.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      FLASK_APP: wsgi.py
+      PG_URL: postgresql+psycopg://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: pip install -r requirements-dev.txt
+
+      - name: Tests (SQLite)
+        run: python -m pytest -q
+
+      - name: Migrations apply cleanly and match the models (Postgres)
+        env:
+          DATABASE_URL: ${{ env.PG_URL }}
+        run: |
+          flask db upgrade
+          flask db check
+
+      - name: Tests (Postgres)
+        env:
+          TEST_DATABASE_URL: ${{ env.PG_URL }}
+        run: |
+          psql postgresql://postgres:postgres@localhost:5432/postgres -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+          python -m pytest -q
+
+      - name: Extension tests
+        working-directory: extension
+        run: npm test

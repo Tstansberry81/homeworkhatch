@@ -21,6 +21,7 @@ def test_public_pages(client):
         assert r.status_code == 200, path
     assert client.get("/dashboard").status_code == 302, "login required"
     assert client.get("/nope").status_code == 404
+    assert client.get("/arcade").status_code == 404, "the arcade was removed"
 
 
 def test_every_student_page_renders(app, synced_user, client):
@@ -35,8 +36,7 @@ def test_every_student_page_renders(app, synced_user, client):
     paths = ["/dashboard", "/welcome", "/courses/", "/calendar", "/calendar?y=2026&m=2", "/planner", "/study/",
              "/study/generate", "/study/decks/new", f"/study/decks/{deck.id}", f"/study/decks/{deck.id}/review",
              f"/study/decks/{deck.id}/cram", "/study/quizzes/new", f"/study/quizzes/{quiz.id}",
-             f"/study/quizzes/{quiz.id}/edit", "/tutor/", "/chat/", f"/chat/course/{course.id}", "/coins", "/arcade",
-             "/arcade/snake", "/arcade/math-sprint", "/arcade/memory", "/college/", "/tools/citations", "/billing/",
+             f"/study/quizzes/{quiz.id}/edit", "/tutor/", "/chat/", f"/chat/course/{course.id}", "/coins", "/college/", "/tools/citations", "/billing/",
              "/settings/", "/settings/sync", "/settings/data", f"/courses/assignments/{a.id}", f"/courses/pages/{page.id}",
              f"/courses/files/{f.id}", "/live/join"]
     paths += [f"/courses/{course.id}?tab={t}" for t in ("overview", "assignments", "grades", "modules", "pages", "files", "announcements")]
@@ -225,20 +225,7 @@ def test_admin_area(app, client):
     assert "Admin: contest" in reasons
 
 
-# ---------------------------------------------------------------- arcade & lab
-
-
-def test_arcade_costs_coins_and_caps_scores(app, synced_user, client):
-    coins.award(synced_user.id, 10, "seed", "seed")
-    db.session.commit()
-    client.get("/coins")  # first visit of the day pays the +1 check-in
-    before = coins.balance(synced_user.id)
-    start = client.post("/arcade/snake/start").get_json()
-    assert start["balance"] == before - 2
-    r = client.post("/arcade/snake/score", json={"token": start["token"], "score": 10 ** 9}).get_json()
-    assert r["score"] == 2000, "impossible scores are capped"
-    again = client.post("/arcade/snake/score", json={"token": start["token"], "score": 5})
-    assert again.status_code == 400, "a run can only be scored once"
+# ---------------------------------------------------------------- probability lab
 
 
 def test_probability_lab_is_adult_and_flag_gated(app, synced_user, client):
@@ -264,3 +251,28 @@ def test_seed_demo_command(app):
     assert db.session.scalars(select(CanvasFile).where(CanvasFile.user_id == demo.id, CanvasFile.text_status == "ok")).all()
     again = app.test_cli_runner().invoke(args=["seed-demo"])  # re-running is safe
     assert "Demo account ready" in again.output
+
+
+def test_supabase_lockdown_enables_rls_and_revokes_api_roles(app):
+    """On Postgres: every table gets RLS, and Supabase's API roles can't read anything."""
+    from sqlalchemy import text
+
+    from app.services.dbsecurity import lock_down_public_schema
+
+    if db.engine.dialect.name != "postgresql":
+        pytest.skip("Postgres-only (run with TEST_DATABASE_URL)")
+    with db.engine.begin() as conn:
+        for role in ("anon", "authenticated"):
+            conn.execute(text(f"DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') "
+                              f"THEN CREATE ROLE {role} NOLOGIN; END IF; END $$;"))
+        conn.execute(text("GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated"))
+        lock_down_public_schema(conn)
+        lock_down_public_schema(conn)  # idempotent
+        no_rls = conn.execute(text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                                   "AND NOT rowsecurity")).scalars().all()
+        leaks = conn.execute(text("SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace "
+                                  "AND c.relkind = 'r' AND has_table_privilege('anon', c.oid, 'SELECT')")).scalars().all()
+    assert no_rls == [] and leaks == []
+    # The app (table owner) still reads and writes normally.
+    make_user("owner")
+    assert db.session.scalar(select(User.username).where(User.username == "owner")) == "owner"

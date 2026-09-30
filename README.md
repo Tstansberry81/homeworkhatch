@@ -25,7 +25,6 @@ login, so no school password or API key is ever involved.
 | **Summaries** | AI study summaries of any synced file or page. |
 | **Class chat** | A room per Canvas course, shared by enrolled classmates. Profanity masking, slur and threat blocking, reports, and auto-hide after 3 reports. |
 | **Buddy Coins** | Original rules: assignment 10, quiz 20, test 30, plus a grade bonus; late work earns half. Also pays for studying and live-quiz wins. Achievements and leaderboards (opt-in). |
-| **Arcade** | Math Sprint, Snake, Memory Match. Plays cost coins, and scores are validated server-side. |
 | **Probability Lab** | 18+, off by default (`FEATURE_SIMULATIONS=1`). Dice odds with the exact probability and expected value shown. Virtual coins only, as in the original terms of service. |
 | **College odds** | College Scorecard search (or manual entry), out-of-state rates, and a transparent reach/target/safety estimate. |
 | **Citations** | MLA 9, APA 7 and Chicago 17 for websites, books and articles. |
@@ -36,7 +35,7 @@ login, so no school password or API key is ever involved.
 ## Run it locally
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # Python 3.13+
 cp .env.example .env            # optional: add ANTHROPIC_API_KEY to turn on AI features
 export FLASK_APP=wsgi.py
 .venv/bin/flask db upgrade      # creates instance/homeworkhatch.db (SQLite)
@@ -55,19 +54,53 @@ The first account you register becomes the admin. You can also create one with
 3. On the site, create a **server token**. In the extension's Settings, paste the server
    address and the token, then click **Sync now**.
 
-## Deploy (Render)
+## Deploy: GitHub → Render + Supabase
 
-`render.yaml` is a Blueprint for a web service plus Postgres. Migrations run on every
-deploy (`flask db upgrade`). Set these:
+The code lives in git, and every push to `main` runs CI (`.github/workflows/ci.yml`: tests on
+SQLite and Postgres 17, a migration check, extension tests). Render deploys automatically
+**only after CI passes** (`autoDeployTrigger: checksPass`). Supabase provides Postgres and
+file storage. No secrets live in the repo: they go in Render's dashboard, and `.env` is
+git-ignored.
 
-- `PUBLIC_URL`
-- `ANTHROPIC_API_KEY`
-- storage: `STORAGE_BACKEND=s3`, `S3_BUCKET`, `S3_ENDPOINT_URL`, and AWS-style keys.
-  Render's disk is wiped on every deploy, and Cloudflare R2 works well here.
-- Stripe keys and price IDs, optionally.
-- `COLLEGE_SCORECARD_API_KEY`, optionally.
+**1. Supabase** (supabase.com → New project)
+- **Database:** click **Connect** and copy the **Session pooler** URI
+  (`postgresql://postgres.<ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`).
+  Use the session pooler because Render only speaks IPv4, while the direct
+  `db.<ref>.supabase.co` host is IPv6-only. The app adds `sslmode=require` itself.
+- **Storage:** create a **private** bucket named `canvas-files`. Then go to Storage →
+  Settings → **S3 connection**, enable it, and create an access key. Note the region shown
+  there.
+- **Security:** optionally turn on *Enforce SSL* in Database settings. The app turns on Row
+  Level Security for every table after each migration, so Supabase's public Data API can't
+  read app data. Supabase's Security Advisor should show no "RLS disabled" errors.
+- **File size:** the Free plan caps files at 50 MB, which is the app's default limit on
+  Supabase. After upgrading, raise the global file size limit and set `MAX_FILE_MB`.
 
-See `.env.example` for every setting.
+**2. Render** (render.com → New → **Blueprint**, pick this repo)
+- It reads `render.yaml` and asks once for the secret values: `DATABASE_URL`,
+  `SUPABASE_URL`, `SUPABASE_S3_REGION`, `SUPABASE_S3_ACCESS_KEY_ID`,
+  `SUPABASE_S3_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY`, and optionally Stripe and College
+  Scorecard. `SECRET_KEY` is generated for you.
+- Migrations run on start (`flask db upgrade`). On a paid plan you can move them to
+  `preDeployCommand`.
+- The app refuses to boot in production with an unsafe config: no `SECRET_KEY`, a SQLite
+  database, or local file storage.
+
+**3. Verify** from Render's shell (paid plans) or any machine with the same env vars:
+
+```bash
+flask check-deploy   # config, database + migrations, row level security, storage round-trip, AI
+```
+
+`/health` returns the deployed commit (Render's health check), and `/health/db` pings the
+database.
+
+Notes:
+- Free Render services sleep after 15 minutes idle; the extension's hourly sync wakes them.
+- Free Supabase projects pause after about a week with no activity; regular syncs keep
+  them awake.
+- Keep `WEB_CONCURRENCY × (DB_POOL_SIZE + DB_MAX_OVERFLOW)` under the pooler's *Pool Size*
+  in Supabase's database settings (defaults: 2 × (3 + 2) = 10).
 
 ## Architecture
 
@@ -75,10 +108,11 @@ See `.env.example` for every setting.
 extension/            Chrome MV3 extension: canvas.js (sync engine), upload.js (protocol), zip.js
 app/
   blueprints/         auth, main (dashboard/calendar/planner), courses, api (ingest), study, live,
-                      tutor, chat, coins (wallet/arcade/lab), college, tools, billing, settings, admin
+                      tutor, chat, coins (wallet/lab), college, tools, billing, settings, admin
   services/           ingest, retrieval (BM25), ai (Claude + quotas), study (generators), grades,
-                      planner, srs, coins, college, citations, moderation, billing, storage, ics
-  models.py           SQLAlchemy models (Postgres in production, SQLite locally)
+                      planner, srs, coins, college, citations, moderation, billing, storage
+                      (local / Supabase / S3), dbsecurity (Supabase RLS lockdown), ics
+  models.py           SQLAlchemy models (Supabase Postgres in production, SQLite locally)
 migrations/           Alembic
 tests/                pytest suite + tests/js (real extension code against a live server)
 ```
@@ -95,7 +129,7 @@ action is metered against the plan's monthly quota.
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest          # 52 tests: ingest, grades, AI features, live quiz, chat, billing, pages...
+.venv/bin/python -m pytest          # ingest, storage (S3 emulator), grades, AI features, live quiz, chat, billing, pages...
 (cd extension && npm test)          # extension sync engine + zip writer
 TEST_DATABASE_URL=postgresql+psycopg://... .venv/bin/python -m pytest   # same suite on Postgres
 ```

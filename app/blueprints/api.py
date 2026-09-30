@@ -15,7 +15,7 @@ from sqlalchemy import select
 from ..extensions import db
 from ..models import ApiToken, SyncRun, User, utcnow
 from ..services import ingest
-from ..services.storage import TooLarge
+from ..services.storage import StorageError, TooLarge
 
 bp = Blueprint("api", __name__, url_prefix="/v1")
 
@@ -114,6 +114,10 @@ def put_file(file_id: str):
     except TooLarge as exc:
         db.session.rollback()
         return _error(413, str(exc))
+    except StorageError as exc:
+        db.session.rollback()
+        current_app.logger.error("file storage failed: %s", exc)
+        return _error(502, "file storage is unavailable; the file will be retried next sync")
     return jsonify({"ok": True, "size": row.size, "sha256": row.sha256, "text": row.text_status})
 
 

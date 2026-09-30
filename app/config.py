@@ -1,90 +1,182 @@
+"""Configuration, read from environment variables when the app is created.
+
+Everything is built by `load_config()` at app-creation time (not at import time), so a
+local `.env` file loaded by `create_app` is always honored.
+
+Production target: Render (web) + Supabase (Postgres + Storage). See README "Deploy".
+"""
+
+from __future__ import annotations
+
 import os
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-def _bool(name: str, default: bool = False) -> bool:
+def env_bool(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
-    if value is None:
+    if value is None or value.strip() == "":
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _database_url() -> str:
-    url = os.environ.get("DATABASE_URL", "")
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
+# ---------------------------------------------------------------- database
+
+
+def normalize_database_url(url: str | None) -> str:
+    """Accepts the connection strings Supabase/Render hand out and makes them SQLAlchemy-ready.
+
+    - postgres:// and postgresql:// become postgresql+psycopg:// (SQLAlchemy 2 rejects the
+      first, and a bare postgresql:// would pick psycopg2, which isn't installed).
+    - Supabase hosts get sslmode=require unless an sslmode is already given (Supabase does
+      not enforce TLS by default).
+    """
     if not url:
         return f"sqlite:///{BASE_DIR / 'instance' / 'homeworkhatch.db'}"
-    # Render/Heroku hand out postgres:// URLs; SQLAlchemy wants an explicit driver.
-    if url.startswith("postgres://"):
-        url = "postgresql+psycopg://" + url[len("postgres://"):]
-    elif url.startswith("postgresql://"):
-        url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+psycopg://" + url[len(prefix):]
+            break
+    if url.startswith("postgresql"):
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query))
+        if "supabase" in (parts.hostname or "") and "sslmode" not in query:
+            query["sslmode"] = "require"
+            url = urlunsplit(parts._replace(query=urlencode(query)))
     return url
 
 
-class Config:
-    ENV_NAME = os.environ.get("HH_ENV", "development")
-    SECRET_KEY = os.environ.get("SECRET_KEY", "dev-insecure-change-me")
-
-    SQLALCHEMY_DATABASE_URI = _database_url()
-    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
-
-    # Public base URL, used for Stripe return URLs and the extension setup page.
-    PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
-
-    # File storage for synced Canvas files: "local" (disk) or "s3" (S3, R2, MinIO...).
-    STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")
-    STORAGE_DIR = os.environ.get("STORAGE_DIR", str(BASE_DIR / "instance" / "storage"))
-    S3_BUCKET = os.environ.get("S3_BUCKET", "")
-    S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL") or None
-    S3_REGION = os.environ.get("S3_REGION") or None
-
-    MAX_SNAPSHOT_MB = int(os.environ.get("MAX_SNAPSHOT_MB", "64"))
-    MAX_FILE_MB = int(os.environ.get("MAX_FILE_MB", "512"))
-    # Text is extracted from uploaded files up to this size for the AI tutor and generators.
-    MAX_EXTRACT_MB = int(os.environ.get("MAX_EXTRACT_MB", "40"))
-
-    # AI. The Anthropic SDK reads ANTHROPIC_API_KEY itself; AI features are disabled without it.
-    AI_MODEL = os.environ.get("AI_MODEL", "claude-opus-5-5")
-    AI_ENABLED = _bool("AI_ENABLED", True)
-
-    # Billing (optional). Without STRIPE_SECRET_KEY every account stays on the free plan.
-    STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
-    STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-    STRIPE_PRICE_NORMAL = os.environ.get("STRIPE_PRICE_NORMAL", "")
-    STRIPE_PRICE_PREMIUM = os.environ.get("STRIPE_PRICE_PREMIUM", "")
-    STRIPE_PRICE_PRO = os.environ.get("STRIPE_PRICE_PRO", "")
-
-    # College acceptance calculator: free key from https://api.data.gov/signup/
-    COLLEGE_SCORECARD_API_KEY = os.environ.get("COLLEGE_SCORECARD_API_KEY", "")
-
-    # New accounts wait for an admin to approve them.
-    REQUIRE_APPROVAL = _bool("REQUIRE_APPROVAL", False)
-    # Probability-game "simulations" with virtual coins: 18+ only, off unless enabled.
-    FEATURE_SIMULATIONS = _bool("FEATURE_SIMULATIONS", False)
-
-    SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = "Lax"
-    REMEMBER_COOKIE_HTTPONLY = True
-    WTF_CSRF_TIME_LIMIT = None
+def is_transaction_pooler(url: str) -> bool:
+    """Supabase's Supavisor transaction mode listens on 6543 and can't use prepared statements."""
+    try:
+        return url.startswith("postgresql") and urlsplit(url).port == 6543
+    except ValueError:
+        return False
 
 
-class ProductionConfig(Config):
-    SESSION_COOKIE_SECURE = True
-    REMEMBER_COOKIE_SECURE = True
-    PREFERRED_URL_SCHEME = "https"
+def engine_options(url: str) -> dict:
+    if url.startswith("sqlite"):
+        return {}
+    options: dict = {
+        # Render resets long-lived outbound TCP connections on network changes; ping and
+        # recycle so a dead connection is replaced instead of failing a request.
+        "pool_pre_ping": True,
+        "pool_recycle": env_int("DB_POOL_RECYCLE", 300),
+    }
+    if is_transaction_pooler(url):
+        from sqlalchemy.pool import NullPool
+
+        options["poolclass"] = NullPool
+        options["connect_args"] = {"prepare_threshold": None}
+    else:
+        # Session-mode pooler / direct connection: a small pool per gunicorn worker. Keep
+        # workers x (pool_size + max_overflow) under Supabase's pooler "Pool Size".
+        options.update(pool_size=env_int("DB_POOL_SIZE", 3), max_overflow=env_int("DB_MAX_OVERFLOW", 2),
+                       pool_timeout=30)
+    return options
 
 
-class TestConfig(Config):
-    TESTING = True
-    SECRET_KEY = "test"
-    # Set TEST_DATABASE_URL to run the suite against Postgres.
-    SQLALCHEMY_DATABASE_URI = os.environ.get("TEST_DATABASE_URL", "sqlite://")
-    WTF_CSRF_ENABLED = False
-    AI_ENABLED = True
-    STORAGE_BACKEND = "local"
+# ---------------------------------------------------------------- config objects
 
 
-def config_for(env_name: str):
-    return {"production": ProductionConfig, "test": TestConfig}.get(env_name, Config)
+def load_config(env_name: str) -> dict:
+    database_url = normalize_database_url(os.environ.get("DATABASE_URL"))
+    storage_backend = os.environ.get("STORAGE_BACKEND", "local").strip().lower()
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    cfg = {
+        "ENV_NAME": env_name,
+        "SECRET_KEY": os.environ.get("SECRET_KEY", "dev-insecure-change-me"),
+        "SQLALCHEMY_DATABASE_URI": database_url,
+        "SQLALCHEMY_ENGINE_OPTIONS": engine_options(database_url),
+        # Public base URL, used for Stripe return URLs and the extension setup page.
+        "PUBLIC_URL": (os.environ.get("PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/"),
+        "GIT_COMMIT": os.environ.get("RENDER_GIT_COMMIT", "")[:12] or None,
+
+        # File storage: "local" (disk; development), "supabase" (Supabase Storage via its
+        # S3-compatible API) or "s3" (AWS S3, Cloudflare R2, MinIO...).
+        "STORAGE_BACKEND": storage_backend,
+        "STORAGE_DIR": os.environ.get("STORAGE_DIR", str(BASE_DIR / "instance" / "storage")),
+        "S3_BUCKET": os.environ.get("S3_BUCKET") or os.environ.get("SUPABASE_BUCKET", ""),
+        "S3_ENDPOINT_URL": os.environ.get("S3_ENDPOINT_URL") or None,
+        "S3_REGION": os.environ.get("S3_REGION") or os.environ.get("SUPABASE_S3_REGION") or None,
+        "S3_ACCESS_KEY_ID": os.environ.get("S3_ACCESS_KEY_ID") or os.environ.get("SUPABASE_S3_ACCESS_KEY_ID")
+                            or os.environ.get("AWS_ACCESS_KEY_ID"),
+        "S3_SECRET_ACCESS_KEY": os.environ.get("S3_SECRET_ACCESS_KEY") or os.environ.get("SUPABASE_S3_SECRET_ACCESS_KEY")
+                                or os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        "SUPABASE_URL": supabase_url,
+        # Downloads are served as short-lived signed URLs from object storage.
+        "DOWNLOAD_URL_TTL": env_int("DOWNLOAD_URL_TTL", 300),
+
+        "MAX_SNAPSHOT_MB": env_int("MAX_SNAPSHOT_MB", 64),
+        # Supabase's Free plan caps each file at 50 MB; raise this with a paid plan.
+        "MAX_FILE_MB": env_int("MAX_FILE_MB", 50 if storage_backend == "supabase" else 512),
+        # Text is extracted from uploaded files up to this size for the AI tutor and generators.
+        "MAX_EXTRACT_MB": env_int("MAX_EXTRACT_MB", 40),
+
+        # AI. The Anthropic SDK reads ANTHROPIC_API_KEY itself; AI features are hidden without it.
+        "AI_MODEL": os.environ.get("AI_MODEL", "claude-opus-5-5"),
+        "AI_ENABLED": env_bool("AI_ENABLED", True),
+
+        # Billing (optional). Without STRIPE_SECRET_KEY every account stays on the free plan.
+        "STRIPE_SECRET_KEY": os.environ.get("STRIPE_SECRET_KEY", ""),
+        "STRIPE_WEBHOOK_SECRET": os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
+        "STRIPE_PRICE_NORMAL": os.environ.get("STRIPE_PRICE_NORMAL", ""),
+        "STRIPE_PRICE_PREMIUM": os.environ.get("STRIPE_PRICE_PREMIUM", ""),
+        "STRIPE_PRICE_PRO": os.environ.get("STRIPE_PRICE_PRO", ""),
+
+        # College acceptance calculator: free key from https://api.data.gov/signup/
+        "COLLEGE_SCORECARD_API_KEY": os.environ.get("COLLEGE_SCORECARD_API_KEY", ""),
+
+        # New accounts wait for an admin to approve them.
+        "REQUIRE_APPROVAL": env_bool("REQUIRE_APPROVAL", False),
+        # Probability Lab with virtual coins: 18+ only, off unless enabled.
+        "FEATURE_SIMULATIONS": env_bool("FEATURE_SIMULATIONS", False),
+
+        "SESSION_COOKIE_HTTPONLY": True,
+        "SESSION_COOKIE_SAMESITE": "Lax",
+        "REMEMBER_COOKIE_HTTPONLY": True,
+        "WTF_CSRF_TIME_LIMIT": None,
+    }
+    if storage_backend == "supabase" and not cfg["S3_ENDPOINT_URL"] and supabase_url:
+        # https://<ref>.supabase.co -> https://<ref>.storage.supabase.co/storage/v1/s3 (the
+        # storage host is Supabase's recommended endpoint for large transfers).
+        host = urlsplit(supabase_url).hostname or ""
+        ref = host.split(".")[0]
+        cfg["S3_ENDPOINT_URL"] = f"https://{ref}.storage.supabase.co/storage/v1/s3" if host.endswith(".supabase.co") \
+            else f"{supabase_url}/storage/v1/s3"
+    if env_name == "production":
+        cfg.update(SESSION_COOKIE_SECURE=True, REMEMBER_COOKIE_SECURE=True, PREFERRED_URL_SCHEME="https")
+    if env_name == "test":
+        test_url = os.environ.get("TEST_DATABASE_URL")  # set to run the suite against Postgres
+        cfg.update(TESTING=True, SECRET_KEY="test", WTF_CSRF_ENABLED=False, AI_ENABLED=True, STORAGE_BACKEND="local",
+                   FEATURE_SIMULATIONS=False, REQUIRE_APPROVAL=False,
+                   SQLALCHEMY_DATABASE_URI=normalize_database_url(test_url) if test_url else "sqlite://",
+                   SQLALCHEMY_ENGINE_OPTIONS=engine_options(normalize_database_url(test_url)) if test_url else {})
+    return cfg
+
+
+def validate_production(cfg: dict) -> list[str]:
+    """Problems that would make a production deploy unsafe or broken."""
+    problems = []
+    if cfg["SECRET_KEY"] == "dev-insecure-change-me":
+        problems.append("SECRET_KEY is not set.")
+    if cfg["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
+        problems.append("DATABASE_URL is not set (SQLite on Render is wiped on every deploy).")
+    if cfg["STORAGE_BACKEND"] == "local":
+        problems.append("STORAGE_BACKEND is local (Render's disk is wiped on every deploy); use supabase or s3.")
+    if cfg["STORAGE_BACKEND"] in {"supabase", "s3"}:
+        for key in ("S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"):
+            if not cfg.get(key):
+                problems.append(f"{key} is not set for {cfg['STORAGE_BACKEND']} storage.")
+        if cfg["STORAGE_BACKEND"] == "supabase" and not cfg["S3_ENDPOINT_URL"]:
+            problems.append("SUPABASE_URL (or S3_ENDPOINT_URL) is not set for Supabase storage.")
+    return problems

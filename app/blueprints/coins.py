@@ -1,4 +1,4 @@
-"""Buddy Coins wallet, achievements, leaderboards, the arcade, and the 18+ Probability Lab."""
+"""Buddy Coins wallet, achievements, leaderboards, and the 18+ Probability Lab."""
 
 from __future__ import annotations
 
@@ -10,19 +10,11 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, select
 
 from ..extensions import db
-from ..models import ArcadeRun, ArcadeScore, CoinTransaction, User, utcnow
+from ..models import CoinTransaction, User, utcnow
 from ..services import coins
 from ..utils import adult_required
 
 bp = Blueprint("coins", __name__)
-
-# Entry cost in coins, and the highest score a legitimate run can reach (anti-tamper cap).
-GAMES = {
-    "math-sprint": {"name": "Math Sprint", "cost": 2, "max_score": 400, "blurb": "Answer as many arithmetic problems as you can in 60 seconds."},
-    "snake": {"name": "Snake", "cost": 2, "max_score": 2000, "blurb": "Classic snake. Eat, grow, don't hit yourself."},
-    "memory": {"name": "Memory Match", "cost": 2, "max_score": 1000, "blurb": "Flip cards to find pairs in as few moves as you can."},
-}
-RUN_TTL = timedelta(minutes=30)
 
 
 @bp.route("/coins")
@@ -37,76 +29,6 @@ def wallet():
         .group_by(User.id).order_by(earned.desc()).limit(15)).all()
     return render_template("coins/wallet.html", history=history, achievements=coins.achievements(current_user),
                            leaders=leaders, lifetime=coins.lifetime_earned(current_user.id))
-
-
-# ---------------------------------------------------------------- arcade
-
-
-def _game(slug: str) -> dict:
-    game = GAMES.get(slug)
-    if game is None:
-        abort(404)
-    return game
-
-
-def _leaderboard(slug: str, limit: int = 10):
-    best = func.max(ArcadeScore.score)
-    return db.session.execute(
-        select(User.display_name, best.label("score")).join(ArcadeScore, ArcadeScore.user_id == User.id)
-        .where(ArcadeScore.game == slug, User.show_on_leaderboards.is_(True))
-        .group_by(User.id).order_by(best.desc()).limit(limit)).all()
-
-
-@bp.route("/arcade")
-@login_required
-def arcade():
-    boards = {slug: _leaderboard(slug, 5) for slug in GAMES}
-    return render_template("coins/arcade.html", games=GAMES, boards=boards)
-
-
-@bp.route("/arcade/<slug>")
-@login_required
-def game(slug: str):
-    g = _game(slug)
-    personal = db.session.scalar(select(func.max(ArcadeScore.score)).where(ArcadeScore.user_id == current_user.id,
-                                                                            ArcadeScore.game == slug))
-    return render_template("coins/game.html", slug=slug, game=g, board=_leaderboard(slug), personal=personal)
-
-
-@bp.route("/arcade/<slug>/start", methods=["POST"])
-@login_required
-def start(slug: str):
-    g = _game(slug)
-    try:
-        coins.spend(current_user.id, g["cost"], f"Arcade: {g['name']}")
-    except coins.InsufficientCoins as exc:
-        return jsonify({"error": str(exc)}), 402
-    run = ArcadeRun(user_id=current_user.id, game=slug)
-    db.session.add(run)
-    db.session.commit()
-    return jsonify({"token": run.token, "balance": coins.balance(current_user.id)})
-
-
-@bp.route("/arcade/<slug>/score", methods=["POST"])
-@login_required
-def score(slug: str):
-    g = _game(slug)
-    data = request.get_json(silent=True) or {}
-    run = db.session.scalar(select(ArcadeRun).where(ArcadeRun.token == str(data.get("token", ""))))
-    if run is None or run.user_id != current_user.id or run.game != slug or run.finished \
-            or utcnow() - run.started_at > RUN_TTL:
-        return jsonify({"error": "That game session expired."}), 400
-    try:
-        value = int(data.get("score"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "bad score"}), 400
-    value = max(0, min(value, g["max_score"]))
-    run.finished = True
-    db.session.add(ArcadeScore(user_id=current_user.id, game=slug, score=value))
-    db.session.commit()
-    best = db.session.scalar(select(func.max(ArcadeScore.score)).where(ArcadeScore.user_id == current_user.id,
-                                                                        ArcadeScore.game == slug))
-    return jsonify({"score": value, "best": best})
 
 
 # ---------------------------------------------------------------- Probability Lab (18+)

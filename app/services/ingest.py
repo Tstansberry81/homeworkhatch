@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import tempfile
 from urllib.parse import urlparse
 
 from flask import current_app
@@ -25,7 +26,7 @@ from ..models import (Announcement, Assignment, AssignmentGroup, CalendarEvent, 
 from ..utils import log_activity, parse_ts
 from . import coins, retrieval
 from .extract import extract_text
-from .storage import get_storage
+from .storage import TooLarge, get_storage, safe_key_part
 
 
 class IngestError(ValueError):
@@ -298,6 +299,25 @@ def _apply_event(row: CalendarEvent, e: dict, courses: dict[str, Course]):
 # ---------------------------------------------------------------- files
 
 
+def _spool(stream, limit: int):
+    """Copy the request body to a temp file, enforcing the size limit and hashing as we go."""
+    spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+    digest = hashlib.sha256()
+    size = 0
+    while True:
+        chunk = stream.read(1024 * 256)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > limit:
+            spool.close()
+            raise TooLarge(f"file exceeds the {limit // (1024 * 1024)} MB limit")
+        digest.update(chunk)
+        spool.write(chunk)
+    spool.seek(0)
+    return spool, size, digest.hexdigest()
+
+
 def store_file(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | None, stream,
                content_type: str | None) -> CanvasFile:
     row = db.session.scalar(select(CanvasFile).where(CanvasFile.account_id == run.account_id,
@@ -306,23 +326,36 @@ def store_file(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | 
         raise IngestError("file is not part of this sync")
     version = version_key(updated_at)
     cfg = current_app.config
-    key = f"u/{user.id}/files/{row.account_id}/{row.canvas_id}/{version}"
-    size, digest = get_storage().put_stream(key, stream, cfg["MAX_FILE_MB"] * 1024 * 1024)
-    row.storage_key = key
-    row.stored_version = version
-    row.sha256 = digest
-    row.size = size
-    row.stored_at = utcnow()
     if content_type and content_type != "application/octet-stream":
         row.content_type = content_type
-    if size <= cfg["MAX_EXTRACT_MB"] * 1024 * 1024:
-        text, status = extract_text(get_storage().read(key), row.name, row.content_type)
-    else:
-        text, status = None, "too_large"
+    spool, size, digest = _spool(stream, cfg["MAX_FILE_MB"] * 1024 * 1024)
+    try:
+        # Extract text first: boto3's upload_fileobj closes the file object it's given.
+        if size <= cfg["MAX_EXTRACT_MB"] * 1024 * 1024:
+            text, status = extract_text(spool.read(), row.name, row.content_type)
+            spool.seek(0)
+        else:
+            text, status = None, "too_large"
+        key = f"u/{user.id}/files/{row.account_id}/{safe_key_part(row.canvas_id)}/{version}/{safe_key_part(row.name)}"
+        storage = get_storage()
+        storage.put_file(key, spool, row.content_type)
+        old_key = row.storage_key
+        row.storage_key = key
+        row.stored_version = version
+        row.sha256 = digest
+        row.size = size
+        row.stored_at = utcnow()
+    finally:
+        spool.close()
     row.text, row.text_status = text, status
     retrieval.rebuild_file_chunks(row)
     run.files_uploaded = (run.files_uploaded or 0) + 1
     db.session.commit()
+    if old_key and old_key != key:  # an older version of this file is no longer needed
+        try:
+            storage.delete_prefix(old_key)
+        except Exception as exc:
+            current_app.logger.warning("could not delete old file version %s: %s", old_key, exc)
     return row
 
 

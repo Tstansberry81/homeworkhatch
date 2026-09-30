@@ -29,7 +29,21 @@ def landing():
 
 @bp.route("/health")
 def health():
-    return {"ok": True}
+    """Render's health check: fast, and reports the deployed commit (no database call)."""
+    return {"ok": True, "commit": current_app.config.get("GIT_COMMIT")}
+
+
+@bp.route("/health/db")
+def health_db():
+    """Confirms the database answers. Reports the backend, never credentials."""
+    from sqlalchemy import text
+
+    try:
+        db.session.execute(text("SELECT 1"))
+    except Exception as exc:  # report, don't crash the probe
+        current_app.logger.error("database health check failed: %s", exc)
+        return {"ok": False, "database": db.engine.dialect.name}, 503
+    return {"ok": True, "database": db.engine.dialect.name}
 
 
 @bp.route("/terms")

@@ -2,7 +2,7 @@
 {% block title %}Buddy Coins{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>🪙 Buddy Coins</h1><p class="muted">Earned by turning in work (assignment 10, quiz 20, test 30, plus a bonus for your grade; half for late work), studying, live-quiz wins and daily check-ins. Spend them in the <a href="{{ url_for('coins.arcade') }}">arcade</a>.</p></div>
+  <div><h1>🪙 Buddy Coins</h1><p class="muted">Earned by turning in work (assignment 10, quiz 20, test 30, plus a bonus for your grade; half for late work), studying, live-quiz wins and daily check-ins. They track your progress, unlock achievements and put you on the leaderboard{% if feature_simulations and current_user.is_adult %}, and you can try them in the <a href="{{ url_for('coins.lab') }}">Probability Lab</a>{% endif %}.</p></div>
 </div>
 <div class="grid grid-3 mb">
   <div class="card stat"><div class="value">{{ coin_balance }}</div><div class="label">balance</div></div>

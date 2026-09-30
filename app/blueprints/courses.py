@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import select
 
@@ -119,7 +119,12 @@ def download(file_id: int):
     if f is None or f.user_id != current_user.id or not f.storage_key:
         abort(404)
     inline = request.args.get("inline") == "1" and (f.content_type or "").startswith(("application/pdf", "image/"))
-    return send_file(get_storage().open(f.storage_key), mimetype=f.content_type or "application/octet-stream",
+    storage = get_storage()
+    # Object storage: redirect to a short-lived signed URL so the bytes don't pass through us.
+    url = storage.signed_url(f.storage_key, f.name, f.content_type, inline, current_app.config["DOWNLOAD_URL_TTL"])
+    if url:
+        return redirect(url, code=302)
+    return send_file(storage.open(f.storage_key), mimetype=f.content_type or "application/octet-stream",
                      as_attachment=not inline, download_name=f.name)
 
 

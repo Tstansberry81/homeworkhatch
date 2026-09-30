@@ -105,6 +105,11 @@ def run_migrations_online():
 
         with context.begin_transaction():
             context.run_migrations()
+            # Supabase: keep every table invisible to the public Data API (see app/services/dbsecurity.py).
+            if not getattr(config.cmd_opts, "autogenerate", False):
+                from app.services.dbsecurity import lock_down_public_schema
+
+                lock_down_public_schema(connection)
 
 
 if context.is_offline_mode():

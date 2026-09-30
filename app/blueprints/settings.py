@@ -145,7 +145,7 @@ def delete_account():
         return redirect(url_for("settings.data"))
     user = db.session.get(User, current_user.id)
     try:
-        get_storage().delete_prefix(f"u/{user.id}")
+        get_storage().delete_prefix(f"u/{user.id}/")  # trailing slash: never touch u/{id}0...
     except Exception as exc:
         current_app.logger.warning("storage cleanup failed for user %s: %s", user.id, exc)
     logout_user()
