@@ -6,7 +6,7 @@
 {% block content %}
 {% include "_account_tabs.html" %}
 <div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.users') }}">Users</a></div><h1>{{ user.display_name }} <span class="muted">@{{ user.username }}</span></h1>
-  <p class="muted small">{{ user.email }} · joined {{ user.created_at|dt('long') }} · {{ courses }} classes · {{ ai_used }} AI actions this month · 🪙 {{ balance }}</p></div></div>
+  <p class="muted small">{{ user.email }} · joined {{ user.created_at|dt('long') }} · {{ courses }} classes · {{ plan.name }} · {{ ai_used }} AI actions {{ 'this month' if plan.monthly else 'of the free trial' }} · 🪙 {{ balance }}</p></div></div>
 <div class="grid grid-2">
   <div class="card">
     <h2>Account</h2>

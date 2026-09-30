@@ -23,8 +23,8 @@ def plans():
     elif status == "cancel":
         flash("Checkout canceled. Nothing was charged.", "info")
     return render_template("billing/plans.html", plans=billing.PLANS.values(), current=billing.plan_for(current_user),
-                           enabled=billing.enabled(), used=ai.used_this_month(current_user.id),
-                           remaining=ai.remaining(current_user))
+                           enabled=billing.enabled(), used=ai.used(current_user), remaining=ai.remaining(current_user),
+                           subscribed=billing.has_active_subscription(current_user))
 
 
 @bp.route("/checkout/<plan>", methods=["POST"])
@@ -33,6 +33,10 @@ def checkout(plan: str):
     if not billing.enabled() or plan not in billing.PLANS or plan == "free":
         abort(404)
     if billing.has_active_subscription(current_user) and current_user.stripe_customer_id:
+        if billing.PLANS[plan].period == "once":
+            flash("You already have Plus. Cancel it in the billing portal first if you'd rather have a Semester Pass.",
+                  "info")
+            return redirect(url_for("billing.plans"))
         # Changing plans happens in Stripe's portal; a second checkout would add a second subscription.
         return redirect(url_for("billing.portal"))
     try:

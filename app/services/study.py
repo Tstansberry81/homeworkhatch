@@ -156,7 +156,7 @@ def _valid_cards(data: dict) -> dict:
     return {"title": (data.get("title") or "").strip()[:200], "cards": cards}
 
 
-def generate_flashcards(user: User, material: Material, count: int = 15) -> dict:
+def generate_flashcards(user: User, material: Material, count: int = 15, fresh: bool = False) -> dict:
     count = max(5, min(int(count), 50))
     instruction = (
         f"Make {count} flashcards covering the most important ideas in the material: key terms, definitions, "
@@ -164,7 +164,7 @@ def generate_flashcards(user: User, material: Material, count: int = 15) -> dict
         "are concise, complete answers (one to three sentences). No duplicates. Also give the set a short title."
     )
     return ai.complete_json(user, "flashcards", system=SYSTEM, prompt=_prompt(material, instruction),
-                            schema=CARDS_SCHEMA, effort="low", validate=_valid_cards)
+                            schema=CARDS_SCHEMA, effort="low", validate=_valid_cards, share=True, fresh=fresh)
 
 
 # ---------------------------------------------------------------- practice quizzes
@@ -224,7 +224,7 @@ def _valid_quiz(data: dict) -> dict:
     return {"title": (data.get("title") or "").strip()[:200], "questions": questions}
 
 
-def generate_quiz(user: User, material: Material, count: int = 10) -> dict:
+def generate_quiz(user: User, material: Material, count: int = 10, fresh: bool = False) -> dict:
     count = max(3, min(int(count), 30))
     instruction = (
         f"Write {count} multiple-choice questions that test understanding of the material, not trivia. Each has "
@@ -233,19 +233,26 @@ def generate_quiz(user: User, material: Material, count: int = 10) -> dict:
         "explanation says why the answer is right. Also give the quiz a short title."
     )
     return ai.complete_json(user, "quiz", system=SYSTEM, prompt=_prompt(material, instruction),
-                            schema=QUIZ_SCHEMA, effort="medium", validate=_valid_quiz)
+                            schema=QUIZ_SCHEMA, effort="medium", validate=_valid_quiz, share=True, fresh=fresh)
 
 
 # ---------------------------------------------------------------- summaries
 
 
-def summarize(user: User, material: Material) -> str:
+def summarize(user: User, material: Material, fresh: bool = False) -> str:
+    """Summaries of the same source are shared like study sets; `fresh` asks for a new one."""
     instruction = (
         "Write a study summary of the material in Markdown: a two-sentence overview, then the key ideas as "
         "headed sections with bullet points, important terms in bold with brief definitions, and a final "
         "'Check yourself' list of 3-5 questions. Be concise."
     )
-    return ai.complete(user, "summary", system=SYSTEM, prompt=_prompt(material, instruction), effort="low").text
+    prompt = _prompt(material, instruction)
+    key = ai.request_key("summary", SYSTEM, prompt)
+    if not fresh and (hit := ai.reuse(key)) is not None:
+        return hit["text"]
+    result = ai.complete(user, "summary", system=SYSTEM, prompt=prompt, effort="low")
+    ai.remember(key, "summary", {"text": result.text}, result)
+    return result.text
 
 
 # ---------------------------------------------------------------- scanned PDFs
@@ -266,8 +273,14 @@ def transcribe_pdf(user: User, pdf_bytes: bytes, name: str) -> str:
     """Turn a scanned (image-only) PDF into text with Claude, streaming because output can be long."""
     import base64
 
+    import hashlib
+
     if len(pdf_bytes) > MAX_TRANSCRIBE_BYTES:
         raise MaterialError("That PDF is too large for AI reading (limit 20 MB).")
+    # Everyone in a class has the same scanned handout: read it once, keyed on the exact bytes.
+    key = ai.request_key("transcribe", TRANSCRIBE_INSTRUCTION, hashlib.sha256(pdf_bytes).hexdigest())
+    if (hit := ai.reuse(key)) is not None:
+        return hit["text"]
     usage = ai.reserve(user, "transcribe")
     content = [
         {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
@@ -277,7 +290,8 @@ def transcribe_pdf(user: User, pdf_bytes: bytes, name: str) -> str:
     ]
     try:
         handle = ai.provider().stream(system="You transcribe course documents accurately.",
-                                      messages=[{"role": "user", "content": content}], max_tokens=64000, effort="low")
+                                      messages=[{"role": "user", "content": content}], max_tokens=64000, effort="low",
+                                      model=ai.model_for("transcribe"))
         text = "".join(handle).strip()
     except ai.AIError:
         ai.release(usage)
@@ -285,6 +299,7 @@ def transcribe_pdf(user: User, pdf_bytes: bytes, name: str) -> str:
     ai.finish(usage, handle.result)
     if not text:
         raise ai.AIError("The AI couldn't find readable text in that PDF.")
+    ai.remember(key, "transcribe", {"text": text}, handle.result)
     return text
 
 

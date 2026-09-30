@@ -8,7 +8,8 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_, select
 
 from ..extensions import db
-from ..models import (ActivityLog, AIUsage, ChatMessage, ChatReport, CoinTransaction, Course, SyncRun, User, utcnow)
+from ..models import (ActivityLog, AIUsage, ChatMessage, ChatReport, CoinTransaction, Course, SharedGeneration, SyncRun,
+                      User, utcnow)
 from ..services import ai, billing, coins
 from ..utils import admin_required, log_activity
 
@@ -32,14 +33,35 @@ def overview():
         "syncs_24h": db.session.scalar(select(func.count(SyncRun.id)).where(SyncRun.received_at >= now - timedelta(days=1))),
         "courses": db.session.scalar(select(func.count(Course.id)).where(Course.active.is_(True))),
         "ai_month": db.session.scalar(select(func.count(AIUsage.id)).where(AIUsage.created_at >= ai.month_start())),
-        "tokens_month": db.session.scalar(select(func.coalesce(func.sum(AIUsage.input_tokens + AIUsage.output_tokens), 0))
-                                          .where(AIUsage.created_at >= ai.month_start())),
+        "spend_month": db.session.scalar(select(func.coalesce(func.sum(AIUsage.cost_usd), 0))
+                                         .where(AIUsage.created_at >= ai.month_start())),
         "coins": db.session.scalar(select(func.coalesce(func.sum(CoinTransaction.amount), 0))),
         "open_reports": db.session.scalar(select(func.count(ChatReport.id)).where(ChatReport.resolved.is_(False))),
     }
     plans = dict(db.session.execute(select(User.plan, func.count(User.id)).group_by(User.plan)).all())
     pending = db.session.scalars(select(User).where(User.is_approved.is_(False)).order_by(User.created_at)).all()
     return render_template("admin/overview.html", stats=stats, plans=plans, pending=pending)
+
+
+@bp.route("/ai")
+def ai_spend():
+    """What Claude costs: this month by feature, model and student, and what shared sets saved."""
+    since = ai.month_start()
+    this_month = AIUsage.created_at >= since
+    cost = func.coalesce(func.sum(AIUsage.cost_usd), 0)
+    by = lambda col: db.session.execute(select(col, func.count(AIUsage.id), cost).where(this_month)  # noqa: E731
+                                        .group_by(col).order_by(cost.desc())).all()
+    totals = db.session.execute(select(func.count(AIUsage.id), cost, func.coalesce(func.sum(AIUsage.input_tokens), 0),
+                                       func.coalesce(func.sum(AIUsage.output_tokens), 0),
+                                       func.coalesce(func.sum(AIUsage.cache_read_tokens), 0)).where(this_month)).one()
+    top = db.session.execute(select(User, func.count(AIUsage.id), cost).join(AIUsage, AIUsage.user_id == User.id)
+                             .where(this_month).group_by(User.id).order_by(cost.desc()).limit(15)).all()
+    saved = db.session.execute(select(SharedGeneration.kind, func.count(SharedGeneration.id),
+                                      func.coalesce(func.sum(SharedGeneration.uses), 0),
+                                      func.coalesce(func.sum(SharedGeneration.uses * SharedGeneration.cost_usd), 0))
+                               .group_by(SharedGeneration.kind)).all()
+    return render_template("admin/ai.html", since=since, totals=totals, kinds=by(AIUsage.kind), models=by(AIUsage.model),
+                           top=top, saved=saved, plans=billing.PLANS)
 
 
 @bp.route("/users")
@@ -102,7 +124,7 @@ def user_detail(user_id: int):
     activity = db.session.scalars(select(ActivityLog).where(ActivityLog.user_id == user.id)
                                   .order_by(ActivityLog.created_at.desc()).limit(50)).all()
     return render_template("admin/user.html", user=user, activity=activity, plans=billing.PLANS,
-                           balance=coins.balance(user.id), ai_used=ai.used_this_month(user.id),
+                           balance=coins.balance(user.id), ai_used=ai.used(user), plan=billing.plan_for(user),
                            courses=db.session.scalar(select(func.count(Course.id)).where(Course.user_id == user.id)))
 
 

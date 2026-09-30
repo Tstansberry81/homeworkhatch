@@ -1,28 +1,38 @@
-"""Plans and Stripe subscriptions.
+"""Plans and Stripe payments.
 
-Plans mirror the original pricing (Normal $10 / Premium $20 / Pro $25) plus a free tier.
-They differ in monthly AI actions. Without Stripe keys, billing is simply switched off.
+Everything that doesn't call Claude is free for everyone. AI actions (tutor answers, summaries,
+generated study sets) are what cost money, so the free plan gets a small one-time trial and the
+paid plans get a monthly allowance: a one-time Semester Pass or a monthly Plus subscription.
+Study sets someone already generated from the same files are reused at no cost and never count.
+Without Stripe keys, billing is simply switched off.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from flask import current_app
 from sqlalchemy import select
 
 from ..extensions import db
-from ..models import User
+from ..models import User, utcnow
 
 
 @dataclass(frozen=True)
 class Plan:
     key: str
     name: str
-    price: int  # USD per month
-    ai_monthly: int
+    price: int              # USD, per `period`
+    period: str             # "month" (subscription), "once" (one-time pass) or "" (free)
+    ai_actions: int         # per month, or once ever for the free trial
     blurb: str
     price_config: str | None = None
+    days: int = 0           # how long a one-time pass lasts
+
+    @property
+    def monthly(self) -> bool:
+        return self.key != "free"
 
     @property
     def stripe_price(self) -> str:
@@ -30,22 +40,31 @@ class Plan:
 
 
 PLANS: dict[str, Plan] = {
-    "free": Plan("free", "Free", 0, 25, "Canvas sync, calendar, flashcards, chat and games, plus 25 AI actions a month."),
-    "normal": Plan("normal", "Normal", 10, 200, "200 AI actions a month for tutoring, summaries and generated study sets.",
-                   "STRIPE_PRICE_NORMAL"),
-    "premium": Plan("premium", "Premium", 20, 600, "600 AI actions a month for heavy study weeks.", "STRIPE_PRICE_PREMIUM"),
-    "pro": Plan("pro", "Pro", 25, 2000, "2,000 AI actions a month. Effectively unlimited for one student.",
-                "STRIPE_PRICE_PRO"),
+    "free": Plan("free", "Free", 0, "", 5, "Canvas sync, calendar, Google Calendar, files, your own flashcards and "
+                 "quizzes, and study sets a classmate already made from the same files. Plus 5 AI actions to try it."),
+    "pass": Plan("pass", "Semester Pass", 20, "once", 150, "150 AI actions a month for 120 days. One payment, "
+                 "nothing renews.", "STRIPE_PRICE_PASS", days=120),
+    "plus": Plan("plus", "Plus", 6, "month", 150, "150 AI actions a month. Cancel any time.", "STRIPE_PRICE_PLUS"),
 }
+LEGACY = {"normal": "plus", "premium": "plus", "pro": "plus"}  # plans from before Oct 2026
 
 ACTIVE_STATUSES = {"active", "trialing", "past_due"}
 
 
+def pass_active(user: User) -> bool:
+    return bool(user.plan_expires_at) and user.plan_expires_at > utcnow()
+
+
 def plan_for(user: User) -> Plan:
-    plan = PLANS.get(user.plan or "free", PLANS["free"])
-    if plan.key != "free" and not user.plan_comped and user.plan_status not in ACTIVE_STATUSES:
-        return PLANS["free"]
-    return plan
+    key = user.plan or "free"
+    plan = PLANS.get(LEGACY.get(key, key), PLANS["free"])
+    if plan.key == "free" or user.plan_comped:
+        return plan
+    if plan.key == "pass":
+        return plan if pass_active(user) else PLANS["free"]
+    if user.plan_status in ACTIVE_STATUSES:
+        return plan
+    return PLANS["pass"] if pass_active(user) else PLANS["free"]
 
 
 def enabled() -> bool:
@@ -64,10 +83,15 @@ def checkout_url(user: User, plan_key: str, success_url: str, cancel_url: str) -
     if not plan.stripe_price:
         raise ValueError(f"No Stripe price configured for {plan.name}")
     stripe = _stripe()
-    params = dict(mode="subscription", line_items=[{"price": plan.stripe_price, "quantity": 1}],
-                  client_reference_id=str(user.id), success_url=success_url, cancel_url=cancel_url,
-                  metadata={"user_id": str(user.id), "plan": plan_key},
-                  subscription_data={"metadata": {"user_id": str(user.id), "plan": plan_key}})
+    meta = {"user_id": str(user.id), "plan": plan_key}
+    params = dict(line_items=[{"price": plan.stripe_price, "quantity": 1}], client_reference_id=str(user.id),
+                  success_url=success_url, cancel_url=cancel_url, metadata=meta)
+    if plan.period == "once":
+        params.update(mode="payment", payment_intent_data={"metadata": meta})
+        if not user.stripe_customer_id:
+            params["customer_creation"] = "always"  # so receipts show up in the billing portal
+    else:
+        params.update(mode="subscription", subscription_data={"metadata": meta})
     if user.stripe_customer_id:
         params["customer"] = user.stripe_customer_id
     else:
@@ -87,18 +111,37 @@ def _plan_from_price(price_id: str | None) -> str | None:
     return None
 
 
+def _grant_pass(user: User, session_id: str) -> str:
+    if session_id and user.plan_payment_id == session_id:
+        return f"pass payment {session_id} already applied"  # Stripe retries deliver events more than once
+    start = user.plan_expires_at if pass_active(user) else utcnow()
+    user.plan_expires_at = start + timedelta(days=PLANS["pass"].days)
+    user.plan_payment_id = session_id
+    if plan_for(user).key == "free":  # a live Plus subscription keeps its plan; the pass waits behind it
+        user.plan, user.plan_status = "pass", "paid"
+    return f"user {user.id} pass until {user.plan_expires_at:%Y-%m-%d}"
+
+
 def handle_event(event: dict) -> str:
     """Apply a verified Stripe webhook event. Returns a short description for logs."""
     kind = event.get("type", "")
     obj = (event.get("data") or {}).get("object") or {}
-    if kind == "checkout.session.completed":
+    if kind in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
         ref = str(obj.get("client_reference_id") or "")
         user = db.session.get(User, int(ref)) if ref.isdigit() else None
         if user is None:
             return "checkout for unknown user"
         user.stripe_customer_id = obj.get("customer") or user.stripe_customer_id
-        user.stripe_subscription_id = obj.get("subscription") or user.stripe_subscription_id
         plan = (obj.get("metadata") or {}).get("plan")
+        if obj.get("mode") == "payment" or plan == "pass":
+            if obj.get("payment_status") not in {"paid", "no_payment_required"}:
+                db.session.commit()
+                return f"pass checkout for user {user.id} not paid yet"
+            outcome = _grant_pass(user, obj.get("id") or "")
+            db.session.commit()
+            return outcome
+        user.stripe_subscription_id = obj.get("subscription") or user.stripe_subscription_id
+        plan = LEGACY.get(plan, plan)
         if plan in PLANS:
             user.plan = plan
             user.plan_status = "active"
@@ -120,12 +163,13 @@ def handle_event(event: dict) -> str:
         items = ((obj.get("items") or {}).get("data") or [])
         price_id = ((items[0].get("price") or {}).get("id")) if items else None
         plan = _plan_from_price(price_id) or (obj.get("metadata") or {}).get("plan")
+        plan = LEGACY.get(plan, plan)
         user.stripe_subscription_id = obj.get("id")
         user.plan_status = status
         if status in ACTIVE_STATUSES and plan in PLANS:
             user.plan = plan
         elif status not in ACTIVE_STATUSES and not user.plan_comped:
-            user.plan = "free"
+            user.plan = "pass" if pass_active(user) else "free"
         db.session.commit()
         return f"user {user.id} subscription {status}"
     return f"ignored {kind}"

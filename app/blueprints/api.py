@@ -97,7 +97,8 @@ def post_snapshot():
         current_app.logger.warning("could not presign uploads: %s", exc)
         targets = {}
     textjobs.kick()  # resumes reading any files left pending by a restart
-    if integrations.available() and gcal.enabled(g.api_user):
+    unchanged = (run.stats or {}).get("unchanged")
+    if integrations.available() and gcal.enabled(g.api_user) and (not unchanged or gcal.due_for_refresh(g.api_user)):
         gcal.kick(g.api_user.id)  # new or changed due dates go to Google Calendar
     return jsonify({"snapshot_id": run.id, "files_needed": needed, "upload_urls": targets})
 

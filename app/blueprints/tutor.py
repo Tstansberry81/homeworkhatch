@@ -181,7 +181,8 @@ def message(conversation_id: int):
         conv.title = text[:80] + ("…" if len(text) > 80 else "")
     conv.updated_at = utcnow()
     db.session.commit()
-    handle = provider.stream(system=system, messages=messages, max_tokens=12000, effort="medium")
+    handle = provider.stream(system=system, messages=messages, max_tokens=12000, effort="medium",
+                             model=ai.model_for("tutor"))
     # By the time the answer streams, this request's database session has been closed, so the
     # generator works from ids and loads what it needs itself.
     conv_id, usage_id, user_id = conv.id, usage.id, current_user.id

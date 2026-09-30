@@ -3,27 +3,30 @@
 {% block content %}
 {% include "_account_tabs.html" %}
 <div class="page-head">
-  <div><h1>Plans</h1><p class="muted">Every plan includes Canvas sync, the calendar, flashcards, quizzes, class chat and games. Plans differ in monthly AI actions (tutor answers, summaries, generated study sets).</p></div>
-  <div class="card-flat small">This month: <strong>{{ used }}</strong> AI actions used{% if remaining is not none %}, <strong>{{ remaining }}</strong> left{% else %} (unlimited){% endif %}</div>
+  <div><h1>Plans</h1><p class="muted">Canvas sync, the calendar, Google Calendar, your files, flashcards and quizzes you write, and study sets a classmate already made from the same files are free for everyone. Plans only add AI actions: tutor answers, summaries and new generated sets.</p></div>
+  <div class="card-flat small">{% if remaining is none %}AI actions: unlimited{% else %}<strong>{{ remaining }}</strong> AI action{{ 's' if remaining != 1 }} left{% if current.monthly %} this month ({{ used }} used){% else %} of your free {{ current.ai_actions }}{% endif %}{% endif %}
+    {% if current.key == 'pass' and current_user.plan_expires_at and not current_user.plan_comped %}<br>Pass runs until <strong>{{ current_user.plan_expires_at|dt('date') }}</strong>{% endif %}</div>
 </div>
-{% if not enabled %}<div class="flash">Payments aren't set up on this server, so everyone's on the free plan.</div>{% endif %}
-<div class="grid grid-4">
+{% if not enabled %}<div class="flash">Payments aren't set up on this server yet.</div>{% endif %}
+<div class="grid grid-3">
   {% for p in plans %}
   <div class="card" style="{{ 'border-color:var(--accent);border-width:2px' if p.key == current.key }}">
     <h2>{{ p.name }}</h2>
-    <div class="stat"><div class="value">${{ p.price }}<span class="small muted">/mo</span></div></div>
-    <p class="small"><strong>{{ '{:,}'.format(p.ai_monthly) }}</strong> AI actions a month</p>
+    <div class="stat"><div class="value">${{ p.price }}<span class="small muted">{{ '/mo' if p.period == 'month' else ' once' if p.period == 'once' else '' }}</span></div></div>
+    <p class="small"><strong>{{ p.ai_actions }}</strong> AI actions {{ 'a month' if p.monthly else 'to try it' }}</p>
     <p class="small muted">{{ p.blurb }}</p>
     {% if p.key == current.key %}<span class="badge accent">Your plan</span>
-    {% elif p.key != 'free' and enabled and p.stripe_price and current_user.stripe_subscription_id and current.key != 'free' %}
-      <a class="btn btn-ghost btn-block" href="{{ url_for('billing.portal') }}">Switch in billing portal</a>
     {% elif p.key != 'free' and enabled and p.stripe_price %}
-      <form method="post" action="{{ url_for('billing.checkout', plan=p.key) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-block">Choose {{ p.name }}</button></form>
+      {% if p.period == 'month' and subscribed %}
+      <a class="btn btn-ghost btn-block" href="{{ url_for('billing.portal') }}">Manage in billing portal</a>
+      {% else %}
+      <form method="post" action="{{ url_for('billing.checkout', plan=p.key) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-block">{{ 'Add 120 more days' if p.key == 'pass' and current.key == 'pass' else 'Get ' ~ p.name }}</button></form>
+      {% endif %}
     {% endif %}
   </div>
   {% endfor %}
 </div>
 {% if enabled and current_user.stripe_customer_id %}
-<p class="mt"><a class="btn btn-ghost" href="{{ url_for('billing.portal') }}">Manage billing, invoices, or cancel</a></p>
+<p class="mt"><a class="btn btn-ghost" href="{{ url_for('billing.portal') }}">Receipts, payment method, or cancel Plus</a></p>
 {% endif %}
 {% endblock %}

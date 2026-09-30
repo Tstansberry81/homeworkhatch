@@ -16,7 +16,7 @@
   </aside>
   <section>
     <div class="page-head">
-      <div><h1 style="font-size:1.25rem">{{ conv.title }}</h1><p class="small muted">{{ 'About ' ~ conv.course.name if conv.course else 'Across all your classes' }}{% if remaining is not none %} · <span id="remaining">{{ remaining }}</span> AI actions left this month{% endif %}</p></div>
+      <div><h1 style="font-size:1.25rem">{{ conv.title }}</h1><p class="small muted">{{ 'About ' ~ conv.course.name if conv.course else 'Across all your classes' }}{% if remaining is not none %} · <span id="remaining">{{ remaining }}</span> AI actions left{% endif %}</p></div>
       <form method="post" action="{{ url_for('tutor.delete', conversation_id=conv.id) }}" data-confirm="Delete this conversation?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost btn-sm">Delete</button></form>
     </div>
     <div class="card chat">

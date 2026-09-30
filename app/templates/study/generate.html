@@ -4,7 +4,7 @@
 {% block content %}
 {% include "_study_tabs.html" %}
 <div class="page-head"><div><h1>Make a study set</h1><p class="muted">Pick files and pages from a class (or your own uploads) and get flashcards or a practice quiz built from exactly those.</p></div>
-  {% if remaining is not none %}<span class="badge accent">{{ remaining }} AI actions left this month</span>{% endif %}</div>
+  {% if remaining is not none %}<span class="badge accent">{{ remaining }} AI actions left</span>{% endif %}</div>
 {% if not ai_available %}<div class="flash warning">AI isn't enabled on this server yet.</div>{% endif %}
 <form method="post" class="card" id="gen">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -36,6 +36,8 @@
   </div>
   <label for="count">How many</label>
   <input id="count" name="count" type="number" min="3" max="50" value="{{ 10 if preset.output == 'quiz' else 15 }}" style="width:110px">
+  <label class="check mt"><input type="checkbox" name="fresh" value="1"> Make a new version</label>
+  <p class="help">If a classmate (or you) already made this exact set from the same files, you get it free, with no AI action used. Tick this for a different take instead.</p>
   <button class="btn btn-block mt" type="submit" id="go" {{ 'disabled' if not ai_available }}>Generate</button>
   <p class="help center" id="busy" hidden>Working on it… this usually takes 10–40 seconds (longer for many files).</p>
 </form>

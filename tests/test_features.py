@@ -1,8 +1,10 @@
-from sqlalchemy import select
+from datetime import timedelta
+
+from sqlalchemy import func, select
 
 from app.extensions import db
 from app.models import (AIUsage, Card, CanvasFile, ChatMessage, Course, Deck, LiveSession, Page, PracticeQuiz,
-                        TutorMessage, User)
+                        SharedGeneration, TutorMessage, User, utcnow)
 from app.services import ai, coins
 
 from .conftest import api_token, login, make_user, sync
@@ -67,12 +69,56 @@ def test_generate_reports_unusable_sources(synced_user, client):
     assert r.status_code == 400 and b"readable text" in r.data
 
 
-def test_ai_quota_is_enforced(synced_user, client):
-    for _ in range(25):  # free plan allowance
-        db.session.add(AIUsage(user_id=synced_user.id, kind="x"))
+def test_free_trial_runs_out_but_shared_sets_stay_free(app, synced_user, client, fake_ai):
+    from app.services import ai
+
+    notes = {"output": "deck", "mode": "paste", "pasted": "Notes about the chain rule " * 5}
+    for _ in range(5):  # the whole free trial, used last month: it doesn't reset
+        db.session.add(AIUsage(user_id=synced_user.id, kind="x", created_at=utcnow() - timedelta(days=40)))
     db.session.commit()
-    r = client.post("/study/generate", data={"output": "deck", "mode": "paste", "pasted": "Notes about the chain rule " * 5})
-    assert r.status_code == 400 and b"used all 25 AI actions" in r.data
+    assert ai.remaining(synced_user) == 0
+    r = client.post("/study/generate", data=notes)
+    assert r.status_code == 400 and b"used your 5 free AI actions" in r.data and not fake_ai.calls
+
+    classmate = make_user("kim", plan="plus", plan_status="active")
+    kim = app.test_client()
+    login(kim, classmate)
+    r = kim.post("/study/generate", data=notes)
+    assert r.status_code == 302 and len(fake_ai.calls) == 1
+    assert ai.remaining(classmate) == 149
+
+    # The same request from the same material is served from the saved result: no call, no action used.
+    r = client.post("/study/generate", data=notes, follow_redirects=True)
+    assert r.status_code == 200 and b"no AI action used" in r.data and len(fake_ai.calls) == 1
+    decks = db.session.scalars(select(Deck).order_by(Deck.id)).all()
+    assert [d.user_id for d in decks] == [classmate.id, synced_user.id], "each student gets their own editable copy"
+    assert [c.front for c in decks[0].cards] == [c.front for c in decks[1].cards]
+    shared = db.session.scalar(select(SharedGeneration))
+    assert shared.kind == "flashcards" and shared.uses == 1
+
+    # Asking for a new version really generates (and costs the classmate an action).
+    kim.post("/study/generate", data={**notes, "fresh": "1"})
+    assert len(fake_ai.calls) == 2 and ai.remaining(classmate) == 148
+    assert db.session.scalar(select(func.count(SharedGeneration.id))) == 1, "the first saved version stays"
+
+    # Different material never matches.
+    kim.post("/study/generate", data={**notes, "pasted": "Notes about the product rule " * 5})
+    assert len(fake_ai.calls) == 3
+
+
+def test_shared_summaries_and_scanned_pdf_readings(app, synced_user, fake_ai):
+    from app.services import study
+
+    material = study.Material("Lecture 1", "Limits describe what a function approaches. " * 20, False, None)
+    first = study.summarize(synced_user, material)
+    assert study.summarize(synced_user, material) == first and len(fake_ai.calls) == 1
+    study.summarize(synced_user, material, fresh=True)
+    assert len(fake_ai.calls) == 2
+    pdf = b"%PDF-1.4 scanned handout"
+    text = study.transcribe_pdf(synced_user, pdf, "handout.pdf")
+    other = make_user("kim")
+    assert study.transcribe_pdf(other, pdf, "renamed.pdf") == text and len(fake_ai.calls) == 3
+    assert db.session.scalar(select(func.count(AIUsage.id)).where(AIUsage.user_id == other.id)) == 0
 
 
 def test_summary_is_rendered_safely(synced_user, client):

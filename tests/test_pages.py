@@ -4,12 +4,13 @@ import io
 import json
 import time
 import zipfile
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
 
 from app.extensions import db
-from app.models import (Assignment, CanvasFile, CoinTransaction, Course, Deck, Page, PracticeQuiz, User)
+from app.models import (Assignment, CanvasFile, CoinTransaction, Course, Deck, Page, PracticeQuiz, User, utcnow)
 from app.services import coins
 
 from .conftest import login, make_user
@@ -165,16 +166,21 @@ def _signed(payload: dict, secret: str) -> tuple[bytes, str]:
     return body, f"t={ts},v1={sig}"
 
 
+def _webhook(client, event_id: str, kind: str, obj: dict):
+    body, sig = _signed({"id": event_id, "object": "event", "type": kind, "data": {"object": obj}}, "whsec_test")
+    return client.post("/billing/webhook", data=body, headers={"Stripe-Signature": sig, "Content-Type": "application/json"})
+
+
 def test_stripe_webhook_updates_plan(app, client):
-    app.config.update(STRIPE_WEBHOOK_SECRET="whsec_test", STRIPE_SECRET_KEY="sk_test_x", STRIPE_PRICE_PREMIUM="price_prem")
+    app.config.update(STRIPE_WEBHOOK_SECRET="whsec_test", STRIPE_SECRET_KEY="sk_test_x", STRIPE_PRICE_PLUS="price_plus")
     user = make_user()
     body, sig = _signed({"id": "evt_1", "object": "event", "type": "checkout.session.completed",
                          "data": {"object": {"client_reference_id": str(user.id), "customer": "cus_1", "subscription": "sub_1",
-                                             "metadata": {"plan": "premium"}}}}, "whsec_test")
+                                             "mode": "subscription", "metadata": {"plan": "plus"}}}}, "whsec_test")
     r = client.post("/billing/webhook", data=body, headers={"Stripe-Signature": sig, "Content-Type": "application/json"})
     assert r.status_code == 200
     db.session.refresh(user)
-    assert user.plan == "premium" and user.stripe_customer_id == "cus_1"
+    assert user.plan == "plus" and user.stripe_customer_id == "cus_1"
 
     body, sig = _signed({"id": "evt_2", "object": "event", "type": "customer.subscription.deleted",
                          "data": {"object": {"id": "sub_1", "customer": "cus_1", "status": "canceled", "items": {"data": []}}}},
@@ -191,13 +197,66 @@ def test_plan_quota_limits(app):
     from app.services import ai, billing
 
     user = make_user()
-    assert billing.plan_for(user).key == "free" and ai.remaining(user) == 25
-    user.plan, user.plan_status = "pro", "active"
-    assert ai.remaining(user) == 2000
+    assert billing.plan_for(user).key == "free" and ai.remaining(user) == 5, "a one-time free trial"
+    user.plan, user.plan_status = "plus", "active"
+    assert ai.remaining(user) == 150
     user.plan_status = "canceled"
     assert billing.plan_for(user).key == "free", "a lapsed subscription falls back to free"
     user.plan_comped = True
-    assert billing.plan_for(user).key == "pro", "admin-comped plans don't need Stripe"
+    assert billing.plan_for(user).key == "plus", "admin-comped plans don't need Stripe"
+    user.plan, user.plan_comped, user.plan_status = "premium", False, "active"
+    assert billing.plan_for(user).key == "plus", "old plans map onto Plus"
+    user.plan, user.plan_expires_at = "pass", utcnow() + timedelta(days=3)
+    assert billing.plan_for(user).key == "pass" and ai.remaining(user) == 150
+    user.plan_expires_at = utcnow() - timedelta(minutes=1)
+    assert billing.plan_for(user).key == "free", "an expired pass is the free plan"
+
+
+def test_semester_pass_is_a_one_time_payment(app, client, monkeypatch):
+    from app.services import billing
+
+    app.config.update(STRIPE_WEBHOOK_SECRET="whsec_test", STRIPE_SECRET_KEY="sk_test_x", STRIPE_PRICE_PASS="price_pass",
+                      STRIPE_PRICE_PLUS="price_plus")
+    user = make_user()
+    sessions = []
+
+    class FakeStripe:
+        class checkout:
+            class Session:
+                @staticmethod
+                def create(**params):
+                    sessions.append(params)
+                    return type("S", (), {"url": "https://checkout.stripe.test/pay"})
+
+    monkeypatch.setattr(billing, "_stripe", lambda: FakeStripe)
+    login(client, user)
+    assert b"Semester Pass" in client.get("/billing/").data
+    r = client.post("/billing/checkout/pass")
+    assert r.status_code == 303 and sessions[-1]["mode"] == "payment" and "subscription_data" not in sessions[-1]
+    assert sessions[-1]["line_items"] == [{"price": "price_pass", "quantity": 1}]
+
+    paid = {"id": "cs_1", "client_reference_id": str(user.id), "customer": "cus_9", "mode": "payment",
+            "payment_status": "paid", "metadata": {"plan": "pass"}}
+    _webhook(client, "evt_p1", "checkout.session.completed", {**paid, "payment_status": "unpaid"})
+    db.session.refresh(user)
+    assert billing.plan_for(user).key == "free", "not until the money arrives"
+    _webhook(client, "evt_p2", "checkout.session.async_payment_succeeded", paid)
+    _webhook(client, "evt_p2", "checkout.session.async_payment_succeeded", paid)  # Stripe retry
+    db.session.refresh(user)
+    assert billing.plan_for(user).key == "pass" and user.stripe_customer_id == "cus_9"
+    days = (user.plan_expires_at - utcnow()).days
+    assert 118 <= days <= 120, "a retried event doesn't add a second 120 days"
+    _webhook(client, "evt_p3", "checkout.session.completed", {**paid, "id": "cs_2"})
+    db.session.refresh(user)
+    assert 238 <= (user.plan_expires_at - utcnow()).days <= 240, "buying again extends the pass"
+
+    # A Plus subscription ending doesn't take away a pass that's still running.
+    user.plan, user.plan_status, user.stripe_subscription_id = "plus", "active", "sub_1"
+    db.session.commit()
+    _webhook(client, "evt_p4", "customer.subscription.deleted",
+             {"id": "sub_1", "customer": "cus_9", "status": "canceled", "items": {"data": []}})
+    db.session.refresh(user)
+    assert user.plan == "pass" and billing.plan_for(user).key == "pass"
 
 
 # ---------------------------------------------------------------- admin
@@ -210,14 +269,14 @@ def test_admin_area(app, client):
     login(c, student)
     assert c.get("/admin/").status_code == 403
     login(client, admin)
-    for path in ("/admin/", "/admin/users", "/admin/users?q=kid", f"/admin/users/{student.id}", "/admin/reports"):
+    for path in ("/admin/", "/admin/ai", "/admin/users", "/admin/users?q=kid", f"/admin/users/{student.id}", "/admin/reports"):
         assert client.get(path).status_code == 200, path
     before = coins.balance(student.id)  # includes today's +1 check-in
     client.post(f"/admin/users/{student.id}", data={"action": "coins", "amount": "50", "reason": "contest"})
     assert coins.balance(student.id) == before + 50
-    client.post(f"/admin/users/{student.id}", data={"action": "plan", "plan": "pro"})
+    client.post(f"/admin/users/{student.id}", data={"action": "plan", "plan": "plus"})
     db.session.refresh(student)
-    assert student.plan == "pro" and student.plan_comped
+    assert student.plan == "plus" and student.plan_comped
     client.post(f"/admin/users/{student.id}", data={"action": "toggle_active"})
     db.session.refresh(student)
     assert student.active is False
@@ -279,19 +338,22 @@ def test_supabase_lockdown_enables_rls_and_revokes_api_roles(app):
 
 
 def test_stripe_ignores_other_subscriptions_and_blocks_double_checkout(app, client):
-    app.config.update(STRIPE_WEBHOOK_SECRET="whsec_test", STRIPE_SECRET_KEY="sk_test_x", STRIPE_PRICE_PRO="price_pro")
+    app.config.update(STRIPE_WEBHOOK_SECRET="whsec_test", STRIPE_SECRET_KEY="sk_test_x", STRIPE_PRICE_PLUS="price_plus",
+                      STRIPE_PRICE_PASS="price_pass")
     user = make_user()
-    user.plan, user.plan_status, user.stripe_customer_id, user.stripe_subscription_id = "pro", "active", "cus_1", "sub_live"
+    user.plan, user.plan_status, user.stripe_customer_id, user.stripe_subscription_id = "plus", "active", "cus_1", "sub_live"
     db.session.commit()
     body, sig = _signed({"id": "evt_3", "object": "event", "type": "customer.subscription.deleted",
                          "data": {"object": {"id": "sub_old", "customer": "cus_1", "status": "canceled",
                                              "items": {"data": []}}}}, "whsec_test")
     client.post("/billing/webhook", data=body, headers={"Stripe-Signature": sig, "Content-Type": "application/json"})
     db.session.refresh(user)
-    assert user.plan == "pro", "an old subscription's cancellation doesn't downgrade the paying user"
+    assert user.plan == "plus", "an old subscription's cancellation doesn't downgrade the paying user"
     login(client, user)
-    r = client.post("/billing/checkout/pro")
+    r = client.post("/billing/checkout/plus")
     assert r.status_code == 302 and r.headers["Location"].endswith("/billing/portal"), "no second subscription"
+    r = client.post("/billing/checkout/pass")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/billing/"), "no pass on top of Plus"
 
 
 def test_login_lockout_and_password_change_ends_sessions(app):

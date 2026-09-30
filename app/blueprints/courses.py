@@ -161,14 +161,14 @@ def summarize(kind: str, ident: int):
     if kind not in {"file", "page"}:
         abort(404)
     back = url_for("courses.file_detail", file_id=ident) if kind == "file" else url_for("courses.page", page_id=ident)
+    existing = db.session.scalar(select(Summary).where(Summary.user_id == current_user.id,
+                                                       Summary.source_type == kind, Summary.source_id == ident))
     try:
         material = study.gather_material(current_user, kind, ident)
-        text = study.summarize(current_user, material)
+        text = study.summarize(current_user, material, fresh=existing is not None)  # asking again = a new take
     except (study.MaterialError, ai.AIError) as exc:
         flash(str(exc), "error")
         return redirect(back)
-    existing = db.session.scalar(select(Summary).where(Summary.user_id == current_user.id,
-                                                       Summary.source_type == kind, Summary.source_id == ident))
     if existing:
         existing.content = text
     else:

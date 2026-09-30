@@ -48,6 +48,8 @@ class User(UserMixin, db.Model):
     plan: Mapped[str] = mapped_column(String(20), default="free")
     plan_status: Mapped[str | None] = mapped_column(String(40))
     plan_comped: Mapped[bool] = mapped_column(Boolean, default=False)
+    plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime)  # one-time passes; subscriptions leave it empty
+    plan_payment_id: Mapped[str | None] = mapped_column(String(120))  # last pass checkout applied (webhook retries)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(120), index=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(120))
 
@@ -120,6 +122,9 @@ class CanvasAccount(db.Model):
     canvas_name: Mapped[str | None] = mapped_column(String(200))
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_snapshot_id: Mapped[str | None] = mapped_column(String(80))
+    # Fingerprint of the last snapshot (minus its timestamp): an identical hourly sync skips
+    # re-reading and re-writing every class (see ingest.snapshot_digest).
+    last_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
     restricted: Mapped[list | None] = mapped_column(JSON)
 
     __table_args__ = (UniqueConstraint("user_id", "host", "canvas_user_id"),)
@@ -540,7 +545,27 @@ class AIUsage(db.Model):
     model: Mapped[str | None] = mapped_column(String(60))
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cost_usd: Mapped[float | None] = mapped_column(Float)  # at list price when the call finished
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class SharedGeneration(db.Model):
+    """One AI result reused by everyone who asks for the same thing from the same material, e.g. a
+    class's flashcards from the same lecture slides. The key hashes the exact request (instructions
+    plus the full source text), so a hit needs identical material the student already has; nothing
+    personal crosses between accounts. Reuses cost no AI call and no AI action."""
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    data: Mapped[dict] = mapped_column(JSON)
+    model: Mapped[str | None] = mapped_column(String(60))
+    cost_usd: Mapped[float | None] = mapped_column(Float)  # what the one real generation cost
+    uses: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # times served without a call
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 # ---------------------------------------------------------------- class chat

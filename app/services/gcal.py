@@ -32,6 +32,12 @@ def enabled(user: User) -> bool:
     return bool(row and row.connected and (row.settings or {}).get("enabled"))
 
 
+def due_for_refresh(user: User, hours: int = 12) -> bool:
+    """Even when Canvas hasn't changed, assignments move into the 60-day window over time."""
+    row = integrations.get(user, "calendar")
+    return row is None or row.last_sync_at is None or utcnow() - row.last_sync_at > timedelta(hours=hours)
+
+
 def _tz(user: User) -> ZoneInfo:
     try:
         return ZoneInfo(user.timezone or "UTC")

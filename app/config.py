@@ -140,14 +140,16 @@ def load_config(env_name: str) -> dict:
 
         # AI. The Anthropic SDK reads ANTHROPIC_API_KEY itself; AI features are hidden without it.
         "AI_MODEL": os.environ.get("AI_MODEL", "claude-opus-5-5"),
+        # Per-feature models; each falls back to AI_MODEL. Kinds: tutor, flashcards, quiz,
+        # summary, transcribe. AI_MODELS="tutor=claude-haiku-4-5,flashcards=claude-sonnet-5-5".
+        "AI_MODELS": env_pairs("AI_MODELS"),
         "AI_ENABLED": env_bool("AI_ENABLED", True),
 
         # Billing (optional). Without STRIPE_SECRET_KEY every account stays on the free plan.
         "STRIPE_SECRET_KEY": os.environ.get("STRIPE_SECRET_KEY", ""),
         "STRIPE_WEBHOOK_SECRET": os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
-        "STRIPE_PRICE_NORMAL": os.environ.get("STRIPE_PRICE_NORMAL", ""),
-        "STRIPE_PRICE_PREMIUM": os.environ.get("STRIPE_PRICE_PREMIUM", ""),
-        "STRIPE_PRICE_PRO": os.environ.get("STRIPE_PRICE_PRO", ""),
+        "STRIPE_PRICE_PASS": os.environ.get("STRIPE_PRICE_PASS", ""),  # one-time price, $20
+        "STRIPE_PRICE_PLUS": os.environ.get("STRIPE_PRICE_PLUS", ""),  # recurring monthly price, $6
 
 
         # Chrome extension ids the Connect Canvas page links automatically: the Web Store id

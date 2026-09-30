@@ -55,6 +55,14 @@ def version_key(updated_at) -> str:
     return hashlib.sha1(str(updated_at).encode()).hexdigest()[:16]
 
 
+def snapshot_digest(snapshot: dict, manifest: list) -> str:
+    """What the sync says, minus when it was taken. Equal digests mean nothing changed in Canvas
+    (assignment statuses are part of the snapshot, so a due time passing counts as a change)."""
+    body = {k: v for k, v in snapshot.items() if k != "synced_at"}
+    raw = json.dumps({"snapshot": body, "files": manifest}, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def content_fingerprint(name, content_type, size) -> str | None:
     """A file's identity before we download it: name, type and size. Name and type alone
     aren't enough; courses reuse names like "solution.py" for different files."""
@@ -219,6 +227,9 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     account.canvas_name = _clip(canvas_user.get("name"), 200)
     account.last_sync_at = parse_ts(snapshot.get("synced_at")) or utcnow()
     account.restricted = snapshot.get("restricted") or []
+    digest = snapshot_digest(snapshot, manifest or [])
+    if digest == account.last_snapshot_hash and account.last_snapshot_id:
+        return _unchanged_run(user, account, snapshot, manifest or [])
 
     # Endpoints the extension reported as failed: e.g. {"endpoint": "assignments:123"}.
     failed = set()
@@ -382,6 +393,7 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
                          "errors": len(snapshot.get("errors") or []), "restricted": len(snapshot.get("restricted") or [])})
     db.session.add(run)
     account.last_snapshot_id = run.id
+    account.last_snapshot_hash = digest
     log_activity(user.id, "sync", f"{len(courses_by_canvas_id)} courses from {host}, {len(needed)} files needed")
 
     # Keep the latest raw snapshot for debugging and re-processing.
@@ -391,6 +403,38 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     except Exception as exc:  # storage trouble must not lose the sync itself
         current_app.logger.warning("could not store raw snapshot: %s", exc)
 
+    db.session.commit()
+    return run, needed
+
+
+def _unchanged_run(user: User, account: CanvasAccount, snapshot: dict, manifest: list) -> tuple[SyncRun, list[str]]:
+    """Canvas hasn't changed since the last sync: record the sync and say which files are still
+    missing (a failed upload is retried), without touching the classes. Same no-duplicates rules
+    as a full sync: a copy of a stored file is linked to it, and one file is requested once."""
+    announced = {str(m.get("id")) for m in manifest if m.get("id") is not None}
+    rows = [r for r in db.session.scalars(select(CanvasFile).where(CanvasFile.account_id == account.id)
+                                          .order_by(CanvasFile.id)) if r.canvas_id in announced]
+    held = {r.stored_fingerprint: r for r in rows if r.storage_key and r.stored_fingerprint}
+    needed, requested = [], set()
+    for row in rows:
+        if row.wanted_version is None or (row.stored_version == row.wanted_version
+                                          and row.stored_fingerprint == row.wanted_fingerprint):
+            continue
+        fp = row.wanted_fingerprint
+        if fp and fp in held:
+            share_stored(row, held[fp])
+            continue
+        if fp in requested:
+            continue
+        if fp:
+            requested.add(fp)
+        needed.append(row.canvas_id)
+    run = SyncRun(id=f"{utcnow():%Y%m%dT%H%M%S}-{secrets.token_hex(4)}", user_id=user.id, account_id=account.id,
+                  synced_at=parse_ts(snapshot.get("synced_at")), files_needed=len(needed),
+                  stats={"courses": len(snapshot.get("courses") or []), "coins": 0, "unchanged": True,
+                         "errors": len(snapshot.get("errors") or []), "restricted": len(snapshot.get("restricted") or [])})
+    db.session.add(run)
+    account.last_snapshot_id = run.id
     db.session.commit()
     return run, needed
 

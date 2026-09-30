@@ -90,6 +90,7 @@ def generate():
     mode = f.get("mode", "sources")
     output = f.get("output", "deck")
     preset = {"course_id": f.get("picker_course", type=int), "refs": f.getlist("refs"), "output": output, "mode": mode}
+    fresh = bool(f.get("fresh"))
     try:
         count = int(f.get("count") or (15 if output == "deck" else 10))
         if mode == "course":
@@ -99,14 +100,14 @@ def generate():
         else:
             material = study.gather_sources(current_user, f.getlist("refs"))
         if output == "quiz":
-            data = study.generate_quiz(current_user, material, count)
+            data = study.generate_quiz(current_user, material, count, fresh=fresh)
             quiz = PracticeQuiz(user_id=current_user.id, course_id=material.course_id, source="ai",
                                 title=data["title"] or f"Quiz: {material.title}"[:200], questions=data["questions"])
             db.session.add(quiz)
             db.session.commit()
             target = url_for("study.take_quiz", quiz_id=quiz.id)
         else:
-            data = study.generate_flashcards(current_user, material, count)
+            data = study.generate_flashcards(current_user, material, count, fresh=fresh)
             deck = Deck(user_id=current_user.id, course_id=material.course_id, source="ai",
                         title=data["title"] or f"Cards: {material.title}"[:200],
                         description=f"Generated from {material.title}"[:1000])
@@ -119,7 +120,11 @@ def generate():
         return _generate_page(preset), 400
     if material.truncated:
         flash("The picked sources are long, so each one was trimmed to fit (every source still contributes).", "info")
-    flash("Generated! Review the items and fix anything that looks off.", "success")
+    if data["shared"]:
+        flash("Someone already made this from the exact same material, so it was free: no AI action used. "
+              "Want a different take? Tick \"Make a new version\" next time.", "success")
+    else:
+        flash("Generated! Review the items and fix anything that looks off.", "success")
     return redirect(target)
 
 

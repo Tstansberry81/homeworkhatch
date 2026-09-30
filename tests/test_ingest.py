@@ -299,8 +299,45 @@ def test_shared_object_survives_when_one_copy_changes(app, client, snapshot, man
 def test_files_stored_before_fingerprints_are_not_downloaded_again(app, client, snapshot, manifest):
     token = api_token(make_user())
     sync(client, token, snapshot, manifest)
+    from app.models import CanvasAccount
+
     for f in db.session.scalars(select(CanvasFile)):
         f.stored_fingerprint = f.wanted_fingerprint = None  # as deployed before this change
+    for a in db.session.scalars(select(CanvasAccount)):
+        a.last_snapshot_hash = None  # ...which also predates skipping unchanged syncs
     db.session.commit()
     body, uploaded = sync(client, token, snapshot, manifest)
     assert uploaded == [] and all(f.stored_fingerprint for f in db.session.scalars(select(CanvasFile)) if f.storage_key)
+
+
+
+def test_unchanged_sync_skips_the_classes_but_still_retries_missing_files(app, client, snapshot, manifest):
+    from sqlalchemy import event
+
+    from app.models import SyncRun
+
+    token = api_token(make_user())
+    auth = {"Authorization": f"Bearer {token}"}
+    first = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
+    assert sorted(first["files_needed"]) == ["9001", "9002"]
+    # 9002 uploads, 9001 fails this time.
+    client.put(f"/v1/files/9002?updated_at={manifest[1]['updated_at']}", data=b"x" * 120,
+               headers={**auth, "X-Snapshot-Id": first["snapshot_id"], "Content-Type": "text/plain"})
+
+    statements = []
+    listener = lambda *a: statements.append(a[2])
+    event.listen(db.engine, "before_cursor_execute", listener)
+    snapshot["synced_at"] = iso(0)  # an hour later, nothing else changed
+    again = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
+    event.remove(db.engine, "before_cursor_execute", listener)
+    assert again["files_needed"] == ["9001"], "the failed file is still requested"
+    assert db.session.get(SyncRun, again["snapshot_id"]).stats["unchanged"] is True
+    assert not any("assignment" in s.lower() and s.lstrip().upper().startswith("SELECT") for s in statements), \
+        "classes aren't re-read"
+    assert len(statements) < 15, statements
+
+    # A real change goes through the full sync again.
+    snapshot["courses"][0]["assignments"][0]["name"] = "HW 1 (renamed)"
+    changed = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
+    assert not db.session.get(SyncRun, changed["snapshot_id"]).stats.get("unchanged")
+    assert db.session.scalar(select(Assignment).where(Assignment.name == "HW 1 (renamed)"))

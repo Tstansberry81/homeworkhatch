@@ -23,8 +23,8 @@ class FakeAI:
         # but not in the test client; tests of streamed responses turn this on to match.
         self.close_session_before_streaming = False
 
-    def complete(self, *, system, messages, max_tokens, effort, schema=None):
-        self.calls.append({"system": system, "messages": messages, "effort": effort, "schema": schema})
+    def complete(self, *, system, messages, max_tokens, effort, schema=None, model=None):
+        self.calls.append({"system": system, "messages": messages, "effort": effort, "schema": schema, "model": model})
         if self.fail_with:
             raise self.fail_with
         props = (schema or {}).get("properties", {})
@@ -41,8 +41,8 @@ class FakeAI:
             text = "## Overview\nA **summary** with math $x^2$.\n\n- point one\n- point two"
         return AIResult(text, 1200, 300, "fake-model")
 
-    def stream(self, *, system, messages, max_tokens, effort):
-        self.calls.append({"system": system, "messages": messages, "effort": effort, "stream": True})
+    def stream(self, *, system, messages, max_tokens, effort, model=None):
+        self.calls.append({"system": system, "messages": messages, "effort": effort, "stream": True, "model": model})
         handle = StreamHandle(chunks=iter(()))
         answer = "The chain rule multiplies derivatives [S1]. Try it on $\\sin(x^2)$."
 

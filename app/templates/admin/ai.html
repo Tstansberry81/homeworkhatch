@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}AI spend{% endblock %}
+{% macro money(v) %}${{ '{:,.2f}'.format(v or 0) }}{% endmacro %}
+{% block content %}
+{% include "_account_tabs.html" %}
+<div class="page-head"><div><h1>AI spend</h1><p class="muted">Since {{ since|dt('date') }}, at list prices. Rows from before cost tracking count as $0.</p></div>
+  <a class="btn btn-ghost" href="{{ url_for('admin.overview') }}">Admin</a></div>
+{% set n, total, tin, tout, tcache = totals %}
+<div class="grid grid-4 mb">
+  <div class="card stat"><div class="value">{{ money(total) }}</div><div class="label">Spent this month</div></div>
+  <div class="card stat"><div class="value">{{ '{:,}'.format(n) }}</div><div class="label">AI actions</div></div>
+  <div class="card stat"><div class="value">{{ money(total / n if n else 0) }}</div><div class="label">Per action</div></div>
+  <div class="card stat"><div class="value">{{ '{:,}'.format(tin + tout) }}</div><div class="label">Tokens ({{ '{:,}'.format(tcache) }} read from cache)</div></div>
+</div>
+<div class="grid grid-2">
+  <div class="card"><h2>By feature</h2>
+    <table class="table"><thead><tr><th>Feature</th><th>Actions</th><th>Spend</th><th>Each</th></tr></thead><tbody>
+    {% for kind, count, spend in kinds %}<tr><td>{{ kind }}</td><td>{{ count }}</td><td>{{ money(spend) }}</td><td>{{ money(spend / count if count else 0) }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">Nothing yet this month.</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>By model</h2>
+    <table class="table"><thead><tr><th>Model</th><th>Actions</th><th>Spend</th></tr></thead><tbody>
+    {% for model, count, spend in models %}<tr><td class="mono small">{{ model or 'unfinished' }}</td><td>{{ count }}</td><td>{{ money(spend) }}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">Nothing yet this month.</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Top students</h2>
+    <table class="table"><thead><tr><th>Student</th><th>Plan</th><th>Actions</th><th>Spend</th></tr></thead><tbody>
+    {% for u, count, spend in top %}<tr><td><a href="{{ url_for('admin.user_detail', user_id=u.id) }}">{{ u.username }}</a></td><td>{{ u.plan }}</td><td>{{ count }}</td><td>{{ money(spend) }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">Nobody yet.</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h2>Saved by sharing</h2>
+    <p class="small muted">Sets, summaries and scanned-PDF readings reused instead of generated again (all time).</p>
+    <table class="table"><thead><tr><th>Kind</th><th>Saved results</th><th>Reuses</th><th>Saved</th></tr></thead><tbody>
+    {% for kind, rows, uses, value in saved %}<tr><td>{{ kind }}</td><td>{{ rows }}</td><td>{{ uses }}</td><td>{{ money(value) }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No reuses yet.</td></tr>{% endfor %}</tbody></table></div>
+</div>
+{% endblock %}
