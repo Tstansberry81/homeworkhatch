@@ -35,4 +35,6 @@ input { display: block; width: 100%; box-sizing: border-box; margin-top: 2px; pa
 label.check { display: flex; gap: 6px; align-items: baseline; color: var(--fg); }
 label.check input { display: inline; width: auto; margin: 0; }
 #setup p { margin: 10px 0; }
+.disclosure { border: 1px solid var(--line, #ccc); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 12px; }
+.disclosure p { margin: 6px 0; }
 td:first-child { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

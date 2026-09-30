@@ -2,7 +2,7 @@
 {% block title %}Connect Canvas{% endblock %}
 {% block content %}
 {% include "_account_tabs.html" %}
-<div class="page-head"><div><h1>Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension, using the same login you already use. Your school password never reaches us, and it works even at schools that block student API tokens.</p></div></div>
+<div class="page-head"><div><h1>Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension that runs in your browser while you're signed in to Canvas. Your school password never reaches us.</p></div></div>
 
 {% if accounts %}
 <div class="card mb" style="border-color:var(--ok)">
@@ -10,6 +10,21 @@
   <ul class="list">{% for a in accounts %}<li><div class="grow"><div class="title">{{ a.host }}</div><div class="small muted">as {{ a.canvas_name or 'you' }} · last sync {{ a.last_sync_at|ago }}</div></div>
     {% if a.restricted %}<span class="small muted" title="Tabs your instructors hid in Canvas">{{ a.restricted|length }} hidden sections</span>{% endif %}</li>{% endfor %}</ul>
 </div>
+{% endif %}
+
+{% if courses %}
+<form method="post" action="{{ url_for('settings.files') }}" class="card mb" id="files">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h2>Which classes' files should we keep?</h2>
+  <p class="muted small">Due dates, grades, pages and announcements sync for every class. Course files (slides, readings, handouts) are copied here only for the classes you choose, for your own studying. Unticking a class deletes the copies we stored.</p>
+  <label class="check"><input type="radio" name="mode" value="all" {{ 'checked' if current_user.keep_all_files }}> Keep files for all my classes, including new ones</label>
+  <label class="check"><input type="radio" name="mode" value="pick" {{ 'checked' if not current_user.keep_all_files }}> Only the classes I tick:</label>
+  <ul class="list">{% for c in courses %}
+    <li><label class="check grow"><input type="checkbox" name="keep" value="{{ c.id }}" {{ 'checked' if c.sync_files }}> {{ c.name }}</label>
+      <span class="small muted">{{ c.files|length }} file{{ 's' if c.files|length != 1 }}{% if c.sync_files is none %} · not chosen yet{% endif %}</span></li>
+  {% endfor %}</ul>
+  <button class="btn mt">Save</button>
+</form>
 {% endif %}
 
 <div class="grid grid-main">

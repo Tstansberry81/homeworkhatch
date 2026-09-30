@@ -1,29 +1,63 @@
 {% extends "base.html" %}
+{% from "legal/_contact.html" import contact %}
 {% block title %}Terms of Service{% endblock %}
 {% macro body() %}
 <div class="card prose" style="max-width:820px;margin:0 auto">
   <h1>Terms of Service</h1>
-  <p class="muted small">Homework Hatch L.L.C. · Last updated September 2026. Template terms; have them reviewed before relying on them commercially.</p>
+  <p class="muted small">Effective September 30, 2026. These terms are an agreement between you and Homework Hatch L.L.C., a Maryland limited liability company ("we"). Contact: {{ contact() }}.</p>
+
   <h2>1. The service</h2>
-  <p>Homework Hatch (“the Service”) helps students organize and study their own coursework. It uses data you choose to sync from your school's learning management system (such as Canvas) through a browser extension you install and control.</p>
-  <h2>2. Eligibility</h2>
-  <p>You must be at least 13 years old. If you're under 18, a parent or guardian must agree to these terms. Some optional features (like the Probability Lab) are limited to users 18 and older.</p>
-  <h2>3. Academic integrity</h2>
-  <p>The AI tools are learning aids, not substitutes for your own work. You agree not to use the Service to cheat, plagiarize, or misrepresent AI output as your own where your school doesn't allow it, and to follow your school's rules and applicable law. The tutor is designed to explain and guide rather than complete graded work.</p>
-  <h2>4. Your data</h2>
-  <p>You may connect your school account so we can process your academic data (courses, assignments, grades, files) solely to provide the Service. We don't share it with teachers, schools, or parents without your consent. Leaderboards are opt-in. See the <a href="{{ url_for('main.privacy') }}">Privacy Policy</a>.</p>
-  <h2>5. Buddy Coins and games</h2>
-  <p>Buddy Coins are virtual points with no monetary value. They can't be bought, sold, transferred, or redeemed for money or prizes. The 18+ Probability Lab uses coins only to teach probability and expected value.</p>
+  <p>Homework Hatch ("the Service") helps students organize and study their own coursework. A browser extension you install and control reads your Canvas while you're signed in, and syncs your coursework to your Homework Hatch account. It syncs course files only for the classes you choose. The Service isn't provided by or for your school.</p>
+
+  <h2>2. Who can use it</h2>
+  <p>You must be at least 13. If you're under 18, a parent or guardian must agree to these terms for you. Some optional features are limited to adults. Keep your password and sync token private; you're responsible for activity on your account.</p>
+
+  <h2>3. Course materials and your school's rules</h2>
+  <p>Files and content from your classes belong to your instructors, your school or their publishers, not to you or us. You may sync them to Homework Hatch only if you're allowed to access them, and only for your own studying.</p>
+  <p>You agree not to use the Service to reproduce, share, sell, post or distribute course materials, or anything made from them, beyond what your school's policies and copyright law allow. For example: don't post slides, readings, answer keys or exam content in class chat, in a live quiz, or anywhere public. Don't use the Service to access anything you aren't permitted to see.</p>
+
+  <h2>4. Academic integrity and AI</h2>
+  <p>The AI tools are learning aids. Follow your school's honor code and each course's AI policy. Don't submit AI output as your own work where that isn't allowed. The tutor is designed to explain and guide, not to complete graded work. AI output can be wrong or incomplete; check it against your materials before relying on it.</p>
+
+  <h2>5. Your content</h2>
+  <p>What you create (notes, flashcards, quizzes, messages) stays yours. You give us permission to host, copy, process and display your content only to run the Service for you and as you direct, for example to show your chat messages to the chat you joined. That includes sending it to our AI and hosting providers. You promise you have the right to add what you add.</p>
+
   <h2>6. Acceptable use</h2>
-  <p>Don't upload harmful, illegal, or harassing content; don't disrupt, reverse-engineer, or attack the Service; and don't use AI output for anything unlawful or discriminatory. Class chat must stay respectful. Reported content may be removed and accounts suspended.</p>
-  <h2>7. Content and licenses</h2>
-  <p>Content you create (notes, flashcards, quizzes) stays yours. You grant us a license to store and process it only to operate the Service. Course materials remain the property of their owners; they're stored for your personal study use.</p>
-  <h2>8. Subscriptions</h2>
-  <p>Paid plans renew monthly until canceled. You can cancel anytime from the billing portal; access continues through the paid period.</p>
-  <h2>9. Disclaimers</h2>
-  <p>The Service is provided “as is.” AI output can be wrong; verify important information. Grade calculations are approximations, not official records or predictions.</p>
-  <h2>10. Changes and contact</h2>
-  <p>We may update these terms and will note the date above. Questions: contact the site administrator.</p>
+  <p>Don't:</p>
+  <ul>
+    <li>break the law or infringe anyone's rights;</li>
+    <li>harass people, or post hateful or sexual content;</li>
+    <li>upload malware;</li>
+    <li>access other people's accounts or data;</li>
+    <li>scrape, overload, reverse-engineer or attack the Service;</li>
+    <li>misrepresent who you are, including your enrollment in a class chat.</li>
+  </ul>
+  <p>We may remove content and suspend or close accounts that break these terms.</p>
+
+  <h2>7. Copyright</h2>
+  <p>We respond to copyright complaints under our <a href="{{ url_for('main.copyright') }}">Copyright policy</a>, and we close the accounts of repeat infringers.</p>
+
+  <h2>8. Plans and payments</h2>
+  <p>Everything that doesn't use AI is free. The free plan includes 5 AI actions to try it. When paid plans are offered:</p>
+  <ul>
+    <li><strong>Semester Pass:</strong> a one-time payment for 120 days of access. It does not renew.</li>
+    <li><strong>Plus:</strong> a monthly subscription that renews each month until you cancel. You can cancel any time from the billing portal, and access continues to the end of the period you paid for.</li>
+  </ul>
+  <p>Paid plans include up to 100 AI actions a month. Prices and terms are shown before you pay. For refunds, contact us.</p>
+  <p>Buddy Coins are virtual points with no monetary value. They can't be bought, sold, transferred or redeemed.</p>
+
+  <h2>9. Other services</h2>
+  <p>The Service works with third-party services, including Canvas, Google and Anthropic, under their own terms. We're not affiliated with Instructure or with any school, and we're not responsible for those services, including changes that affect syncing.</p>
+
+  <h2>10. Ending your use</h2>
+  <p>You can delete your account at any time from Settings → Your data. We may suspend or end the Service, or your access, for a violation of these terms or to comply with the law.</p>
+
+  <h2>11. Disclaimers and limits</h2>
+  <p>The Service is provided "as is" and "as available," without warranties of any kind, to the extent the law allows. Grade calculations are estimates, not official records. To the extent the law allows, we aren't liable for indirect or consequential damages. Our total liability for any claim is limited to the greater of what you paid us in the 12 months before the claim or $50.</p>
+
+  <h2>12. Changes and law</h2>
+  <p>If we change these terms in a way that matters, we'll post the new version with a new effective date and tell signed-in users. These terms are governed by the laws of the State of Maryland, except where the law of your home state requires otherwise.</p>
+  {% include "_disclaimer.html" %}
 </div>
 {% endmacro %}
 {% block content %}{{ body() }}{% endblock %}

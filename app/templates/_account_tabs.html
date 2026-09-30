@@ -5,7 +5,7 @@
 <nav class="tabs" aria-label="Account">
   {% for endpoint, label, ico, on, show in [
     ("settings.profile", "Profile", "user", ep == "settings.profile", true),
-    ("settings.sync", "Canvas", "plug", ep in ("settings.sync", "settings.create_token"), true),
+    ("settings.sync", "Canvas", "plug", ep in ("settings.sync", "settings.create_token", "settings.files"), true),
     ("settings.integrations_page", "Google", "link", ep.startswith("settings.integration") or ep.startswith("settings.calendar"), integrations_available),
     ("billing.plans", "Plan", "star", ep.startswith("billing."), true),
     ("coins.wallet", "Coins", "coin", ep == "coins.wallet", true),

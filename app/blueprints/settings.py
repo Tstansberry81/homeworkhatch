@@ -7,11 +7,11 @@ from urllib.parse import urlsplit
 from flask import (Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request,
                    session, url_for)
 from flask_login import current_user, login_required, logout_user
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from .. import queries
 from ..extensions import db
-from ..models import (ApiToken, ChatMessage, CoinTransaction, Deck, PracticeQuiz, SyncRun,
+from ..models import (ApiToken, ChatMessage, CoinTransaction, Deck, LivePlayer, PracticeQuiz, SyncRun,
                       TutorConversation, User, utcnow)
 from ..services import gcal, integrations
 from ..services.storage import get_storage
@@ -80,7 +80,31 @@ def sync():
     runs = db.session.scalars(select(SyncRun).where(SyncRun.user_id == current_user.id)
                               .order_by(SyncRun.received_at.desc()).limit(10)).all()
     return render_template("settings/sync.html", tokens=tokens, runs=runs, accounts=queries.accounts(current_user.id),
-                           server_url=server_url(), new_token=request.args.get("new_token_shown"))
+                           server_url=server_url(), new_token=request.args.get("new_token_shown"),
+                           courses=queries.visible_courses(current_user.id, include_hidden=True))
+
+
+@bp.route("/files", methods=["POST"])
+@login_required
+def files():
+    """The student chooses which classes' files are copied here; unticked classes lose their copies."""
+    from ..services import ingest
+
+    keep_all = request.form.get("mode") == "all"
+    keep = {int(x) for x in request.form.getlist("keep") if x.isdigit()}
+    current_user.keep_all_files = keep_all
+    removed = 0
+    for course in queries.visible_courses(current_user.id, include_hidden=True):
+        wanted = keep_all or course.id in keep
+        if course.sync_files and not wanted:
+            removed += ingest.forget_course_files(course)
+        course.sync_files = wanted
+    db.session.commit()
+    msg = "Saved. New files arrive with the next sync (use Sync now to start it)."
+    if removed:
+        msg += f" Deleted {removed} stored file{'s' if removed != 1 else ''} from classes you unticked."
+    flash(msg, "success")
+    return redirect(url_for("settings.sync") + "#files")
 
 
 @bp.route("/tokens", methods=["POST"])
@@ -169,14 +193,29 @@ def delete_account():
     user = db.session.get(User, current_user.id)
     from ..services import billing
 
+    # Files first: if storage can't be cleared, delete nothing, so we never keep files for an
+    # account that no longer exists.
+    try:
+        get_storage().delete_prefix(f"u/{user.id}/")  # trailing slash: never touch u/{id}0...
+    except Exception as exc:
+        current_app.logger.error("storage cleanup failed for user %s: %s", user.id, exc)
+        flash("We couldn't delete your stored files just now, so nothing was deleted. Try again in a few minutes.",
+              "error")
+        return redirect(url_for("settings.data"))
     try:
         billing.cancel_subscription(user)
     except Exception as exc:  # never keep an account the user asked to delete because Stripe hiccuped
         current_app.logger.error("could not cancel Stripe subscription for user %s: %s", user.id, exc)
-    try:
-        get_storage().delete_prefix(f"u/{user.id}/")  # trailing slash: never touch u/{id}0...
-    except Exception as exc:
-        current_app.logger.warning("storage cleanup failed for user %s: %s", user.id, exc)
+    if integrations.available():
+        for kind in integrations.LABELS:
+            row = integrations.get(user, kind)
+            if row and row.connected:
+                try:
+                    integrations.disconnect(user, kind)  # revokes the Google tokens too
+                except Exception as exc:
+                    current_app.logger.error("could not disconnect %s for user %s: %s", kind, user.id, exc)
+    # Live-quiz seats in other people's games keep only a SET NULL link otherwise; remove them.
+    db.session.execute(delete(LivePlayer).where(LivePlayer.user_id == user.id))
     logout_user()
     db.session.delete(user)
     db.session.commit()

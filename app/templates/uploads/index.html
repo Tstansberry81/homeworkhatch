@@ -55,7 +55,7 @@
       <ul class="list picker-list" id="drive-list"><li class="muted">Loading…</li></ul>
       <form method="post" action="{{ url_for('settings.integration_disconnect', kind='drive') }}" class="mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('uploads.index') }}"><button class="linklike small">Disconnect Google Drive</button></form>
       {% else %}
-      <p class="small muted">Connect your Google account to pick files from Drive. Homework Hatch only reads the files you add.</p>
+      <p class="small muted">Connect your Google account to pick files from Drive. We search your Drive to list files when you look for one, and download only the files you add.</p>
       <a class="btn btn-block" href="{{ url_for('settings.integration_connect', kind='drive', next=url_for('uploads.index')) }}">Connect Google Drive</a>
       {% endif %}
     </div>

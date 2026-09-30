@@ -8,8 +8,7 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_, select
 
 from ..extensions import db
-from ..models import (ActivityLog, AIUsage, ChatMessage, ChatReport, CoinTransaction, Course, SharedGeneration, SyncRun,
-                      User, utcnow)
+from ..models import (ActivityLog, AIUsage, ChatMessage, ChatReport, CoinTransaction, Course, SyncRun, User, utcnow)
 from ..services import ai, billing, coins
 from ..utils import admin_required, log_activity
 
@@ -45,7 +44,7 @@ def overview():
 
 @bp.route("/ai")
 def ai_spend():
-    """What Claude costs: this month by feature, model and student, and what shared sets saved."""
+    """What Claude costs: this month by feature, model and student."""
     since = ai.month_start()
     this_month = AIUsage.created_at >= since
     cost = func.coalesce(func.sum(AIUsage.cost_usd), 0)
@@ -56,12 +55,8 @@ def ai_spend():
                                        func.coalesce(func.sum(AIUsage.cache_read_tokens), 0)).where(this_month)).one()
     top = db.session.execute(select(User, func.count(AIUsage.id), cost).join(AIUsage, AIUsage.user_id == User.id)
                              .where(this_month).group_by(User.id).order_by(cost.desc()).limit(15)).all()
-    saved = db.session.execute(select(SharedGeneration.kind, func.count(SharedGeneration.id),
-                                      func.coalesce(func.sum(SharedGeneration.uses), 0),
-                                      func.coalesce(func.sum(SharedGeneration.uses * SharedGeneration.cost_usd), 0))
-                               .group_by(SharedGeneration.kind)).all()
     return render_template("admin/ai.html", since=since, totals=totals, kinds=by(AIUsage.kind), models=by(AIUsage.model),
-                           top=top, saved=saved, plans=billing.PLANS)
+                           top=top, plans=billing.PLANS)
 
 
 @bp.route("/users")

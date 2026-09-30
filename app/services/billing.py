@@ -3,7 +3,6 @@
 Everything that doesn't call Claude is free for everyone. AI actions (tutor answers, summaries,
 generated study sets) are what cost money, so the free plan gets a small one-time trial and the
 paid plans get a monthly allowance: a one-time Semester Pass or a monthly Plus subscription.
-Study sets someone already generated from the same files are reused at no cost and never count.
 Without Stripe keys, billing is simply switched off.
 """
 
@@ -40,8 +39,8 @@ class Plan:
 
 
 PLANS: dict[str, Plan] = {
-    "free": Plan("free", "Free", 0, "", 5, "Canvas sync, calendar, Google Calendar, files, your own flashcards and "
-                 "quizzes, and study sets a classmate already made from the same files. Plus 5 AI actions to try it."),
+    "free": Plan("free", "Free", 0, "", 5, "Canvas sync, calendar, Google Calendar, your files, and flashcards and "
+                 "quizzes you write yourself. Plus 5 AI actions to try it."),
     "pass": Plan("pass", "Semester Pass", 20, "once", 100, "100 AI actions a month for 120 days. One payment, "
                  "nothing renews.", "STRIPE_PRICE_PASS", days=120),
     "plus": Plan("plus", "Plus", 6, "month", 100, "100 AI actions a month. Cancel any time.", "STRIPE_PRICE_PLUS"),

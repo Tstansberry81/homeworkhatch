@@ -12,7 +12,7 @@
   <form method="post" action="{{ url_for('settings.delete_account') }}" class="card" style="border-color:var(--err)" data-confirm="This permanently deletes your account and everything in it. Continue?">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h2>Delete account</h2>
-    <p class="small">Permanently deletes your account, synced Canvas data and files, study sets and messages. This can't be undone.</p>
+    <p class="small">Permanently deletes your account, synced Canvas data, stored files, study materials, tutor and chat messages, and live-quiz entries, and disconnects Google. Events already added to your Google Calendar stay there (turn off Calendar sync first to remove them), and Stripe keeps its own payment records. This can't be undone.</p>
     <label for="confirm">Type your username (<code>{{ current_user.username }}</code>)</label><input id="confirm" name="confirm" type="text" autocomplete="off">
     <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
     <button class="btn btn-danger mt">Delete everything</button>

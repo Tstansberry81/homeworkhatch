@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 
 from app.extensions import db
 from app.models import (AIUsage, Card, CanvasFile, ChatMessage, Course, Deck, LiveSession, Page, PracticeQuiz,
-                        SharedGeneration, TutorMessage, User, utcnow)
+                        TutorMessage, User, utcnow)
 from app.services import ai, coins
 
 from .conftest import api_token, login, make_user, sync
@@ -70,7 +70,7 @@ def test_generate_reports_unusable_sources(synced_user, client):
     assert r.status_code == 400 and b"readable text" in r.data
 
 
-def test_free_trial_runs_out_but_shared_sets_stay_free(app, synced_user, client, fake_ai):
+def test_free_trial_runs_out_and_nothing_crosses_accounts(app, synced_user, client, fake_ai):
     from app.services import ai
 
     notes = {"output": "deck", "mode": "paste", "pasted": "Notes about the chain rule " * 5}
@@ -81,45 +81,30 @@ def test_free_trial_runs_out_but_shared_sets_stay_free(app, synced_user, client,
     r = client.post("/study/generate", data=notes)
     assert r.status_code == 400 and b"used your 5 free AI actions" in r.data and not fake_ai.calls
 
+    # A classmate asking for the very same set gets their own generation: study material made
+    # from one student's files is never served to another account.
     classmate = make_user("kim", plan="plus", plan_status="active")
     kim = app.test_client()
     login(kim, classmate)
-    r = kim.post("/study/generate", data=notes)
-    assert r.status_code == 302 and len(fake_ai.calls) == 1
-    assert ai.remaining(classmate) == 99
-
-    # The same request from the same material is served from the saved result: no call, no action used.
-    r = client.post("/study/generate", data=notes, follow_redirects=True)
-    assert r.status_code == 200 and b"no AI action used" in r.data and len(fake_ai.calls) == 1
-    decks = db.session.scalars(select(Deck).order_by(Deck.id)).all()
-    assert [d.user_id for d in decks] == [classmate.id, synced_user.id], "each student gets their own editable copy"
-    assert [c.front for c in decks[0].cards] == [c.front for c in decks[1].cards]
-    shared = db.session.scalar(select(SharedGeneration))
-    assert shared.kind == "flashcards" and shared.uses == 1
-
-    # Asking for a new version really generates (and costs the classmate an action).
-    kim.post("/study/generate", data={**notes, "fresh": "1"})
+    assert kim.post("/study/generate", data=notes).status_code == 302
+    assert kim.post("/study/generate", data=notes).status_code == 302
     assert len(fake_ai.calls) == 2 and ai.remaining(classmate) == 98
-    assert db.session.scalar(select(func.count(SharedGeneration.id))) == 1, "the first saved version stays"
-
-    # Different material never matches.
-    kim.post("/study/generate", data={**notes, "pasted": "Notes about the product rule " * 5})
-    assert len(fake_ai.calls) == 3
+    assert client.post("/study/generate", data=notes).status_code == 400, "still out of trial actions"
 
 
-def test_shared_summaries_and_scanned_pdf_readings(app, synced_user, fake_ai):
+def test_summaries_and_scanned_pdf_readings_are_per_student(app, synced_user, fake_ai):
     from app.services import study
 
     material = study.Material("Lecture 1", "Limits describe what a function approaches. " * 20, False, None)
-    first = study.summarize(synced_user, material)
-    assert study.summarize(synced_user, material) == first and len(fake_ai.calls) == 1
-    study.summarize(synced_user, material, fresh=True)
+    study.summarize(synced_user, material)
+    study.summarize(synced_user, material)
     assert len(fake_ai.calls) == 2
     pdf = b"%PDF-1.4 scanned handout"
-    text = study.transcribe_pdf(synced_user, pdf, "handout.pdf")
+    study.transcribe_pdf(synced_user, pdf, "handout.pdf")
     other = make_user("kim")
-    assert study.transcribe_pdf(other, pdf, "renamed.pdf") == text and len(fake_ai.calls) == 3
-    assert db.session.scalar(select(func.count(AIUsage.id)).where(AIUsage.user_id == other.id)) == 0
+    study.transcribe_pdf(other, pdf, "handout.pdf")
+    assert len(fake_ai.calls) == 4
+    assert db.session.scalar(select(func.count(AIUsage.id)).where(AIUsage.user_id == other.id)) == 1
 
 
 def test_summary_is_rendered_safely(synced_user, client):
@@ -205,18 +190,18 @@ def test_live_quiz_full_game(app, synced_user, client):
     session = db.session.scalar(select(LiveSession))
     assert session.code == code
 
-    # Two signed-in classmates and one guest join.
+    # Three signed-in classmates join; someone without an account is sent to sign in.
     players = []
-    for name in ("alice", "bob"):
+    for name in ("alice", "bob", "carol"):
         make_user(name)
         c = app.test_client()
         login(c, db.session.scalar(select(User).where(User.username == name)))
         assert c.post("/live/join", data={"code": code, "nickname": name}).status_code == 302
         players.append(c)
     guest = app.test_client()
-    assert guest.post("/live/join", data={"code": code, "nickname": "guest"}).status_code == 302
-    assert guest.post("/live/join", data={"code": code, "nickname": "alice"}).status_code in (302, 400)
-    players.append(guest)
+    r = guest.post("/live/join", data={"code": code, "nickname": "guest"})
+    assert r.status_code == 302 and "/login" in r.headers["Location"], "no anonymous players"
+    assert players[2].post("/live/join", data={"code": code, "nickname": "alice"}).status_code in (302, 400)
 
     host_state = client.get(f"/live/{code}/state").get_json()
     assert host_state["state"] == "lobby" and host_state["players"] == 3
@@ -242,7 +227,38 @@ def test_live_quiz_full_game(app, synced_user, client):
     bob = db.session.scalar(select(User).where(User.username == "bob"))
     assert coins.balance(alice.id) >= 10 and coins.balance(bob.id) >= 10, "signed-in players split the prizes"
     assert players[0].get(f"/live/{code}/state").status_code == 200
-    assert app.test_client().get(f"/live/{code}/state").status_code == 403, "strangers can't peek"
+    assert app.test_client().get(f"/live/{code}/state").status_code == 302, "strangers can't peek"
+    stranger = app.test_client()
+    login(stranger, make_user("dave"))
+    assert stranger.get(f"/live/{code}/state").status_code == 403, "signed in but never joined"
+
+
+def test_live_quiz_keeps_course_file_quizzes_private_and_closes_stale_games(app, synced_user, client):
+    from datetime import timedelta
+
+    qs = [{"question": "2+2", "choices": ["3", "4"], "answer": 1, "explanation": ""}]
+    from_files = PracticeQuiz(user_id=synced_user.id, title="From slides", questions=qs, source="ai", from_course_files=True)
+    mine = PracticeQuiz(user_id=synced_user.id, title="My own", questions=qs)
+    db.session.add_all([from_files, mine])
+    db.session.commit()
+    r = client.post(f"/live/host/{from_files.id}", follow_redirects=True)
+    assert b"be hosted live" in r.data and db.session.scalar(select(func.count(LiveSession.id))) == 0
+    assert b"Host live" not in client.get(f"/study/quizzes/{from_files.id}").data
+    code = client.post(f"/live/host/{mine.id}").headers["Location"].split("/")[-2]
+    s = db.session.scalar(select(LiveSession))
+    s.created_at = utcnow() - timedelta(hours=7)
+    db.session.commit()
+    player = app.test_client()
+    login(player, make_user("erin"))
+    r = player.post("/live/join", data={"code": code, "nickname": "erin"})
+    assert r.status_code == 404 and db.session.get(LiveSession, s.id).state == "finished"
+
+    # Quizzes generated from files are marked; ones from pasted notes can go live.
+    client.post("/study/generate", data={"output": "quiz", "mode": "paste", "pasted": "Notes about limits " * 5})
+    f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
+    client.post("/study/generate", data={"output": "quiz", "mode": "sources", "refs": [f"file:{f.id}"]})
+    made = db.session.scalars(select(PracticeQuiz).where(PracticeQuiz.source == "ai").order_by(PracticeQuiz.id)).all()
+    assert [q.from_course_files for q in made[-2:]] == [False, True]
 
 
 # ---------------------------------------------------------------- class chat
@@ -261,6 +277,13 @@ def test_class_chat_membership_and_moderation(app, client, snapshot, manifest):
     login(ca, alice), login(cb, bob), login(ce, eve)
     a_course = db.session.scalar(select(Course).where(Course.user_id == alice.id, Course.canvas_id == "101"))
     b_course = db.session.scalar(select(Course).where(Course.user_id == bob.id, Course.canvas_id == "101"))
+    # Chat is opt-in: nothing is readable or postable before joining, and the room lists no names.
+    assert ca.get(f"/chat/course/{a_course.id}/messages").status_code == 403
+    page = ca.get(f"/chat/course/{a_course.id}").get_data(as_text=True)
+    assert "Join chat" in page and "Bob" not in page
+    ca.post(f"/chat/course/{a_course.id}/join"), cb.post(f"/chat/course/{b_course.id}/join")
+    page = ca.get(f"/chat/course/{a_course.id}").get_data(as_text=True)
+    assert "2 members" in page and "Bob" not in page and "Enrollment isn't confirmed" in page
     assert ca.post(f"/chat/course/{a_course.id}/messages", json={"body": "anyone done HW 3? this is shit"}).status_code == 200
     msgs = cb.get(f"/chat/course/{b_course.id}/messages").get_json()["messages"]
     assert [m["body"] for m in msgs] == ["anyone done HW 3? this is s***"] and msgs[0]["author"] == "Alice"
@@ -273,6 +296,8 @@ def test_class_chat_membership_and_moderation(app, client, snapshot, manifest):
     assert cb.post(f"/chat/messages/{mid}/delete").status_code == 403, "can't delete someone else's message"
     assert ca.post(f"/chat/messages/{mid}/delete").status_code == 200
     assert db.session.get(ChatMessage, mid).deleted is True
+    cb.post(f"/chat/course/{b_course.id}/join", data={"leave": "1"})
+    assert cb.get(f"/chat/course/{b_course.id}/messages").status_code == 403, "leaving closes the room"
 
 
 def test_scanned_pdf_can_be_read_with_ai(synced_user, client, fake_ai):

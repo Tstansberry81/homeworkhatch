@@ -3,11 +3,18 @@
 {% block content %}
 <div class="page-head">
   <div><div class="small muted"><a href="{{ url_for('chat.index') }}">Class chat</a></div><h1>{{ course.name }}</h1>
-    <p class="small muted">{{ members|length }} member{{ 's' if members|length != 1 }}:
-      {% for u, ok in members %}{{ u.display_name }}{% if any_verified and not ok %} <span class="badge warn" title="Not confirmed on classmates' Canvas rosters">unconfirmed</span>{% endif %}{{ ', ' if not loop.last }}{% endfor %}</p></div>
-  <a class="btn btn-ghost" href="{{ url_for('courses.detail', course_id=course.id) }}">Class page</a>
+    <p class="small muted">{{ members }} member{{ 's' if members != 1 }} · open to Homework Hatch users whose Canvas includes this class. Enrollment isn't confirmed, so don't share personal info, and don't post course files, answer keys or exam content.</p></div>
+  <div class="btn-row"><a class="btn btn-ghost" href="{{ url_for('courses.detail', course_id=course.id) }}">Class page</a>
+  {% if course.chat_joined %}<form method="post" action="{{ url_for('chat.join', course_id=course.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="leave" value="1"><button class="btn btn-ghost">Leave chat</button></form>{% endif %}</div>
 </div>
-{% if members|length < 2 %}<div class="flash">You're the first one here. Classmates join automatically when they connect their Canvas to Homework Hatch.</div>{% endif %}
+{% if not course.chat_joined %}
+<div class="card">
+  <h2>Join this class's chat?</h2>
+  <p>Other members will see your display name next to your messages. You can leave any time.</p>
+  <form method="post" action="{{ url_for('chat.join', course_id=course.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn">Join chat</button></form>
+</div>
+{% else %}
+{% if members < 2 %}<div class="flash">You're the first one here. Classmates can join from their own class chat page.</div>{% endif %}
 <div class="card chat">
   <div class="chat-log" id="log"><p class="muted center small" id="loading">Loading…</p></div>
   <form class="composer" id="composer">
@@ -16,10 +23,12 @@
   </form>
   <p class="small" id="err" style="color:var(--err)"></p>
 </div>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
 (() => {
+  if (!document.getElementById("log")) return;  // not joined yet
   const url = "{{ url_for('chat.messages', course_id=course.id) }}";
   const log = document.getElementById("log"), input = document.getElementById("input"), err = document.getElementById("err");
   let lastId = 0;

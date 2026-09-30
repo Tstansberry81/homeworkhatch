@@ -1,26 +1,59 @@
 {% extends "base.html" %}
+{% from "legal/_contact.html" import contact %}
 {% block title %}Privacy Policy{% endblock %}
 {% macro body() %}
 <div class="card prose" style="max-width:820px;margin:0 auto">
   <h1>Privacy Policy</h1>
-  <p class="muted small">Last updated September 2026. Template policy; review before relying on it commercially.</p>
+  <p class="muted small">Effective September 30, 2026. Homework Hatch is run by Homework Hatch L.L.C., a Maryland limited liability company ("we"). Questions or requests: {{ contact() }}.</p>
+  <p>Homework Hatch is a study tool you choose to use with your own accounts. It isn't provided by or for your school, and we don't share your data with your school, teachers or parents.</p>
+
   <h2>What we collect</h2>
   <ul>
-    <li><strong>Account data:</strong> email, username, display name, password (stored only as a secure hash), time zone, and optional grade level and birth year.</li>
-    <li><strong>Academic data you sync:</strong> courses, assignments, submissions, grades, rubric feedback, pages, announcements, and course files, read through the extension under your own Canvas login. We never receive your school password.</li>
-    <li><strong>What you create:</strong> flashcards, quizzes, tutor conversations, chat messages, and files you upload or pick from Google Drive.</li>
-    <li><strong>Usage data:</strong> sign-ins, syncs, and AI usage counts, to run and improve the Service.</li>
+    <li><strong>Your account:</strong> email, username, display name, a hash of your password (never the password itself), time zone, birth year, and an optional grade or year. At sign-up we also ask your birth month to check your age; we don't store the month.</li>
+    <li><strong>From your Canvas, through the extension:</strong> while you're signed in to Canvas in Chrome, the extension reads the classes shown in its course list and sends us your Canvas name and user ID; class names and terms; assignments (descriptions, due dates, points, your submission status, scores, grades, rubrics, and your instructors' comments and rubric feedback on your work); assignment groups and weights; modules; pages and the syllabus; announcements; discussion topics; calendar events; and your missing-work list. This content can include other people's names and words, such as an instructor's name on an announcement or a classmate's name in a discussion topic. We don't collect class rosters.</li>
+    <li><strong>Course files, only for classes you choose:</strong> for each class you tick under "Which classes' files should we keep?", the extension uploads that class's files (slides, readings, handouts) so you can open and study from them here. We extract their text so search, the tutor and study-set tools can use it. Untick a class and we delete the copies we stored.</li>
+    <li><strong>What you make and add:</strong> flashcards, quizzes, summaries, tutor conversations and the files you attach to them, files you upload or pick from Google Drive, class chat messages, and live-quiz nicknames, answers and scores.</li>
+    <li><strong>Google, if you connect it:</strong> we connect through Composio, which holds the Google sign-in for us. For Google Calendar we create, update and delete the due-date events we add. For Google Drive we search your Drive when you look for a file, and download only the files you pick.</li>
+    <li><strong>Payments, when paid plans are offered:</strong> Stripe collects your card details; we never see them. We keep your plan, its dates, and Stripe's customer and subscription IDs, and share your email with Stripe for receipts.</li>
+    <li><strong>Usage and technical data:</strong> sync history, sign-in events (failed sign-ins record the IP address, to stop password guessing), how many AI actions you use and what they cost, and the standard request logs kept by our host (which include IP addresses). We use cookies only to keep you signed in, protect forms, and remember your seat in a live quiz. No advertising or cross-site tracking cookies.</li>
   </ul>
+
   <h2>How we use it</h2>
-  <p>Only to provide the Service: showing your coursework, planning, generating study materials, and answering tutor questions. When you use AI features, the relevant course material and your question are sent to our AI provider (Anthropic) to produce a response.</p>
-  <h2>Who sees it</h2>
-  <p>Your academic data is private to you. We don't share it with teachers, schools, parents, or advertisers, and we don't sell it. Class chat messages are visible to classmates enrolled in the same Canvas course. Leaderboards show your display name only if you opt in.</p>
+  <p>To run Homework Hatch for you: showing your coursework, grades and calendar, storing the files you chose, generating study materials, answering tutor questions, and keeping the service secure. Buddy Coins are partly earned from your synced submissions and grades. We don't sell your data, show ads, or use it to train AI models.</p>
+  <p><strong>AI features.</strong> When you use the tutor, generate a study set or summary, or have us read a scanned PDF, the material involved and your question are sent to Anthropic (Claude) to produce the answer. Anthropic doesn't train its models on this content under its commercial terms, and keeps it only for a limited time under its own policies. AI answers can be wrong; check them against your materials.</p>
+
+  <h2>Who can see what</h2>
+  <ul>
+    <li><strong>Your synced data, files and study materials are private to your account.</strong> Nothing you generate from your course files is shown to other users.</li>
+    <li><strong>Class chat (opt-in):</strong> if you join a class's chat, other Homework Hatch users who joined that class's chat see your display name and messages. We can't confirm who is really enrolled, so don't share personal information there.</li>
+    <li><strong>Leaderboard (opt-in):</strong> shows your display name and coins only if you turn it on in your profile.</li>
+    <li><strong>Live quizzes you host:</strong> signed-in players who join with your code see the quiz. Quizzes made from course files can't be hosted.</li>
+    <li><strong>Your calendar feed link:</strong> anyone who has it can see your class and assignment names, due dates and statuses. Keep it private; you can reset it on the Calendar page.</li>
+    <li><strong>Our service providers,</strong> only to run the service: Render (hosting and logs), Supabase (database and file storage), Anthropic (AI), Composio and Google (only if you connect Google), Stripe (payments, when offered), and Google Fonts and Cloudflare's cdnjs (fonts and math-rendering scripts, which receive your IP address when pages load). All are in the United States.</li>
+    <li><strong>Us:</strong> we can technically access stored data. We only do so to operate the service, fix a problem you report, keep it secure, or when the law requires it.</li>
+    <li><strong>The law:</strong> we disclose data if legally required, for example by a valid subpoena.</li>
+  </ul>
+
+  <h2>How long we keep it</h2>
+  <p>Until you delete it or your account. Stored files stay until you untick their class or delete your account, including files your instructor later removes from Canvas. Chat messages you delete are hidden from everyone at once and erased when your account is deleted. Our providers may keep backups for a short period after deletion.</p>
+
   <h2>Your choices</h2>
-  <p>You can export all your data or permanently delete your account at any time from Settings → Your data. Revoking the extension's token stops syncing immediately.</p>
-  <h2>Students and minors</h2>
-  <p>The Service is for users 13+. Users under 18 need a parent or guardian's consent. We follow FERPA and GDPR principles where applicable.</p>
+  <ul>
+    <li><strong>Export:</strong> Settings → Your data downloads your profile, classes and assignments, study sets, quizzes, tutor chats, chat messages and coin history. You can download your stored files from each class's Files page.</li>
+    <li><strong>Delete your account:</strong> Settings → Your data deletes your account and everything we store for it: synced data, stored files, study materials, tutor and chat messages, and live-quiz entries. It also disconnects Google. Two things stay: Stripe's own payment records, and events already added to your Google Calendar. To remove the calendar events, turn off Calendar sync before deleting.</li>
+    <li><strong>Stop syncing:</strong> revoke the extension's token on the Connect Canvas page, or remove the extension.</li>
+    <li><strong>Anything else:</strong> ask us at {{ contact() }} to see, correct or delete your data.</li>
+  </ul>
+
+  <h2>Age</h2>
+  <p>You must be 13 or older to use Homework Hatch. If you're under 18, a parent or guardian must agree to the <a href="{{ url_for('main.terms') }}">Terms</a> and this policy. If we learn we have data from a child under 13, we delete it.</p>
+
   <h2>Security</h2>
-  <p>Data is sent over HTTPS, tokens are stored hashed, and access to your data requires your login or your personal sync token.</p>
+  <p>Connections use HTTPS. Passwords and sync tokens are stored as hashes, and files sit in private storage. File download links expire after five minutes, and the links the extension uploads with expire after an hour. No system is perfectly secure; if a breach affects your data, we'll tell you as the law requires.</p>
+
+  <h2>Do Not Track and changes</h2>
+  <p>We don't track you across other sites, so browser Do Not Track signals don't change anything here. If we change this policy in a way that matters, we'll post the new version with a new effective date and tell signed-in users.</p>
+  {% include "_disclaimer.html" %}
 </div>
 {% endmacro %}
 {% block content %}{{ body() }}{% endblock %}

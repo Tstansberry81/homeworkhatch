@@ -1,7 +1,9 @@
 """Re-test quizzes after a prompt change: new-prompt candidate models against the Opus quizzes saved by
 model_eval.py (the old prompt, i.e. what production served). Blind and pairwise, both orders.
 
-    DATABASE_URL=sqlite:///path/hh.db python docs/evals/quiz_prompt_eval.py model_eval.json out.json
+Same rules as model_eval.py: synthetic or openly licensed material only.
+
+    DATABASE_URL=sqlite:///path/hh.db EVAL_SETS=sets.json python docs/evals/quiz_prompt_eval.py model_eval.json out.json
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from app.models import User
 from app.services import study
 
 sys.path.insert(0, "docs/evals")
-from model_eval import REFERENCE, SETS, checks, generate, pairwise, render  # noqa: E402
+from model_eval import REFERENCE, checks, generate, load_sets, pairwise, render  # noqa: E402
 
 CANDIDATES = ["claude-sonnet-5-5", "claude-opus-5-5"]
 
@@ -27,6 +29,7 @@ CANDIDATES = ["claude-sonnet-5-5", "claude-opus-5-5"]
 def main(saved_path: str, out_path: str):
     saved = {g["set"]: g for g in json.load(open(saved_path))["generation"] if g["kind"] == "quiz"}
     app = create_app("development")
+    SETS, _ = load_sets()
     rows = []
     with app.test_request_context():
         user = db.session.scalar(select(User).where(User.username == "traveler"))

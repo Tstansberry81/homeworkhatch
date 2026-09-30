@@ -55,7 +55,10 @@ class User(UserMixin, db.Model):
 
     streak_days: Mapped[int] = mapped_column(Integer, default=0)
     last_active_date: Mapped[str | None] = mapped_column(String(10))  # YYYY-MM-DD in the user's timezone
-    show_on_leaderboards: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_on_leaderboards: Mapped[bool] = mapped_column(Boolean, default=False)  # opt-in
+    # The student's standing choice for course files: True = keep files for every class, including
+    # new ones; False = only classes they tick; None = not chosen yet (no files are copied).
+    keep_all_files: Mapped[bool | None] = mapped_column(Boolean)
     calendar_token: Mapped[str] = mapped_column(String(64), unique=True, default=lambda: secrets.token_urlsafe(24))
     # Bumped on password change/reset; part of the login cookie, so old sessions stop working.
     session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
@@ -155,8 +158,10 @@ class Course(db.Model):
     files_tab_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     # Canvas's "weight final grade based on assignment groups" setting (None if unknown).
     group_weighting: Mapped[bool | None] = mapped_column(Boolean)
-    # Canvas user ids of the students enrolled, as seen by this student (for chat membership checks).
-    roster_ids: Mapped[list | None] = mapped_column(JSON)
+    chat_joined: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # opt-in class chat
+    # Whether the student chose to keep this class's files here: None until they decide, and
+    # files are only requested when True (the student directs every copy that's made).
+    sync_files: Mapped[bool | None] = mapped_column(Boolean)
     # Hash of the course's text content; the search index is rebuilt only when it changes.
     content_signature: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -438,6 +443,9 @@ class PracticeQuiz(db.Model):
     # [{"question", "choices": [4], "answer": index, "explanation"}]
     questions: Mapped[list] = mapped_column(JSON)
     source: Mapped[str] = mapped_column(String(20), default="manual")
+    # Generated from synced course files or uploads: those are instructors' or publishers' materials,
+    # so the quiz stays with its owner and can't be hosted live for others (UVA PROV-005, copyright).
+    from_course_files: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     seconds_per_question: Mapped[int] = mapped_column(Integer, default=20)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -549,23 +557,6 @@ class AIUsage(db.Model):
     cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     cost_usd: Mapped[float | None] = mapped_column(Float)  # at list price when the call finished
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
-
-
-class SharedGeneration(db.Model):
-    """One AI result reused by everyone who asks for the same thing from the same material, e.g. a
-    class's flashcards from the same lecture slides. The key hashes the exact request (instructions
-    plus the full source text), so a hit needs identical material the student already has; nothing
-    personal crosses between accounts. Reuses cost no AI call and no AI action."""
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    key: Mapped[str] = mapped_column(String(64), unique=True)
-    kind: Mapped[str] = mapped_column(String(40))
-    data: Mapped[dict] = mapped_column(JSON)
-    model: Mapped[str | None] = mapped_column(String(60))
-    cost_usd: Mapped[float | None] = mapped_column(Float)  # what the one real generation cost
-    uses: Mapped[int] = mapped_column(Integer, default=0, server_default="0")  # times served without a call
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 # ---------------------------------------------------------------- class chat

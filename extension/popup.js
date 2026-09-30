@@ -70,7 +70,8 @@ async function detectCanvas() {
 // nothing after it can be relied on. We record the pending origin first and let the
 // background worker finish the connection when the grant lands (permissions.onAdded).
 function connect(origin) {
-  chrome.storage.local.set({ pendingConnect: origin }); // not awaited: keep the user gesture
+  // Clicking "Agree and connect" is the student's consent to the disclosure above it.
+  chrome.storage.local.set({ pendingConnect: origin, consent: { at: new Date().toISOString(), origin } }); // not awaited: keep the user gesture
   chrome.permissions.request({ origins: [`${origin}/*`] })
     .then(async (granted) => {
       if (!granted) {
@@ -106,9 +107,9 @@ async function renderSetup() {
     const host = new URL(detected.origin).host;
     $("setupMsg").textContent = detected.loggedIn
       ? `Found Canvas at ${host}, signed in as ${detected.name}.`
-      : `Found Canvas at ${host}. Connect, then log in as usual.`;
+      : `Found Canvas at ${host}. Connect below, then log in as usual.`;
     $("connect").hidden = false;
-    $("connect").textContent = `Connect ${host}`;
+    $("connect").textContent = `Agree and connect ${host}`;
   } else {
     $("setupMsg").textContent = "Open your school's Canvas in this tab, then click the extension icon again.";
     $("connect").hidden = true;

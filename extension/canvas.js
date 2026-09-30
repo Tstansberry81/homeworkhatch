@@ -292,7 +292,7 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
   const courses = await pool(visible, concurrency, async (c, idx) => {
     onProgress({ step: "course", index: idx + 1, total: visible.length, name: c.name });
     const id = c.id;
-    const [assignments, groups, modules, pages, files, discussions, quizzes, roster, submissions] = await Promise.all([
+    const [assignments, groups, modules, pages, files, discussions, quizzes, submissions] = await Promise.all([
       safe(`assignments:${id}`, () =>
         client.all(`/courses/${id}/assignments`, { "include[]": ["submission"], order_by: "due_at" })),
       safe(`assignment_groups:${id}`, () => client.all(`/courses/${id}/assignment_groups`)),
@@ -303,7 +303,6 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
       safe(`quizzes:${id}`, () => client.all(`/courses/${id}/quizzes`)),
       // Teacher comments, rubric scores and your own uploaded attachments.
       // With no student_ids, Canvas returns the calling student's own submissions.
-      safe(`roster:${id}`, () => client.all(`/courses/${id}/users`, { "enrollment_type[]": "student" })),
       safe(`submissions:${id}`, () => client.all(`/courses/${id}/students/submissions`, {
         "include[]": ["submission_comments", "rubric_assessment"],
       })),
@@ -357,7 +356,6 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
       })),
       // The Pages list was unavailable, so `pages` only holds module-linked pages: not a full list.
       pages_partial: !Array.isArray(pages),
-      roster_ids: Array.isArray(roster) ? roster.map((u) => String(u.id)) : null,
       announcements: [],
       __moduleFileIds: (modules || []).flatMap((m) => (m.items || []).filter((it) => it.type === "File").map((it) => String(it.content_id))),
     };

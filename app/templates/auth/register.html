@@ -6,6 +6,10 @@
     <a class="brand" href="/" style="justify-content:center"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""><span>Homework Hatch</span></a>
     <div class="card">
       <h1>Create your account</h1>
+      {% if blocked %}
+      <p>Sorry, we can't create an account for you right now.</p>
+      <p class="small muted"><a href="/">Back to the home page</a></p>
+      {% else %}
       {% include "_flashes.html" %}
       <form method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -16,10 +20,22 @@
         <input id="username" name="username" type="text" value="{{ form.get('username', '') }}" autocomplete="username" pattern="[A-Za-z0-9_.\-]{3,30}" required>
         <label for="password">Password <span class="hint">(8+ characters)</span></label>
         <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" required>
-        <label class="check"><input type="checkbox" name="terms" required> I'm 13 or older and agree to the <a href="{{ url_for('main.terms') }}" target="_blank">Terms</a> and <a href="{{ url_for('main.privacy') }}" target="_blank">Privacy Policy</a>. If I'm under 18, a parent or guardian has agreed too.</label>
+        <label>Date of birth</label>
+        <div class="form-row">
+          <select name="birth_month" aria-label="Birth month" required>
+            <option value="">Month</option>
+            {% for m in ["January","February","March","April","May","June","July","August","September","October","November","December"] %}<option value="{{ loop.index }}" {{ 'selected' if form.get('birth_month') == loop.index|string }}>{{ m }}</option>{% endfor %}
+          </select>
+          <select name="birth_year" aria-label="Birth year" required>
+            <option value="">Year</option>
+            {% for y in range(now_utc().year, now_utc().year - 100, -1) %}<option {{ 'selected' if form.get('birth_year') == y|string }}>{{ y }}</option>{% endfor %}
+          </select>
+        </div>
+        <label class="check mt"><input type="checkbox" name="terms" required> I agree to the <a href="{{ url_for('main.terms') }}" target="_blank">Terms</a> and <a href="{{ url_for('main.privacy') }}" target="_blank">Privacy Policy</a>. If I'm under 18, a parent or guardian has agreed too.</label>
         <button class="btn btn-block mt" type="submit">Create account</button>
       </form>
       <p class="small muted mt">Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a></p>
+      {% endif %}
     </div>
   </div>
 </div>

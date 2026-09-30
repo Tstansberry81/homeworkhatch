@@ -12,11 +12,16 @@
 
   <section id="setup" hidden>
     <p id="setupMsg"></p>
-    <button id="connect" hidden>Connect</button>
+    <div id="disclosure" class="disclosure">
+      <strong>What connecting does</strong>
+      <p>While you're signed in to Canvas in this browser, Homework Hatch reads your classes: assignments, due dates, grades, instructor feedback, pages, announcements, discussion topics and calendar events. It sends them to your Homework Hatch account about every hour. Course files are sent only for the classes you choose on the website. It only reads the Canvas site you connect, never sees your password, and you can stop it any time by removing the extension.</p>
+      <p class="muted">See the <a href="https://homeworkhatch.onrender.com/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</p>
+    </div>
+    <button id="connect" hidden>Agree and connect</button>
     <details>
       <summary>Enter your Canvas address instead</summary>
       <label>Canvas URL <input id="manualUrl" type="url" placeholder="https://yourschool.instructure.com"></label>
-      <button id="connectManual" class="secondary">Connect</button>
+      <button id="connectManual" class="secondary">Agree and connect</button>
     </details>
   </section>
 

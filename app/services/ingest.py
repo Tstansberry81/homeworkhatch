@@ -82,6 +82,27 @@ def share_stored(row: CanvasFile, twin: CanvasFile) -> None:
     row.stored_fingerprint = row.wanted_fingerprint
 
 
+def forget_course_files(course: Course) -> int:
+    """Delete the stored copies of a class's files (the student stopped keeping them). Objects another
+    kept row still points at stay; so do the file names, so turning the class back on re-requests them."""
+    rows = db.session.scalars(select(CanvasFile).where(CanvasFile.course_id == course.id,
+                                                       CanvasFile.storage_key.is_not(None))).all()
+    keys = {r.storage_key for r in rows}
+    for r in rows:
+        r.storage_key = r.sha256 = r.stored_version = r.stored_fingerprint = r.stored_at = None
+        r.text, r.text_status, r.text_started_at = None, None, None
+        retrieval.rebuild_file_chunks(r)
+    db.session.flush()
+    still_used = set(db.session.scalars(select(CanvasFile.storage_key).where(CanvasFile.storage_key.in_(keys)))) if keys else set()
+    db.session.commit()
+    for key in keys - still_used:
+        try:
+            get_storage().delete_prefix(key)
+        except Exception as exc:
+            current_app.logger.warning("could not delete %s: %s", key, exc)
+    return len(rows)
+
+
 def _str(v) -> str | None:
     return None if v is None else str(v)
 
@@ -213,8 +234,8 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     claimed = db.session.scalar(select(CanvasAccount.user_id).where(
         CanvasAccount.host == host, CanvasAccount.canvas_user_id == canvas_user_id, CanvasAccount.user_id != user.id))
     if claimed:
-        # One Canvas identity per Homework Hatch account: stops someone from posing as a
-        # classmate (whose chat rooms and roster checks trust that identity).
+        # One Canvas identity per Homework Hatch account: stops one Canvas login from feeding
+        # several Homework Hatch accounts.
         raise IngestConflict("This Canvas account is already linked to a different Homework Hatch account.")
 
     account = db.session.scalar(select(CanvasAccount).where(
@@ -250,7 +271,9 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
         if course is None:
             course = Course(user_id=user.id, account_id=account.id, canvas_id=cid,
                             # First time we see it: follow the student's Canvas dashboard.
-                            hidden=c.get("on_dashboard") is False)
+                            hidden=c.get("on_dashboard") is False,
+                            # Files only if the student chose "all my classes"; otherwise they decide.
+                            sync_files=True if user.keep_all_files else None)
             db.session.add(course)
         term = c.get("term") or {}
         grade = c.get("grade") or {}
@@ -271,8 +294,6 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
         course.files_tab_hidden = bool(c.get("files_tab_hidden"))
         if "group_weighting" in c:
             course.group_weighting = c["group_weighting"] if isinstance(c["group_weighting"], bool) else None
-        if isinstance(c.get("roster_ids"), list):
-            course.roster_ids = [str(x)[:64] for x in c["roster_ids"]][:5000]
         db.session.flush()
         courses_by_canvas_id[cid] = course
 
@@ -344,7 +365,10 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     requested: set[str] = set()
     shared: list[CanvasFile] = []
     already_held = duplicates = 0
+    keeping = {c.id for c in courses_by_canvas_id.values() if c.sync_files}
     for fid, row, too_big in announced:
+        if row.course_id not in keeping:  # the student hasn't chosen to keep this class's files
+            continue
         if row.stored_version == row.wanted_version and row.stored_fingerprint == row.wanted_fingerprint:
             already_held += 1
             continue
@@ -396,10 +420,16 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     account.last_snapshot_hash = digest
     log_activity(user.id, "sync", f"{len(courses_by_canvas_id)} courses from {host}, {len(needed)} files needed")
 
-    # Keep the latest raw snapshot for debugging and re-processing.
+    # Keep the latest raw snapshot for debugging and re-processing, minus Canvas's signed download
+    # links (they work as bearer credentials for the student's files).
     try:
+        archived = json.loads(json.dumps(snapshot, default=str))
+        for c in archived.get("courses") or []:
+            for f in c.get("files") or []:
+                if isinstance(f, dict):
+                    f.pop("download_url", None)
         get_storage().put_bytes(f"u/{user.id}/snapshots/{account.id}-latest.json",
-                                json.dumps({"snapshot": snapshot, "files": manifest}).encode())
+                                json.dumps({"snapshot": archived, "files": manifest}).encode())
     except Exception as exc:  # storage trouble must not lose the sync itself
         current_app.logger.warning("could not store raw snapshot: %s", exc)
 
@@ -412,8 +442,10 @@ def _unchanged_run(user: User, account: CanvasAccount, snapshot: dict, manifest:
     missing (a failed upload is retried), without touching the classes. Same no-duplicates rules
     as a full sync: a copy of a stored file is linked to it, and one file is requested once."""
     announced = {str(m.get("id")) for m in manifest if m.get("id") is not None}
+    keeping = set(db.session.scalars(select(Course.id).where(Course.account_id == account.id,
+                                                             Course.sync_files.is_(True))))
     rows = [r for r in db.session.scalars(select(CanvasFile).where(CanvasFile.account_id == account.id)
-                                          .order_by(CanvasFile.id)) if r.canvas_id in announced]
+                                          .order_by(CanvasFile.id)) if r.canvas_id in announced and r.course_id in keeping]
     held = {r.stored_fingerprint: r for r in rows if r.storage_key and r.stored_fingerprint}
     needed, requested = [], set()
     for row in rows:

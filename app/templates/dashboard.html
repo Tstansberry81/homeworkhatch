@@ -30,10 +30,13 @@
   {% endif %}
 </div>
 
+{% if files_undecided %}
+<div class="flash">Pick which classes' files Homework Hatch should keep for your studying ({{ files_undecided }} class{{ 'es' if files_undecided != 1 }} not chosen yet). <a href="{{ url_for('settings.sync') }}#files">Choose classes</a></div>
+{% endif %}
 {% if not accounts %}
 <div class="card accent mb">
   <h2>Connect your Canvas</h2>
-  <p>Add the extension, sign in to Canvas like always, and your classes, due dates, grades and files land here, then stay in sync every hour.</p>
+  <p>Add the extension, sign in to Canvas like always, and your classes, due dates and grades land here and stay in sync every hour. You choose which classes' files to keep.</p>
   <a class="btn btn-ghost" href="{{ url_for('settings.sync') }}">Set it up {{ icon('arrow', 16) }}</a>
 </div>
 {% endif %}

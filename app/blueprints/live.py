@@ -1,5 +1,7 @@
-"""Live quizzes: a host runs one of their quizzes; players join with a code and nickname.
+"""Live quizzes: a host runs one of their quizzes; signed-in players join with a code and nickname.
 
+Only quizzes the host wrote or made from their own pasted notes can go live: a quiz generated from
+course files carries instructors' and publishers' material, which isn't the host's to hand out.
 State lives in the database and clients poll once a second, so it works on any number
 of server workers without WebSockets. Faster correct answers earn more points (up to 1000).
 """
@@ -7,6 +9,7 @@ of server workers without WebSockets. Faster correct answers earn more points (u
 from __future__ import annotations
 
 import secrets
+from datetime import timedelta
 
 from flask import Blueprint, abort, flash, jsonify, make_response, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -21,12 +24,16 @@ bp = Blueprint("live", __name__, url_prefix="/live")
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 PRIZES = [20, 10, 5]
+SESSION_HOURS = 6  # a game nobody finished closes on its own
 
 
 def _session(code: str) -> LiveSession:
     s = db.session.scalar(select(LiveSession).where(LiveSession.code == code.upper()))
     if s is None:
         abort(404)
+    if s.state != "finished" and utcnow() - s.created_at > timedelta(hours=SESSION_HOURS):
+        s.state = "finished"
+        db.session.commit()
     return s
 
 
@@ -35,7 +42,7 @@ def _player(s: LiveSession) -> LivePlayer | None:
     if not token:
         return None
     p = db.session.scalar(select(LivePlayer).where(LivePlayer.token == token, LivePlayer.session_id == s.id))
-    return p
+    return p if p is not None and p.user_id == current_user.id else None
 
 
 def _elapsed(s: LiveSession) -> float:
@@ -83,6 +90,10 @@ def create(quiz_id: int):
     quiz = db.session.get(PracticeQuiz, quiz_id)
     if quiz is None or quiz.user_id != current_user.id or not quiz.questions:
         abort(404)
+    if quiz.from_course_files:
+        flash("Quizzes made from course files stay private to you, so they can't be hosted live. "
+              "Host a quiz you wrote, or one made from your own pasted notes.", "info")
+        return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
     for _ in range(10):
         code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
         if not db.session.scalar(select(LiveSession.id).where(LiveSession.code == code)):
@@ -132,10 +143,13 @@ def control(code: str):
 
 
 @bp.route("/join", methods=["GET", "POST"])
+@login_required
 def join():
     code = (request.values.get("code") or "").strip().upper()
     if request.method == "POST":
         s = db.session.scalar(select(LiveSession).where(LiveSession.code == code))
+        if s is not None:
+            s = _session(s.code)  # closes a stale game
         nickname = (request.form.get("nickname") or "").strip()[:40]
         if s is None or s.state == "finished":
             flash("No live quiz with that code.", "error")
@@ -149,13 +163,12 @@ def join():
             flash(str(exc), "error")
             return render_template("live/join.html", code=code), 400
         existing = _player(s)
-        if existing is None and current_user.is_authenticated:
+        if existing is None:
             # One seat per account: rejoining (another tab/device) reuses the same player.
             existing = db.session.scalar(select(LivePlayer).where(LivePlayer.session_id == s.id,
                                                                   LivePlayer.user_id == current_user.id))
         if existing is None:
-            p = LivePlayer(session_id=s.id, nickname=nickname,
-                           user_id=current_user.id if current_user.is_authenticated else None)
+            p = LivePlayer(session_id=s.id, nickname=nickname, user_id=current_user.id)
             db.session.add(p)
             try:
                 db.session.commit()
@@ -172,6 +185,7 @@ def join():
 
 
 @bp.route("/<code>/play")
+@login_required
 def play(code: str):
     s = _session(code)
     if _player(s) is None:
@@ -180,6 +194,7 @@ def play(code: str):
 
 
 @bp.route("/<code>/answer", methods=["POST"])
+@login_required
 def answer(code: str):
     s = _session(code)
     p = _player(s)
@@ -210,9 +225,10 @@ def answer(code: str):
 
 
 @bp.route("/<code>/state")
+@login_required
 def state(code: str):
     s = _session(code)
-    is_host = current_user.is_authenticated and current_user.id == s.host_id
+    is_host = current_user.id == s.host_id
     player = None if is_host else _player(s)
     if not is_host and player is None:
         abort(403)

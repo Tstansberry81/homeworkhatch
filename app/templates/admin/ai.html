@@ -25,10 +25,5 @@
     <table class="table"><thead><tr><th>Student</th><th>Plan</th><th>Actions</th><th>Spend</th></tr></thead><tbody>
     {% for u, count, spend in top %}<tr><td><a href="{{ url_for('admin.user_detail', user_id=u.id) }}">{{ u.username }}</a></td><td>{{ u.plan }}</td><td>{{ count }}</td><td>{{ money(spend) }}</td></tr>
     {% else %}<tr><td colspan="4" class="muted">Nobody yet.</td></tr>{% endfor %}</tbody></table></div>
-  <div class="card"><h2>Saved by sharing</h2>
-    <p class="small muted">Sets, summaries and scanned-PDF readings reused instead of generated again (all time).</p>
-    <table class="table"><thead><tr><th>Kind</th><th>Saved results</th><th>Reuses</th><th>Saved</th></tr></thead><tbody>
-    {% for kind, rows, uses, value in saved %}<tr><td>{{ kind }}</td><td>{{ rows }}</td><td>{{ uses }}</td><td>{{ money(value) }}</td></tr>
-    {% else %}<tr><td colspan="4" class="muted">No reuses yet.</td></tr>{% endfor %}</tbody></table></div>
 </div>
 {% endblock %}

@@ -421,3 +421,4 @@ a.cite { display: inline-block; font: 700 .7rem var(--mono); padding: 0 6px; bor
   position: sticky; top: 0; background: var(--surface); z-index: 1; }
 .dice { font-size: 3rem; letter-spacing: .1em; }
 @media (hover: none) and (pointer: coarse) { .keys-hint { display: none; } }
+.ai-note { margin: 0 0 6px; padding-bottom: 8px; border-bottom: 1.5px dashed var(--hair); }

@@ -3,7 +3,7 @@
 {% block content %}
 {% include "_account_tabs.html" %}
 <div class="page-head">
-  <div><h1>Plans</h1><p class="muted">Canvas sync, the calendar, Google Calendar, your files, flashcards and quizzes you write, and study sets a classmate already made from the same files are free for everyone. Plans only add AI actions: tutor answers, summaries and new generated sets.</p></div>
+  <div><h1>Plans</h1><p class="muted">Canvas sync, the calendar, Google Calendar, your files, and flashcards and quizzes you write yourself are free for everyone. Plans only add AI actions: tutor answers, summaries and new generated sets.</p></div>
   <div class="card-flat small">{% if remaining is none %}AI actions: unlimited{% else %}<strong>{{ remaining }}</strong> AI action{{ 's' if remaining != 1 }} left{% if current.monthly %} this month ({{ used }} used){% else %} of your free {{ current.ai_actions }}{% endif %}{% endif %}
     {% if current.key == 'pass' and current_user.plan_expires_at and not current_user.plan_comped %}<br>Pass runs until <strong>{{ current_user.plan_expires_at|dt('date') }}</strong>{% endif %}</div>
 </div>

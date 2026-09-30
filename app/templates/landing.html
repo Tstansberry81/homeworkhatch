@@ -8,12 +8,12 @@
 </nav>
 <section class="hero">
   <div>
-    <span class="sticker">Works with any Canvas school</span>
+    <span class="sticker">For students on Canvas LMS</span>
     <h1 class="mt">Every deadline. Every file. <span class="hl">One tab.</span></h1>
     <p class="lead">Homework Hatch pulls in your Canvas (due dates, grades, slides, readings), then turns your actual course files into flashcards, quizzes and a tutor that cites them.</p>
     <div class="btn-row mt"><a class="btn" href="{{ url_for('auth.register') }}">Make a free account {{ icon('arrow', 16) }}</a>
       <a class="btn btn-ghost" href="#how">How it works</a></div>
-    <p class="small muted mt">Even at schools that block Canvas tokens. You sign in to Canvas like always; we never see your school password.</p>
+    <p class="small muted mt">You sign in to Canvas like always; we never see your school password.</p>
   </div>
   <div class="hero-art">
     <p class="kicker">This week</p>
@@ -31,11 +31,12 @@
 </section>
 <section class="features" id="how">
   <div class="grid grid-2">
-    <div class="card feature"><div class="ico">{{ icon('sync') }}</div><h3>Canvas, synced every hour</h3><p class="muted">A small browser extension reads Canvas the way the Canvas site does: assignments, grades, pages, announcements and every file your professors post. It only downloads what's new.</p></div>
+    <div class="card feature"><div class="ico">{{ icon('sync') }}</div><h3>Canvas, synced every hour</h3><p class="muted">A small browser extension reads your Canvas while you're signed in: assignments, grades, pages, announcements, and the course files from the classes you choose to keep. It only downloads what's new.</p></div>
     <div class="card feature"><div class="ico">{{ icon('study') }}</div><h3>Study sets from your real files</h3><p class="muted">Tick the lecture slides and readings you care about and get flashcards or a practice quiz built from exactly those. Flip through them anywhere.</p></div>
     <div class="card feature"><div class="ico">{{ icon('tutor') }}</div><h3>A tutor that cites your slides</h3><p class="muted">Ask anything; answers point back to your own syllabus, slides and pages. Attach a reading and ask about it. It explains instead of doing the work for you.</p></div>
     <div class="card feature"><div class="ico">{{ icon('calendar') }}</div><h3>Due dates in Google Calendar</h3><p class="muted">Flip one switch and every deadline lands in Google Calendar, updated when your professor moves it. No more copying the syllabus by hand.</p></div>
   </div>
-  <p class="center small muted mt"><a href="{{ url_for('main.terms') }}">Terms</a> · <a href="{{ url_for('main.privacy') }}">Privacy</a> · <a href="{{ url_for('main.support') }}">Support</a></p>
+  <p class="center small muted mt"><a href="{{ url_for('main.terms') }}">Terms</a> · <a href="{{ url_for('main.privacy') }}">Privacy</a> · <a href="{{ url_for('main.copyright') }}">Copyright</a> · <a href="{{ url_for('main.support') }}">Support</a></p>
+  {% include "_disclaimer.html" %}
 </section>
 {% endblock %}

@@ -12,9 +12,10 @@
   <ol>
     <li>Add the Homework Hatch extension to Chrome. It opens the <a href="{{ url_for('settings.sync') }}">Connect Canvas</a> page.</li>
     <li>Sign in (or sign up). The extension links itself to your account on that page.</li>
-    <li>Open your school's Canvas, click the Homework Hatch icon in the toolbar and press <em>Connect</em>, then allow access.</li>
+    <li>Open your school's Canvas, click the Homework Hatch icon in the toolbar, read what it syncs and press <em>Agree and connect</em>, then allow access to that Canvas site.</li>
+    <li>On <a href="{{ url_for('settings.sync') }}">Connect Canvas</a>, tick the classes whose files you want to keep here.</li>
   </ol>
-  <p>From then on it syncs every hour while Chrome is open, and only downloads files it doesn't already have.</p>
+  <p>From then on it syncs every hour while Chrome is open, and only downloads files it doesn't already have, from the classes you ticked.</p>
 
   <h2>Common problems</h2>
   <ul>
@@ -22,11 +23,13 @@
     <li><strong>"Not linked to Homework Hatch yet":</strong> open <a href="{{ url_for('settings.sync') }}">Connect Canvas</a> while signed in.</li>
     <li><strong>"A file couldn't be uploaded":</strong> it's retried automatically at the next sync.</li>
     <li><strong>A class is missing:</strong> the popup's <em>Courses shown</em> list controls which classes sync; it starts with your Canvas dashboard.</li>
-    <li><strong>"Hidden by instructors":</strong> normal. Some classes turn off tabs like Files or Pages; the extension reads everything else, including files linked from modules and pages.</li>
+    <li><strong>"Hidden by instructors":</strong> normal. Some classes turn off tabs like Files or Pages; the extension still reads what your instructor links for you in modules and pages, the same things you can open in Canvas.</li>
+    <li><strong>A class's files are missing:</strong> tick the class under "Which classes' files should we keep?" on <a href="{{ url_for('settings.sync') }}">Connect Canvas</a>.</li>
   </ul>
 
   <h2>Your data</h2>
-  <p>Export or delete everything from Settings → Your data. Revoking the extension's token on the Connect Canvas page stops syncing immediately. See the <a href="{{ url_for('main.privacy') }}">Privacy Policy</a>.</p>
+  <p>Export or delete your data from Settings → Your data. Revoking the extension's token on the Connect Canvas page stops syncing immediately. See the <a href="{{ url_for('main.privacy') }}">Privacy Policy</a>. Copyright complaints: see the <a href="{{ url_for('main.copyright') }}">Copyright policy</a>.</p>
+  {% include "_disclaimer.html" %}
 </div>
 {% endmacro %}
 {% block content %}{{ body() }}{% endblock %}

@@ -2,13 +2,13 @@
 {% from "_macros.html" import empty %}
 {% block title %}Class chat{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Class chat</h1><p class="muted">A room for each of your classes, shared with classmates at your school who also use Homework Hatch. Only people enrolled in the class can see it.</p></div></div>
+<div class="page-head"><div><h1>Class chat</h1><p class="muted">An opt-in room for each of your classes, shared with other Homework Hatch users whose Canvas includes the same class. We don't collect class rosters, so we can't confirm who's really enrolled: keep it to study talk.</p></div></div>
 {% if courses %}
 <div class="card">
   <ul class="list">
     {% for c in courses %}
     <li><div class="grow"><a class="title" href="{{ url_for('chat.room', course_id=c.id) }}">{{ c.name }}</a>
-      <div class="small muted">{{ counts.get(c.room_key, 1) }} member{{ 's' if counts.get(c.room_key, 1) != 1 }}{% if last.get(c.room_key) %} · last message {{ last[c.room_key]|ago }}{% endif %}</div></div>
+      <div class="small muted">{% if c.chat_joined %}Joined · {% endif %}{{ counts.get(c.room_key, 0) }} member{{ 's' if counts.get(c.room_key, 0) != 1 }}{% if last.get(c.room_key) %} · last message {{ last[c.room_key]|ago }}{% endif %}</div></div>
       <a class="btn btn-ghost btn-sm" href="{{ url_for('chat.room', course_id=c.id) }}">Open</a></li>
     {% endfor %}
   </ul>

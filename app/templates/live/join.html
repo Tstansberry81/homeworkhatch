@@ -10,7 +10,7 @@
   <label for="nickname">Nickname</label>
   <input id="nickname" name="nickname" type="text" maxlength="40" value="{{ current_user.display_name if current_user.is_authenticated else '' }}" required>
   <button class="btn btn-block mt" type="submit">Join</button>
-  {% if current_user.is_authenticated %}<p class="small muted mt center">Want to host? Open one of your <a href="{{ url_for('study.index') }}">practice quizzes</a> and hit “Host live”.</p>{% endif %}
+  <p class="small muted mt center">Want to host? Open a practice quiz you wrote (or made from your own notes) and hit “Host live”. Quizzes made from course files stay private.</p>
 </form>
 {% endmacro %}
 {% block content %}

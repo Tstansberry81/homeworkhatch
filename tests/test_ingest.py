@@ -195,32 +195,44 @@ def test_one_canvas_identity_per_account(app, client, snapshot, manifest):
     assert r.status_code == 409, "someone else can't claim Alice's Canvas identity"
 
 
-def test_chat_rooms_lock_out_unconfirmed_accounts(app, client, snapshot, manifest):
+def test_files_are_copied_only_for_classes_the_student_chose(app, client, snapshot, manifest):
+    from app.services.storage import get_storage
+
     from .conftest import login
 
-    alice, bob, mallory = make_user("alice"), make_user("bob"), make_user("mallory")
-    roster = ["501", "502"]
-    snapshot["courses"][0]["roster_ids"] = roster
-    sync(client, api_token(alice), snapshot, manifest)                       # canvas user 501
-    snapshot["user"]["id"] = "502"
-    sync(client, api_token(bob), snapshot, manifest)                         # classmate 502
-    fake = dict(snapshot, user={"id": "666", "name": "Faker"})
-    fake["courses"] = [dict(snapshot["courses"][0], roster_ids=["501", "502", "666"])]
-    sync(client, api_token(mallory), fake, manifest)                         # made-up identity
+    student = make_user("ria", keep_all_files=None)  # hasn't chosen yet
+    token = api_token(student)
+    snapshot["courses"][0]["roster_ids"] = ["501", "502"]  # an old extension still sending a roster
+    snapshot["courses"][0]["files"][0]["download_url"] = "https://canvas.test/files/9001/download?verifier=secret"
+    _, uploaded = sync(client, token, snapshot, manifest)
+    assert uploaded == [], "no course files until the student picks classes"
+    archived = get_storage().read(f"u/{student.id}/snapshots/"
+                                  f"{db.session.scalar(select(Course.account_id).limit(1))}-latest.json").decode()
+    assert "verifier=secret" not in archived and "download_url" not in archived, "signed links aren't kept"
+    assert all(c.sync_files is None for c in db.session.scalars(select(Course)))
 
-    def room(user):
-        c = app.test_client()
-        login(c, user)
-        course = db.session.scalar(select(Course).where(Course.user_id == user.id, Course.canvas_id == "101"))
-        return c, course.id
+    c = app.test_client()
+    login(c, student)
+    assert b"not chosen yet" in c.get("/dashboard", follow_redirects=True).data
+    calc = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
+    c.post("/settings/files", data={"mode": "pick", "keep": [str(calc.id)]})
+    _, uploaded = sync(client, token, snapshot, manifest)
+    calc_files = {f.canvas_id for f in db.session.scalars(select(CanvasFile).where(CanvasFile.course_id == calc.id))}
+    assert uploaded and set(uploaded) <= calc_files, "only the ticked class's files"
 
-    (ca, a_id), (cb, b_id), (cm, m_id) = room(alice), room(bob), room(mallory)
-    assert ca.post(f"/chat/course/{a_id}/messages", json={"body": "study group tonight?"}).status_code == 200
-    assert cb.get(f"/chat/course/{b_id}/messages").get_json()["messages"][0]["body"] == "study group tonight?"
-    assert cm.get(f"/chat/course/{m_id}/messages").status_code == 403, "not on real classmates' rosters"
-    assert cm.post(f"/chat/course/{m_id}/messages", json={"body": "hi"}).status_code == 403
-    page = cb.get(f"/chat/course/{b_id}").get_data(as_text=True)
-    assert "unconfirmed" in page
+    # Unticking deletes the stored copies (and their text), keeping the names for later.
+    c.post("/settings/files", data={"mode": "pick", "keep": []})
+    rows = db.session.scalars(select(CanvasFile).where(CanvasFile.course_id == calc.id)).all()
+    assert rows and all(r.storage_key is None and r.text is None for r in rows)
+    assert db.session.scalar(select(func.count(ContentChunk.id)).where(ContentChunk.source_type == "file")) == 0
+    _, uploaded = sync(client, token, snapshot, manifest)
+    assert uploaded == []
+
+    # "All my classes, including new ones": every current class, and classes that show up later.
+    c.post("/settings/files", data={"mode": "all"})
+    snapshot["courses"].append(dict(snapshot["courses"][0], id="777", name="New class", files=[]))
+    sync(client, token, snapshot, manifest)
+    assert db.session.scalar(select(Course.sync_files).where(Course.canvas_id == "777")) is True
 
 
 # ---------------------------------------------------------------- duplicate files

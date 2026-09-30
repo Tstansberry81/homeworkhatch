@@ -134,6 +134,7 @@
     <button class="btn btn-sm" name="output" value="quiz" disabled>Quiz</button>
     <button type="button" class="linklike small" id="pick-all">Select all readable</button>
   </form>
+  {% if not course.sync_files %}<div class="flash">Files for this class aren't being kept here. <a href="{{ url_for('settings.sync') }}#files">Choose to keep them</a> if you want to study from them.</div>{% endif %}
   <p class="small muted">{{ listed|selectattr('storage_key')|list|length }} of {{ listed|length }} Canvas files stored.{% if course.files_tab_hidden %} This class hides its Files tab; these were found through modules and links.{% endif %}
     <a href="{{ url_for('uploads.index') }}">Add your own files</a>.</p>
   <ul class="list" id="pick-list">

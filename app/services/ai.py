@@ -1,4 +1,4 @@
-"""Claude access for every AI feature, with per-plan quotas and shared results.
+"""Claude access for every AI feature, with per-plan monthly quotas.
 
 All calls go through `complete()` (one response, optionally JSON-schema constrained) or
 `stream()` (tutor chat). Requests opt into server-side refusal fallbacks
@@ -8,7 +8,6 @@ Anthropic's recommended fallback model instead of failing.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -17,11 +16,10 @@ from pathlib import Path
 from typing import Callable, Iterator, Protocol
 
 from flask import current_app
-from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
 
 from ..extensions import db
-from ..models import AIUsage, SharedGeneration, User, utcnow
+from ..models import AIUsage, User, utcnow
 from . import billing
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -223,7 +221,7 @@ def remaining(user: User) -> int | None:
 def _over_limit_message(plan: billing.Plan) -> str:
     if not plan.monthly:
         return (f"You've used your {plan.ai_actions} free AI actions. A Semester Pass or Plus gives you "
-                f"{billing.PLANS['plus'].ai_actions} a month. Study sets already made from the same files stay free.")
+                f"{billing.PLANS['plus'].ai_actions} a month. Everything that doesn't use AI stays free.")
     return f"You've used all {plan.ai_actions} AI actions this month. They reset on the 1st."
 
 
@@ -275,53 +273,11 @@ def complete(user: User, kind: str, *, system: str, prompt: str, max_tokens: int
     return result
 
 
-# ---------------------------------------------------------------- shared results
-
-
-def request_key(kind: str, *parts) -> str:
-    """Identifies an AI request by exactly what the model would be asked (see SharedGeneration)."""
-    raw = json.dumps([kind, *parts], sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-def reuse(key: str) -> dict | None:
-    row = db.session.scalar(select(SharedGeneration).where(SharedGeneration.key == key))
-    if row is None:
-        return None
-    db.session.execute(update(SharedGeneration).where(SharedGeneration.id == row.id)
-                       .values(uses=SharedGeneration.uses + 1, last_used_at=utcnow()))
-    db.session.commit()
-    return row.data
-
-
-def remember(key: str, kind: str, data: dict, result: AIResult | None) -> None:
-    if db.session.scalar(select(SharedGeneration.id).where(SharedGeneration.key == key)):
-        return  # a "new version" of something already shared; the first one stays
-    model = result.model if result else None
-    cost = cost_usd(model, result.input_tokens, result.output_tokens, result.cache_write_tokens,
-                    result.cache_read_tokens) if result else None
-    try:
-        with db.session.begin_nested():
-            db.session.add(SharedGeneration(key=key, kind=kind, data=data, model=model, cost_usd=cost))
-    except IntegrityError:
-        pass  # someone else saved the same request a moment ago
-    db.session.commit()
-
-
 def complete_json(user: User, kind: str, *, system: str, prompt: str, schema: dict, effort: str = "medium",
-                  max_tokens: int = 16000, validate: Callable[[dict], dict] | None = None, share: bool = False,
-                  fresh: bool = False) -> dict:
-    """The parsed result, plus `shared`: True when it was reused instead of generated (no AI action used).
-    `share` reuses and saves results keyed on the exact request; `fresh` skips the reuse."""
-    key = request_key(kind, system, prompt, schema) if share else None
-    if key and not fresh and (hit := reuse(key)) is not None:
-        return {**hit, "shared": True}
+                  max_tokens: int = 16000, validate: Callable[[dict], dict] | None = None) -> dict:
     result = complete(user, kind, system=system, prompt=prompt, schema=schema, effort=effort, max_tokens=max_tokens)
     try:
         data = json.loads(result.text)
     except json.JSONDecodeError as exc:
         raise AIError("The AI returned something unreadable. Try again.") from exc
-    data = validate(data) if validate else data
-    if key:
-        remember(key, kind, data, result)
-    return {**data, "shared": False}
+    return validate(data) if validate else data

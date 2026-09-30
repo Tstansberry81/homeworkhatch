@@ -128,7 +128,7 @@ def load_config(env_name: str) -> dict:
         "DOWNLOAD_URL_TTL": env_int("DOWNLOAD_URL_TTL", 300),
         # The extension uploads files straight to storage with presigned URLs valid this long
         # (a first sync of a big semester can take a while).
-        "UPLOAD_URL_TTL": env_int("UPLOAD_URL_TTL", 6 * 3600),
+        "UPLOAD_URL_TTL": env_int("UPLOAD_URL_TTL", 3600),
         # Read text from uploaded files in the request instead of a background thread (tests).
         "EXTRACT_INLINE": env_bool("EXTRACT_INLINE", False),
 

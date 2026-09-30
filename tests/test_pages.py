@@ -15,9 +15,11 @@ from app.services import coins
 
 from .conftest import login, make_user
 
+DOB = {"birth_month": "3", "birth_year": "2005"}
+
 
 def test_public_pages(client):
-    for path in ("/", "/login", "/register", "/terms", "/privacy", "/support", "/live/join", "/health"):
+    for path in ("/", "/login", "/register", "/terms", "/privacy", "/copyright", "/support", "/health"):
         r = client.get(path)
         assert r.status_code == 200, path
     assert client.get("/dashboard").status_code == 302, "login required"
@@ -103,9 +105,22 @@ def test_extension_download_zip(app, synced_user, client):
 # ---------------------------------------------------------------- accounts
 
 
+def test_registration_turns_away_under_13s_without_a_retry(app, client):
+    young = {"email": "kid@example.com", "username": "kiddo", "password": "longenough", "terms": "on",
+             "birth_month": "12", "birth_year": str(utcnow().year - 13)}  # 12 until December
+    r = client.post("/register", data=young)
+    assert r.status_code == 403 and b"create an account for you" in r.data and b"13 or older" not in r.data
+    assert db.session.scalar(select(User).where(User.username == "kiddo")) is None
+    assert client.post("/register", data={**young, "birth_year": "2000"}).status_code == 403, "no second try"
+    fresh = app.test_client()
+    assert fresh.post("/register", data={**young, "birth_month": ""}).status_code == 400
+    ok = fresh.post("/register", data={**young, "birth_year": "2000"})
+    assert ok.status_code == 302 and db.session.scalar(select(User.birth_year).where(User.username == "kiddo")) == 2000
+
+
 def test_register_first_user_is_admin_then_login(client):
     r = client.post("/register", data={"email": "first@example.com", "username": "first", "password": "longenough",
-                                       "terms": "on", "timezone": "America/Chicago"})
+                                       "terms": "on", "timezone": "America/Chicago", **DOB})
     assert r.status_code == 302 and r.headers["Location"].endswith("/welcome")
     user = db.session.scalar(select(User))
     assert user.is_admin and user.timezone == "America/Chicago"
@@ -116,10 +131,10 @@ def test_register_first_user_is_admin_then_login(client):
 def test_registration_validation_and_approval(app):
     client = app.test_client()
     make_user("existing")
-    r = client.post("/register", data={"email": "existing@example.com", "username": "Existing", "password": "longenough", "terms": "on"})
+    r = client.post("/register", data={"email": "existing@example.com", "username": "Existing", "password": "longenough", "terms": "on", **DOB})
     assert r.status_code == 400 and b"already exists" in r.data and b"taken" in r.data
     app.config["REQUIRE_APPROVAL"] = True
-    r = client.post("/register", data={"email": "new@example.com", "username": "newbie", "password": "longenough", "terms": "on"})
+    r = client.post("/register", data={"email": "new@example.com", "username": "newbie", "password": "longenough", "terms": "on", **DOB})
     assert b"on the list" in r.data
     r = client.post("/login", data={"identifier": "newbie", "password": "longenough"})
     assert r.status_code == 403
@@ -374,8 +389,8 @@ def test_login_lockout_and_password_change_ends_sessions(app):
 def test_no_automatic_admin_in_production(app):
     app.config["ENV_NAME"] = "production"
     c = app.test_client()
-    c.post("/register", data={"email": "first@example.com", "username": "firstone", "password": "longenough", "terms": "on"})
+    c.post("/register", data={"email": "first@example.com", "username": "firstone", "password": "longenough", "terms": "on", **DOB})
     assert db.session.scalar(select(User).where(User.username == "firstone")).is_admin is False
     app.config["ADMIN_EMAIL"] = "boss@example.com"
-    app.test_client().post("/register", data={"email": "boss@example.com", "username": "bossy", "password": "longenough", "terms": "on"})
+    app.test_client().post("/register", data={"email": "boss@example.com", "username": "bossy", "password": "longenough", "terms": "on", **DOB})
     assert db.session.scalar(select(User).where(User.username == "bossy")).is_admin is True

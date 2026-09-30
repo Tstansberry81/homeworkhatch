@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "legal/_contact.html" import contact %}
+{% block title %}Copyright policy{% endblock %}
+{% macro body() %}
+<div class="card prose" style="max-width:820px;margin:0 auto">
+  <h1>Copyright policy</h1>
+  <p class="muted small">Effective September 30, 2026. Homework Hatch L.L.C.</p>
+  <p>Homework Hatch stores course files and study materials privately, in the account of the student who synced or made them, for that student's own study. If you believe something on Homework Hatch infringes your copyright, for example your course materials, send a notice to {{ contact() }} that includes:</p>
+  <ol>
+    <li>your physical or electronic signature;</li>
+    <li>the copyrighted work you believe is infringed;</li>
+    <li>the material you want removed, with enough detail for us to find it, such as the file name, class and school;</li>
+    <li>your contact information;</li>
+    <li>a statement that you have a good-faith belief the use isn't authorized by you, your agent or the law;</li>
+    <li>a statement, under penalty of perjury, that your notice is accurate and that you're the owner or authorized to act for the owner.</li>
+  </ol>
+  <p><strong>What we do:</strong> we remove or disable the material promptly, including study materials made from it, and tell the affected user.</p>
+  <p><strong>Counter-notices:</strong> if your material was removed by mistake, you can send a counter-notice with the information required by 17 U.S.C. §512(g).</p>
+  <p><strong>Repeat infringers:</strong> we close their accounts.</p>
+  <p><strong>Instructors:</strong> you can also ask us to remove your course materials from Homework Hatch without a formal notice. Write to the same address.</p>
+  {% include "_disclaimer.html" %}
+</div>
+{% endmacro %}
+{% block content %}{{ body() }}{% endblock %}
+{% block public %}<div style="padding:32px 16px">{{ body() }}</div>{% endblock %}

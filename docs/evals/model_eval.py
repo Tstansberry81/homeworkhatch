@@ -1,17 +1,22 @@
 """Does a cheaper model make study sets and tutor answers as good as Opus? Blind, pairwise.
 
 Runs the app's real generation path (study.generate_flashcards / generate_quiz with per-feature
-models) and the tutor prompt on real course files, then asks Claude Opus 5.5 to judge each
-cheaper model against Opus, in both orders to cancel position bias. Needs a database with synced
-course files (e.g. a local replay of a real export) and ANTHROPIC_API_KEY. Spends real money
-(about $6-8 for the default sets).
+models) and the tutor prompt on files in a local database, then asks Claude Opus 5.5 to judge each
+cheaper model against Opus, in both orders to cancel position bias. Needs ANTHROPIC_API_KEY and
+spends real money (about $6-8 for four sets and six questions).
 
-    DATABASE_URL=sqlite:///path/hh.db python docs/evals/model_eval.py out.json
+Use only material you have the right to process for this purpose: synthetic course files or
+openly licensed ones (e.g. OpenStax). Don't run it on real course materials; instructors' files
+aren't ours to use to develop the product (UVA PROV-005, copyright). The sets live in a local JSON
+file, not in the repo: {"sets": {"name": ["file:1", ...]}, "tutor": [["course name contains", "question"]]}.
+
+    DATABASE_URL=sqlite:///path/hh.db EVAL_SETS=sets.json python docs/evals/model_eval.py out.json
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -29,20 +34,13 @@ from app.blueprints.tutor import SYSTEM as TUTOR_SYSTEM
 MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"]
 REFERENCE, JUDGE = "claude-opus-5-5", "claude-opus-5-5"
 
-SETS = {  # name -> canvas file ids in the local replay database
-    "CS labs 2-4": ["file:78", "file:67", "file:54"],
-    "Balkanization reading": ["file:6"],
-    "Calc limits lessons 1-3": ["file:108", "file:110", "file:112"],
-    "Nozick reading (long)": ["file:32"],
-}
-TUTOR = [  # (course name contains, question)
-    ("Calculus", "Why does the limit of (x^2-1)/(x-1) as x approaches 1 exist even though the function is undefined at 1?"),
-    ("Calculus", "How do I know when to use the chain rule versus the product rule?"),
-    ("Programming", "Why does 'hello'[1::2] give 'el'?"),
-    ("Empirical", "What does the balkanization paper say about Liberia?"),
-    ("Moral", "Explain Nozick's entitlement theory simply, and give one strong objection to it."),
-    ("Econ", "What's the difference between a change in demand and a change in quantity demanded?"),
-]
+
+
+def load_sets(path: str | None = None) -> tuple[dict, list]:
+    """The eval's file sets and tutor questions, from the local JSON file named by EVAL_SETS."""
+    cfg = json.load(open(path or os.environ["EVAL_SETS"]))
+    return cfg["sets"], [tuple(t) for t in cfg["tutor"]]
+
 
 SCORE = {"type": "object", "properties": {
     "accuracy": {"type": "integer"}, "coverage": {"type": "integer"}, "quality": {"type": "integer"},
@@ -64,9 +62,7 @@ def generate(user, kind: str, refs: list[str], model: str) -> dict:
     current_app.config["AI_MODELS"] = {kind if kind != "deck" else "flashcards": model}
     material = study.gather_sources(user, refs)
     t0 = time.time()
-    # fresh: a saved result from another model must not stand in for this one
-    data = (study.generate_flashcards(user, material, 15, fresh=True) if kind == "deck"
-            else study.generate_quiz(user, material, 10, fresh=True))
+    data = study.generate_flashcards(user, material, 15) if kind == "deck" else study.generate_quiz(user, material, 10)
     row = db.session.scalars(select(ai.AIUsage).order_by(ai.AIUsage.id.desc()).limit(1)).first()
     return {"model": model, "kind": kind, "seconds": round(time.time() - t0, 1), "data": data, "material": material.text,
             "usage": {"in": row.input_tokens, "out": row.output_tokens, "cost": row.cost_usd}}
@@ -126,6 +122,7 @@ def pairwise(app, source, what, ref_text, cand_text):
 
 def main(out_path: str):
     app = create_app("development")
+    SETS, TUTOR = load_sets()
     results = {"generation": [], "tutor": []}
     with app.test_request_context():  # sources link back to file pages
         user = db.session.scalar(select(User).where(User.username == "traveler"))

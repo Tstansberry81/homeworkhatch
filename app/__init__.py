@@ -172,7 +172,7 @@ def _register_cli(app: Flask) -> None:
         user = db.session.scalar(select(User).where(User.username == "demo"))
         if user is None:
             user = User(email="demo@example.com", username="demo", display_name="Demo", accepted_terms_at=utcnow(),
-                        onboarded=True, timezone="America/New_York")
+                        onboarded=True, timezone="America/New_York", keep_all_files=True)  # synthetic files only
             user.set_password("demo12345")
             db.session.add(user)
             db.session.commit()

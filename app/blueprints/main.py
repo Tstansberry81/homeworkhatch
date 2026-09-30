@@ -61,6 +61,11 @@ def support():
     return render_template("legal/support.html")
 
 
+@bp.route("/copyright")
+def copyright():
+    return render_template("legal/copyright.html")
+
+
 @bp.route("/welcome", methods=["GET", "POST"])
 @login_required
 def onboarding():
@@ -75,12 +80,6 @@ def onboarding():
             return render_template("onboarding.html"), 400
         current_user.grade_level = (f.get("grade_level") or "").strip()[:40] or None
         current_user.timezone = valid_timezone(f.get("timezone"))
-        year = f.get("birth_year", "").strip()
-        if year:
-            if not year.isdigit() or not 1900 < int(year) <= utcnow().year - 13:
-                flash("Homework Hatch is for students 13 and older.", "error")
-                return render_template("onboarding.html"), 400
-            current_user.birth_year = int(year)
         current_user.onboarded = True
         db.session.commit()
         return redirect(url_for("settings.sync"))
@@ -113,6 +112,7 @@ def dashboard():
         missing=queries.missing(current_user.id), classes=queries.class_rows(courses),
         announcements=queries.recent_announcements(current_user.id), accounts=accounts,
         stale=last_sync is None or (utcnow() - last_sync) > timedelta(hours=3),
+        files_undecided=sum(1 for c in courses if c.sync_files is None),
     )
 
 

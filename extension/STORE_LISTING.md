@@ -12,45 +12,53 @@ first; the store rejects a version it has already seen.
 
 ## Store listing tab
 
-**Name:** Homework Hatch (from the manifest)
+**Name:** Homework Hatch (from the manifest). Don't put "Canvas" in the name, icon or promo art; say
+"for Canvas LMS" in plain text only.
 
 **Summary** (from the manifest description):
 Syncs your own Canvas classes, deadlines, grades and files to Homework Hatch using your normal Canvas login.
 
 **Description:**
 
-    Homework Hatch turns your Canvas into one clean place to plan and study.
+    Homework Hatch puts every deadline from your Canvas LMS classes in one place, and helps you
+    study from your own course material.
 
-    This extension reads your own Canvas account, using the login you already have, and
-    syncs it to your Homework Hatch account every hour:
-    • classes, assignments, due dates and grades
-    • pages, modules, announcements and discussions
-    • course files, uploaded directly to your private storage
+    While you're signed in to Canvas in Chrome, this extension reads your own classes and
+    syncs them to your Homework Hatch account about every hour:
+    • classes, assignments, due dates, grades and your instructors' feedback
+    • pages, modules, announcements, discussion topics and calendar events
+    • course files, only for the classes you choose, into your private storage
 
-    It works even at schools that turn off Canvas API tokens, because it uses your normal
-    browser session. Your school password never leaves Canvas.
+    It only reads the Canvas site you connect and never sees your school password. Before
+    connecting, it shows exactly what it syncs and asks you to agree.
 
-    On Homework Hatch you get a calendar, a two-week study plan, grade what-ifs, flashcards
-    and practice quizzes made from your own course material, and an AI tutor that knows
-    your classes.
+    On Homework Hatch you get a calendar (with optional Google Calendar sync), a week view with
+    countdowns, grades, your course files, flashcards and practice quizzes made from the files
+    you pick, and an AI tutor that cites your own materials.
 
     Setup: add the extension, sign in at https://homeworkhatch.onrender.com and open
-    "Connect Canvas" (the extension links itself to your account), then open your Canvas,
-    click the extension and press Connect.
+    "Connect Canvas" (the extension links itself to your account). Then open your Canvas, click
+    the extension, read what it syncs and press "Agree and connect". Finally, choose which
+    classes' files to keep on the Connect Canvas page.
+
+    Canvas is a trademark of Instructure, Inc. Homework Hatch is independent and not affiliated
+    with, endorsed by or sponsored by Instructure or any school.
 
 **Category:** Education
 **Language:** English
 
 **Graphic assets:**
 - Store icon: `dist/store/icon-128.png`
-- Screenshots (1280x800): `dist/store/screenshot-1-dashboard.png`, `-2-study-plan.png`, `-3-calendar.png`
+- Screenshots (1280x800): `dist/store/screenshot-1-dashboard.png`, `-3-calendar.png`. Retake the second one
+  (the study plan was removed), for example the Files or flashcard viewer, from the demo account.
 - Small promo tile (440x280): `dist/store/promo-tile-440x280.png`
 
 ## Privacy practices tab
 
 **Single purpose:**
-Sync the user's own Canvas course data (classes, assignments, grades, pages, announcements and
-files) to their Homework Hatch account so they can plan and study.
+Sync your Canvas coursework (assignments, due dates, grades, instructor feedback, pages, announcements,
+discussion topics, calendar events, and the course files of classes you choose) to your Homework Hatch
+account so you can plan and study.
 
 **Permission justifications:**
 - `storage`: Saves the user's settings: their Canvas address, their Homework Hatch server address and
@@ -58,8 +66,9 @@ files) to their Homework Hatch account so they can plan and study.
 - `unlimitedStorage`: When the user downloads their course files as one zip, the zip is assembled
   locally and can be larger than the default storage quota.
 - `alarms`: Runs the automatic sync once an hour.
-- `scripting`: Some schools only serve course files to the Canvas page itself. The extension then
-  fetches the file from inside the user's open Canvas tab.
+- `scripting`: Checks whether the tab the user is on is a Canvas site when they click Connect. Also,
+  some schools only serve course files to the Canvas page itself, so the extension then fetches a file
+  the user can already open from inside their open Canvas tab.
 - `downloads`: Saves the zip of course files when the user asks for it.
 - `activeTab`: Reads the address of the Canvas tab the user is on when they click Connect.
 - `offscreen`: Extension service workers can't create download URLs, so an offscreen document turns
@@ -77,7 +86,12 @@ The extension never sends Canvas data or the token back to the page.
 **Data usage.** Tick these:
 - Personally identifiable information (the user's name and Canvas user ID)
 - Authentication information (the Homework Hatch sync token, stored in the extension)
-- Website content (the user's course content, grades and files from Canvas)
+- Personal communications (instructors' comments on the user's submissions, announcements and discussion
+  topics, which can include other people's names)
+- Website content (the user's course content, grades and chosen course files from Canvas)
+
+The extension shows this disclosure and an "Agree and connect" button before it reads anything. It no
+longer collects class rosters (removed in 1.4.1), and Canvas's signed file links never leave the browser.
 
 Then certify all three statements: data isn't sold to third parties, isn't used or transferred for
 purposes unrelated to the single purpose, and isn't used to determine creditworthiness or for
@@ -100,5 +114,5 @@ lending.
     "Connect Canvas" page (the extension links itself to the account there), then open Canvas,
     click the extension and press Connect.
 
-New sign-ups wait for approval (`REQUIRE_APPROVAL=1`), so approve the reviewer's account under
-Admin if one shows up while the extension is in review.
+If sign-up approval is on (`REQUIRE_APPROVAL=1`), approve the reviewer's account under Admin if one
+shows up while the extension is in review.

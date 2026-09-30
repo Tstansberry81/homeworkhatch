@@ -118,7 +118,7 @@ SETUPS = {
     "sonnet": Setup("Option: summaries on Sonnet too (untested)",
                     {"default": "Sonnet 5.5", "Read a scanned PDF (20 pages)": "Opus 5.5"}),
 }
-SHARED_HIT = 0.30  # ASSUME: 3 in 10 sets/summaries/PDF readings are already made by a classmate (0 with one user per class)
+SHARED_HIT = 0.0  # cross-account reuse of generated material was removed (legal review, Sept 30 2026)
 
 # ---------------------------------------------------------------- plans
 
@@ -159,7 +159,7 @@ def main():
 
     print("\n== Blended cost per AI action ==")
     for key, s in SETUPS.items():
-        print(f"   {s.name:70} " + "  ".join(f"{int(h * 100)}% shared ${s.per_action(h):.4f}" for h in (0.0, SHARED_HIT, 0.6)))
+        print(f"   {s.name:70} ${s.per_action(0.0):.4f}")
 
     print("\n== Hosting per month (Supabase Pro + Render + Composio), excluding AI ==")
     for n in (100, 1_000, 5_000, 10_000):
@@ -182,7 +182,7 @@ def main():
 
     print("\n== Whole business per month ==")
     print(f"   ({int(PAID_SHARE * 100)}% pay; free users {FREE_TRIAL_ACTIONS_PER_MONTH} AI actions/mo after the trial change,"
-          f" paid {PAID_TYPICAL}; {int(SHARED_HIT * 100)}% of sets shared)")
+          f" paid {PAID_TYPICAL})")
     b = BEFORE_PLANS
     before_per = SETUPS["before"].per_action(0.0)
     for n in (100, 1_000, 10_000):

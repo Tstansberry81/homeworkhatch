@@ -5,7 +5,7 @@ from datetime import timedelta
 from urllib.parse import urlparse
 from zoneinfo import available_timezones
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import func, select
 
@@ -17,6 +17,19 @@ bp = Blueprint("auth", __name__)
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,30}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MIN_AGE = 13  # COPPA: no accounts for children under 13
+
+
+def _age(month, year) -> int | None:
+    """Whole years from a birth month and year (the day is unknown, so assume the 1st)."""
+    try:
+        month, year = int(month), int(year)
+    except (TypeError, ValueError):
+        return None
+    today = utcnow().date()
+    if not 1 <= month <= 12 or not today.year - 120 <= year <= today.year:
+        return None
+    return today.year - year - (1 if today.month < month else 0)
 _TIMEZONES = None
 
 
@@ -68,6 +81,15 @@ def register():
             errors.append("Usernames are 3–30 letters, numbers, dots, dashes or underscores.")
         if len(password) < 8:
             errors.append("Use a password of at least 8 characters.")
+        if session.get("age_blocked"):
+            return render_template("auth/register.html", form={}, blocked=True), 403
+        age = _age(form.get("birth_month"), form.get("birth_year"))
+        if age is None:
+            errors.append("Enter your birth month and year.")
+        elif age < MIN_AGE:
+            # A neutral age screen: no hint of the cutoff, and no second try with a different year.
+            session["age_blocked"] = True
+            return render_template("auth/register.html", form={}, blocked=True), 403
         if not form.get("terms"):
             errors.append("You need to accept the Terms of Service.")
         if db.session.scalar(select(User.id).where(User.email == email)):
@@ -88,6 +110,7 @@ def register():
             make_admin = not db.session.scalar(select(User.id).limit(1)) or (bool(admin_email) and email == admin_email)
         user = User(email=email, username=username, display_name=username,
                     timezone=valid_timezone(form.get("timezone")), accepted_terms_at=utcnow(),
+                    birth_year=int(form["birth_year"]),
                     is_admin=make_admin,
                     is_approved=make_admin or not current_app.config["REQUIRE_APPROVAL"])
         user.set_password(password)

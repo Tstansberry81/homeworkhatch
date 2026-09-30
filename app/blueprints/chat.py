@@ -1,18 +1,18 @@
-"""Class chat: one room per Canvas course, shared by classmates who use Homework Hatch.
+"""Class chat: one opt-in room per Canvas course, for classmates who use Homework Hatch.
 
-Membership comes from Canvas itself — you're in a room if your synced courses include
-that course at that school. No teacher or school admin is involved (the "admin-free"
-design); moderation is automatic plus student reports reviewed by site admins.
+You can join a room if your synced courses include that course at that school. Enrollment isn't
+independently confirmed (Homework Hatch doesn't collect class rosters), and the room says so.
+No teacher or school admin is involved; moderation is automatic plus student reports reviewed by
+site admins.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import Blueprint, abort, jsonify, render_template, request
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
 
 from .. import queries
 from ..extensions import db
@@ -23,36 +23,23 @@ from ..utils import fmt_dt
 bp = Blueprint("chat", __name__, url_prefix="/chat")
 
 
-def _room_members(room_key: str) -> list[tuple[User, Course]]:
-    return list(db.session.execute(
-        select(User, Course).join(Course, Course.user_id == User.id).options(selectinload(Course.account))
-        .where(Course.room_key == room_key, Course.active.is_(True), User.active.is_(True))).tuples())
+def _member_count(room_key: str) -> int:
+    return db.session.scalar(select(func.count(func.distinct(Course.user_id))).join(User, User.id == Course.user_id)
+                             .where(Course.room_key == room_key, Course.active.is_(True), Course.chat_joined.is_(True),
+                                    User.active.is_(True))) or 0
 
 
-def verification(room_key: str) -> tuple[dict[int, bool], bool]:
-    """Who in a room is a confirmed classmate.
-
-    The server can't ask Canvas itself, so it uses the class rosters each student's extension
-    uploads: two members confirm each other when each appears on the other's roster. Anyone
-    can upload a made-up snapshot, but a made-up identity isn't on real classmates' rosters.
-    Returns ({user_id: verified}, whether anyone in the room is verified).
-    """
-    members = [(u.id, c.account.canvas_user_id if c.account else None, set(c.roster_ids or []))
-               for u, c in _room_members(room_key)]
-    verified = {}
-    for uid, cid, roster in members:
-        verified[uid] = any(other_uid != uid and cid in other_roster and other_cid in roster
-                            for other_uid, other_cid, other_roster in members)
-    return verified, any(verified.values())
-
-
-def _room(course_id: int) -> Course:
+def _course(course_id: int) -> Course:
     course = queries.owned_course(current_user.id, course_id)
     if not course.active:
         abort(404)
-    verified, any_verified = verification(course.room_key)
-    # Once real classmates have confirmed each other, unconfirmed accounts can't read or post.
-    if any_verified and not verified.get(current_user.id):
+    return course
+
+
+def _room(course_id: int) -> Course:
+    """A room the student has joined; reading and posting need an explicit join first."""
+    course = _course(course_id)
+    if not course.chat_joined:
         abort(403)
     return course
 
@@ -70,7 +57,8 @@ def index():
     counts, last = {}, {}
     if keys:
         counts = dict(db.session.execute(select(Course.room_key, func.count(func.distinct(Course.user_id)))
-                                         .where(Course.room_key.in_(keys), Course.active.is_(True))
+                                         .where(Course.room_key.in_(keys), Course.active.is_(True),
+                                                Course.chat_joined.is_(True))
                                          .group_by(Course.room_key)).all())
         last = dict(db.session.execute(select(ChatMessage.room_key, func.max(ChatMessage.created_at))
                                        .where(ChatMessage.room_key.in_(keys), ChatMessage.deleted.is_(False))
@@ -81,10 +69,17 @@ def index():
 @bp.route("/course/<int:course_id>")
 @login_required
 def room(course_id: int):
-    course = _room(course_id)
-    verified, any_verified = verification(course.room_key)
-    members = [(u, verified.get(u.id, False)) for u, _c in _room_members(course.room_key)]
-    return render_template("chat/room.html", course=course, members=members, any_verified=any_verified)
+    course = _course(course_id)
+    return render_template("chat/room.html", course=course, members=_member_count(course.room_key))
+
+
+@bp.route("/course/<int:course_id>/join", methods=["POST"])
+@login_required
+def join(course_id: int):
+    course = _course(course_id)
+    course.chat_joined = request.form.get("leave") != "1"
+    db.session.commit()
+    return redirect(url_for("chat.room", course_id=course.id))
 
 
 @bp.route("/course/<int:course_id>/messages")
@@ -123,14 +118,10 @@ def _message_in_my_rooms(message_id: int) -> ChatMessage:
     m = db.session.get(ChatMessage, message_id)
     if m is None or m.deleted:
         abort(404)
-    mine = db.session.scalar(select(Course.id).where(Course.user_id == current_user.id,
-                                                     Course.room_key == m.room_key).limit(1))
-    if not current_user.is_admin:
-        if not mine:
-            abort(404)
-        verified, any_verified = verification(m.room_key)
-        if any_verified and not verified.get(current_user.id):
-            abort(404)
+    mine = db.session.scalar(select(Course.id).where(Course.user_id == current_user.id, Course.room_key == m.room_key,
+                                                     Course.chat_joined.is_(True)).limit(1))
+    if not current_user.is_admin and not mine:
+        abort(404)
     return m
 
 

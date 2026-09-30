@@ -165,7 +165,7 @@ def summarize(kind: str, ident: int):
                                                        Summary.source_type == kind, Summary.source_id == ident))
     try:
         material = study.gather_material(current_user, kind, ident)
-        text = study.summarize(current_user, material, fresh=existing is not None)  # asking again = a new take
+        text = study.summarize(current_user, material)
     except (study.MaterialError, ai.AIError) as exc:
         flash(str(exc), "error")
         return redirect(back)

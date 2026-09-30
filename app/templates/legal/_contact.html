@@ -1,0 +1,1 @@
+{% macro contact() %}{% if config.SUPPORT_EMAIL %}<a href="mailto:{{ config.SUPPORT_EMAIL }}">{{ config.SUPPORT_EMAIL }}</a>{% else %}the contact options on our <a href="{{ url_for('main.support') }}">Support page</a>{% endif %}{% endmacro %}

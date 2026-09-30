@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { startMockCanvas } from "./mock-canvas.mjs";
 import { syncCanvas, upcoming, NotLoggedInError, parseCanvasJson, nextLink, fileIdsInHtml, zipPlan, fileKey, classKey, isVisible } from "../canvas.js";
 import { buildZip, crc32 } from "../zip.js";
+import { withoutDownloadLinks } from "../upload.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -66,7 +67,11 @@ test("full sync against mock Canvas", async () => {
   assert.equal(cs.assignments[0].rubric[0].description, "Correctness");
   assert.equal(cs.quizzes, null, "a hidden tab is 'unknown' (null), never an empty list the server would treat as deletions");
   assert.equal(calc.discussions, null, "logged in but not authorized (401 unauthorized) is not treated as logged out");
-  assert.deepEqual(calc.roster_ids, ["7", "8"]);
+  assert.equal(calc.roster_ids, undefined, "class rosters aren't collected");
+  assert.ok(!canvas.hits.some((p) => /\/courses\/\d+\/users$/.test(p)), "no roster requests to Canvas");
+  const sent = withoutDownloadLinks(snap);
+  assert.ok(snap.courses.some((c) => c.files?.some((f) => f.download_url)), "links are kept for the browser's own downloads");
+  assert.ok(sent.courses.every((c) => (c.files || []).every((f) => !("download_url" in f))), "signed links never leave the browser");
   assert.equal(cs.pages_partial, true, "Pages list hidden: only module pages were sent");
   assert.deepEqual(snap.restricted.map((r) => `${r.status} ${r.endpoint}`).sort(),
     ["401 /courses/101/discussion_topics", "403 /courses/102/files", "403 /files/79", "404 /courses/102/pages",
