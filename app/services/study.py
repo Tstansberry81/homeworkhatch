@@ -163,8 +163,10 @@ def generate_flashcards(user: User, material: Material, count: int = 15, fresh: 
         "formulas, cause-and-effect, and common points of confusion. Fronts are short prompts or questions; backs "
         "are concise, complete answers (one to three sentences). No duplicates. Also give the set a short title."
     )
-    return ai.complete_json(user, "flashcards", system=SYSTEM, prompt=_prompt(material, instruction),
+    data = ai.complete_json(user, "flashcards", system=SYSTEM, prompt=_prompt(material, instruction),
                             schema=CARDS_SCHEMA, effort="low", validate=_valid_cards, share=True, fresh=fresh)
+    data["cards"] = data["cards"][:count]
+    return data
 
 
 # ---------------------------------------------------------------- practice quizzes
@@ -227,13 +229,18 @@ def _valid_quiz(data: dict) -> dict:
 def generate_quiz(user: User, material: Material, count: int = 10, fresh: bool = False) -> dict:
     count = max(3, min(int(count), 30))
     instruction = (
-        f"Write {count} multiple-choice questions that test understanding of the material, not trivia. Each has "
-        "exactly 4 choices with one correct answer; `answer` is the 0-based index of the correct choice. Wrong "
-        "choices should be plausible misconceptions. Vary which position holds the correct answer. The "
-        "explanation says why the answer is right. Also give the quiz a short title."
+        f"Write exactly {count} multiple-choice questions that test understanding of the material, not trivia, "
+        "one idea per question. Each has exactly 4 choices with one correct answer; `answer` is the 0-based index "
+        "of the correct choice. Wrong choices are misconceptions a student who half-understood this material "
+        "would actually pick, drawn from the material where possible; never joke or throwaway options. Keep all "
+        "four choices alike in length, detail and form so the right one doesn't stand out; reasoning goes in the "
+        "explanation, not the choice. Vary which position holds the correct answer. The explanation says why the "
+        "answer is right, using the material's own definitions. Also give the quiz a short title."
     )
-    return ai.complete_json(user, "quiz", system=SYSTEM, prompt=_prompt(material, instruction),
+    data = ai.complete_json(user, "quiz", system=SYSTEM, prompt=_prompt(material, instruction),
                             schema=QUIZ_SCHEMA, effort="medium", validate=_valid_quiz, share=True, fresh=fresh)
+    data["questions"] = data["questions"][:count]
+    return data
 
 
 # ---------------------------------------------------------------- summaries

@@ -64,7 +64,9 @@ def generate(user, kind: str, refs: list[str], model: str) -> dict:
     current_app.config["AI_MODELS"] = {kind if kind != "deck" else "flashcards": model}
     material = study.gather_sources(user, refs)
     t0 = time.time()
-    data = study.generate_flashcards(user, material, 15) if kind == "deck" else study.generate_quiz(user, material, 10)
+    # fresh: a saved result from another model must not stand in for this one
+    data = (study.generate_flashcards(user, material, 15, fresh=True) if kind == "deck"
+            else study.generate_quiz(user, material, 10, fresh=True))
     row = db.session.scalars(select(ai.AIUsage).order_by(ai.AIUsage.id.desc()).limit(1)).first()
     return {"model": model, "kind": kind, "seconds": round(time.time() - t0, 1), "data": data, "material": material.text,
             "usage": {"in": row.input_tokens, "out": row.output_tokens, "cost": row.cost_usd}}
