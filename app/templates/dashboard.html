@@ -8,7 +8,7 @@
   <span class="bar"></span>
   <div>
     <a class="title" href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a>
-    <div class="meta">{{ a.course.course_code.replace('_', ' ') if a.course.course_code else a.course.name }} · {{ a.due_at|dt('time') }}{% if a.points_possible %} · {{ '%g' % a.points_possible }} pts{% endif %}</div>
+    <div class="meta">{{ a.course.code or a.course.name }} · {{ a.due_at|dt('time') }}{% if a.points_possible %} · {{ '%g' % a.points_possible }} pts{% endif %}</div>
   </div>
   <div class="btn-row">
     {% if cd[0] %}<span class="countdown {{ cd[1] }}" title="{{ a.due_at|dt('long') }}">{{ cd[0] }}</span>{% endif %}

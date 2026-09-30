@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-head">
   <div>
-    <div class="small muted">{{ course.term_name or '' }}{% if course.course_code %} · {{ course.course_code }}{% endif %}</div>
+    <div class="small muted">{{ course.term_name or '' }}{% if course.code %} · {{ course.code }}{% endif %}</div>
     <h1>{{ course.name }}</h1>
   </div>
   <div class="btn-row">

@@ -9,7 +9,7 @@
 <div class="grid grid-3">
   {% for c in courses %}
   <div class="card class-card" style="--c: {{ course_color(c.id) }};{{ 'opacity:.6' if c.hidden }}">
-    <div class="small muted mono">{{ c.term_name or '' }}{% if c.course_code %} · {{ c.course_code.replace('_', ' ') }}{% endif %}</div>
+    <div class="small muted mono">{{ c.term_name or '' }}{% if c.code %} · {{ c.code }}{% endif %}</div>
     <h3 class="mt" style="margin-top:4px"><a href="{{ url_for('courses.detail', course_id=c.id) }}">{{ c.name }}</a></h3>
     <div class="btn-row" style="justify-content:space-between">
       <strong>{{ grade_text(c) }}</strong>

@@ -168,10 +168,15 @@ class Course(db.Model):
     files: Mapped[list[CanvasFile]] = relationship(cascade="all, delete-orphan", order_by="CanvasFile.name")
 
     @property
+    def code(self) -> str:
+        """The section code as students read it ("CS 1110-001", not "CS_1110-001")."""
+        return (self.course_code or "").replace("_", " ").strip()
+
+    @property
     def label(self) -> str:
         """The name plus its section code, so a lecture and its discussion section can be told
         apart in menus ("Intro to Moral & Pol Phil · PHIL 1730-102")."""
-        code = (self.course_code or "").replace("_", " ").strip()
+        code = self.code
         return f"{self.name} · {code}" if code and code.lower() not in self.name.lower() else self.name
 
     @property
