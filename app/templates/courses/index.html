@@ -1,13 +1,15 @@
 {% extends "base.html" %}
 {% from "_macros.html" import grade_text, empty %}
+{% from "_icons.html" import icon %}
 {% block title %}Classes{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Classes</h1><p class="muted">Everything synced from Canvas. Hidden classes stay out of your dashboard, planner and downloads.</p></div></div>
+<div class="page-head"><div><p class="kicker">Synced from Canvas</p><h1>Classes</h1><p class="muted">Hidden classes stay out of your dashboard, calendar and downloads.</p></div>
+  <a class="btn btn-ghost" href="{{ url_for('chat.index') }}">{{ icon('chat', 18) }} Class chats</a></div>
 {% if courses %}
 <div class="grid grid-3">
   {% for c in courses %}
-  <div class="card" style="{{ 'opacity:.6' if c.hidden }}">
-    <div class="small muted">{{ c.term_name or '' }}{% if c.course_code %} · {{ c.course_code }}{% endif %}</div>
+  <div class="card class-card" style="--c: {{ course_color(c.id) }};{{ 'opacity:.6' if c.hidden }}">
+    <div class="small muted mono">{{ c.term_name or '' }}{% if c.course_code %} · {{ c.course_code.replace('_', ' ') }}{% endif %}</div>
     <h3 class="mt" style="margin-top:4px"><a href="{{ url_for('courses.detail', course_id=c.id) }}">{{ c.name }}</a></h3>
     <div class="btn-row" style="justify-content:space-between">
       <strong>{{ grade_text(c) }}</strong>

@@ -1,0 +1,17 @@
+{# One Account area: profile, Canvas, Google, plan, coins and your data, as tabs. #}
+{% from "_icons.html" import icon %}
+{% set ep = request.endpoint or '' %}
+<p class="kicker">Account</p>
+<nav class="tabs" aria-label="Account">
+  {% for endpoint, label, ico, on, show in [
+    ("settings.profile", "Profile", "user", ep == "settings.profile", true),
+    ("settings.sync", "Canvas", "plug", ep in ("settings.sync", "settings.create_token"), true),
+    ("settings.integrations_page", "Google", "link", ep.startswith("settings.integration") or ep.startswith("settings.calendar"), integrations_available),
+    ("billing.plans", "Plan", "star", ep.startswith("billing."), true),
+    ("coins.wallet", "Coins", "coin", ep == "coins.wallet", true),
+    ("settings.data", "Your data", "data", ep == "settings.data", true),
+    ("admin.overview", "Admin", "shield", ep.startswith("admin."), current_user.is_admin),
+  ] if show %}
+  <a href="{{ url_for(endpoint) }}" class="{{ 'active' if on }}">{{ icon(ico, 16) }} {{ label }}</a>
+  {% endfor %}
+</nav>

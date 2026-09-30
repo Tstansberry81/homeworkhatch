@@ -1,4 +1,4 @@
-"""Pure-logic tests: grades, planner, citations, moderation, iCal."""
+"""Pure-logic tests: grades, citations, moderation, iCal."""
 
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models import Assignment, AssignmentGroup, Card, utcnow
-from app.services import citations, grades, ics, moderation, planner
+from app.services import citations, grades, ics, moderation
 
 
 def A(id, score, possible, group="g", status="graded", **kw):
@@ -54,30 +54,6 @@ def test_what_if_and_needed():
     need = grades.needed_on(groups, items, 2, 85)
     assert need == pytest.approx(81.67, abs=0.05)
     assert grades.needed_on(groups, items, 2, 200) is None
-
-
-# ---------------------------------------------------------------- planner
-
-def _planned(name, due, points=10, status="upcoming", is_quiz=False):
-    a = Assignment(name=name, due_at=due, points_possible=points, status=status, is_quiz=is_quiz, user_done=False)
-    a.id = hash(name) % 100000
-    return a
-
-
-def test_planner_spreads_work_and_flags_overflow():
-    user = SimpleNamespace(timezone="UTC")
-    today = date(2026, 9, 1)
-    at = lambda d, h=23: datetime(2026, 9, d, h, 59)
-    work = [_planned("Essay", at(5), points=100), _planned("Final Exam", at(2)), _planned("Done", at(3), status="graded"),
-            _planned("Midterm Exam", at(9), points=100, status="no_submission"),
-            _planned("Week 6 participation", at(4), points=3, status="no_submission")]
-    plan = planner.build_plan(work, today, 60, user)
-    names = {i.assignment.name for d in plan["days"] for i in d.items}
-    assert names == {"Essay", "Final Exam", "Midterm Exam"}, "in-class exams get prep time; participation doesn't"
-    assert all(d.used <= 60 for d in plan["days"])
-    assert any(r["assignment"].name == "Final Exam" for r in plan["at_risk"]), "180 min of exam prep can't fit in 2 days at 60/day"
-    essay_days = [d.day for d in plan["days"] for i in d.items if i.assignment.name == "Essay"]
-    assert max(essay_days) <= date(2026, 9, 5)
 
 
 # ---------------------------------------------------------------- citations

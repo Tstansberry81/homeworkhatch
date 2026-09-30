@@ -4,7 +4,7 @@
 {% set stats = (calendar.settings or {}).get('last_stats') if calendar else none %}
 <div class="card">
   <div class="btn-row" style="justify-content:space-between">
-    <h2 style="margin:0">📆 Google Calendar</h2>
+    <h2 style="margin:0">Google Calendar</h2>
     {% if on %}<span class="badge ok">On</span>{% elif calendar and calendar.connected %}<span class="badge">Off</span>{% endif %}
   </div>
   <p class="small muted">Put every upcoming due date on your Google Calendar automatically, as a 30-minute block ending when it's due. Changes in Canvas update the event; nothing is added twice.</p>

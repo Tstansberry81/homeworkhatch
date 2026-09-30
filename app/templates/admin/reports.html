@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Reports · Admin{% endblock %}
 {% block content %}
+{% include "_account_tabs.html" %}
 <div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.overview') }}">Admin</a></div><h1>Reported chat messages</h1>
   <p class="muted">Messages with 3 reports in a day are hidden automatically until reviewed.</p></div></div>
 <div class="card">

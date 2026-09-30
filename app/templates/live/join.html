@@ -3,7 +3,7 @@
 {% macro join_form() %}
 <form method="post" action="{{ url_for('live.join') }}" class="card" style="max-width:420px;margin:0 auto">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <h1 class="center">⚡ Join a live quiz</h1>
+  <h1 class="center">Join a live quiz</h1>
   {% if not current_user.is_authenticated %}{% include "_flashes.html" %}{% endif %}
   <label for="code">Game code</label>
   <input id="code" name="code" type="text" value="{{ code }}" maxlength="6" autocomplete="off" style="text-transform:uppercase;font:700 1.4rem var(--mono);letter-spacing:.15em;text-align:center" required>
@@ -13,5 +13,6 @@
   {% if current_user.is_authenticated %}<p class="small muted mt center">Want to host? Open one of your <a href="{{ url_for('study.index') }}">practice quizzes</a> and hit “Host live”.</p>{% endif %}
 </form>
 {% endmacro %}
-{% block content %}{{ join_form() }}{% endblock %}
+{% block content %}
+{% include "_study_tabs.html" %}{{ join_form() }}{% endblock %}
 {% block public %}<div class="auth-wrap">{{ join_form() }}</div>{% endblock %}

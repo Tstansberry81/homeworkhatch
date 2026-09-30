@@ -6,8 +6,8 @@
   <div><div class="small muted"><a href="{{ url_for('courses.detail', course_id=course.id, tab='pages') }}">{{ course.name }}</a></div><h1>{{ page.title }}</h1></div>
   <div class="btn-row">
     {% if ai_available %}
-    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='page', ref=page.id, output='deck') }}">🃏 Make flashcards</a>
-    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='page', ref=page.id, output='quiz') }}">❓ Make a quiz</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='page', ref=page.id, output='deck') }}">Make flashcards</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='page', ref=page.id, output='quiz') }}">Make a quiz</a>
     {% endif %}
     {% if page.html_url %}<a class="btn btn-ghost" href="{{ page.html_url }}" target="_blank" rel="noopener">Canvas ↗</a>{% endif %}
   </div>
@@ -20,7 +20,7 @@
     {% if ai_available %}
     <form method="post" action="{{ url_for('courses.summarize', kind='page', ident=page.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn {{ 'btn-ghost' if summary }} btn-block mt">{{ 'Regenerate' if summary else '✨ Summarize this page' }}</button>
+      <button class="btn {{ 'btn-ghost' if summary }} btn-block mt">{{ 'Regenerate' if summary else 'Summarize this page' }}</button>
     </form>
     {% else %}<p class="small muted">AI isn't enabled on this server.</p>{% endif %}
   </div>

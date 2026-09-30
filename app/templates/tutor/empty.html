@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}AI tutor{% endblock %}
 {% block content %}
 <div style="max-width:620px;margin:40px auto" class="card center">
-  <div style="font-size:2.6rem">🤖</div>
+  <div class="empty-mark">{{ icon("tutor", 40) }}</div>
   <h1>Your AI tutor</h1>
   <p class="muted">Ask about anything in your classes. The tutor reads your synced syllabus, pages, files and assignments, cites them, and helps you understand, rather than doing the work for you.</p>
   {% if not ai_available %}<div class="flash warning">AI isn't enabled on this server yet.</div>{% endif %}

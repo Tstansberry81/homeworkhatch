@@ -79,12 +79,14 @@ def _register_template_helpers(app: Flask) -> None:
     from .services import ai as ai_service
     from .services import integrations as integration_service
     from .services import coins as coin_service
-    from .utils import fmt_dt, relative, safe_canvas_html, to_local
+    from .utils import countdown, course_color, fmt_dt, relative, safe_canvas_html, to_local
 
     app.jinja_env.filters["dt"] = fmt_dt
     app.jinja_env.filters["ago"] = relative
     app.jinja_env.filters["local"] = to_local
     app.jinja_env.filters["canvas_html"] = safe_canvas_html
+    app.jinja_env.filters["countdown"] = countdown
+    app.jinja_env.globals["course_color"] = course_color
     from .services.study import render_markdown
     app.jinja_env.filters["md"] = render_markdown  # AI text: `code`, **bold**, lists; math stays for KaTeX
     app.jinja_env.globals["now_utc"] = utcnow

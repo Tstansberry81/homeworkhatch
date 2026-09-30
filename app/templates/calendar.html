@@ -21,9 +21,9 @@
           <div class="day">{{ day.day }}</div>
           {% for kind, item in by_day.get(day, []) %}
             {% if kind == 'assignment' %}
-              <a class="item {{ item.effective_status }}" href="{{ url_for('courses.assignment', assignment_id=item.id) }}" title="{{ item.name }} — {{ item.course.name }} ({{ item.due_at|dt('time') }})">{{ item.due_at|dt('time') }} {{ item.name }}</a>
+              <a class="item {{ item.effective_status }}" style="--c: {{ course_color(item.course_id) }}" href="{{ url_for('courses.assignment', assignment_id=item.id) }}" title="{{ item.name }} — {{ item.course.name }} ({{ item.due_at|dt('time') }})">{{ item.name }}</a>
             {% else %}
-              <span class="item event" title="{{ item.title }}{% if item.location %} @ {{ item.location }}{% endif %}">{{ item.start_at|dt('time') }} {{ item.title }}</span>
+              <span class="item event" title="{{ item.title }} ({{ item.start_at|dt('time') }}){% if item.location %} @ {{ item.location }}{% endif %}">{{ item.title }}</span>
             {% endif %}
           {% endfor %}
         </td>

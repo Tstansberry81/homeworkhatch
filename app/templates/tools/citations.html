@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Citation generator{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>📝 Citation generator</h1><p class="muted">MLA 9, APA 7 and Chicago 17 from one form. Double-check capitalization against your teacher's rules.</p></div></div>
+{% include "_study_tabs.html" %}
+<div class="page-head"><div><h1>Citation generator</h1><p class="muted">MLA 9, APA 7 and Chicago 17 from one form. Double-check capitalization against your teacher's rules.</p></div></div>
 <div class="grid grid-main">
   <form method="post" class="card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

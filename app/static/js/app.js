@@ -47,7 +47,11 @@
 
   // Mobile sidebar.
   document.querySelectorAll("[data-toggle-sidebar]").forEach((btn) =>
-    btn.addEventListener("click", () => document.getElementById("sidebar")?.classList.toggle("open")));
+    btn.addEventListener("click", (e) => { e.stopPropagation(); document.getElementById("sidebar")?.classList.toggle("open"); }));
+  document.addEventListener("click", (e) => {  // tap outside the open menu closes it
+    const rail = document.getElementById("sidebar");
+    if (rail?.classList.contains("open") && !rail.contains(e.target)) rail.classList.remove("open");
+  });
 
   // Copy-to-clipboard buttons: <button data-copy="#target"> or data-copy-text="...".
   document.addEventListener("click", async (e) => {

@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Connect Canvas{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>🔌 Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension, using the same login you already use. Your school password never reaches us, and it works even at schools that block student API tokens.</p></div></div>
+{% include "_account_tabs.html" %}
+<div class="page-head"><div><h1>Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension, using the same login you already use. Your school password never reaches us, and it works even at schools that block student API tokens.</p></div></div>
 
 {% if accounts %}
 <div class="card mb" style="border-color:var(--ok)">
-  <h2>✅ Connected</h2>
+  <h2>Connected</h2>
   <ul class="list">{% for a in accounts %}<li><div class="grow"><div class="title">{{ a.host }}</div><div class="small muted">as {{ a.canvas_name or 'you' }} · last sync {{ a.last_sync_at|ago }}</div></div>
     {% if a.restricted %}<span class="small muted" title="Tabs your instructors hid in Canvas">{{ a.restricted|length }} hidden sections</span>{% endif %}</li>{% endfor %}</ul>
 </div>

@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% from "_source_picker.html" import source_picker %}
-{% block title %}Generate study materials{% endblock %}
+{% block title %}Make a study set{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>✨ Generate study materials</h1><p class="muted">Pick files and pages from a class (or your own uploads) and get flashcards or a practice quiz built from exactly those.</p></div>
+{% include "_study_tabs.html" %}
+<div class="page-head"><div><h1>Make a study set</h1><p class="muted">Pick files and pages from a class (or your own uploads) and get flashcards or a practice quiz built from exactly those.</p></div>
   {% if remaining is not none %}<span class="badge accent">{{ remaining }} AI actions left this month</span>{% endif %}</div>
 {% if not ai_available %}<div class="flash warning">AI isn't enabled on this server yet.</div>{% endif %}
 <form method="post" class="card" id="gen">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label>Make</label>
   <div class="btn-row">
-    <label class="check"><input type="radio" name="output" value="deck" {{ 'checked' if preset.output != 'quiz' }}> 🃏 Flashcards</label>
-    <label class="check"><input type="radio" name="output" value="quiz" {{ 'checked' if preset.output == 'quiz' }}> ❓ Practice quiz</label>
+    <label class="check"><input type="radio" name="output" value="deck" {{ 'checked' if preset.output != 'quiz' }}> Flashcards</label>
+    <label class="check"><input type="radio" name="output" value="quiz" {{ 'checked' if preset.output == 'quiz' }}> Practice quiz</label>
   </div>
   <label>From</label>
   <div class="btn-row">

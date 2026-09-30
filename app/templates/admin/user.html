@@ -4,6 +4,7 @@
 <form method="post" class="inline" {% if confirm %}data-confirm="{{ confirm }}"{% endif %}><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="{{ name }}"><button class="btn {{ cls }} btn-sm">{{ label }}</button></form>
 {% endmacro %}
 {% block content %}
+{% include "_account_tabs.html" %}
 <div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.users') }}">Users</a></div><h1>{{ user.display_name }} <span class="muted">@{{ user.username }}</span></h1>
   <p class="muted small">{{ user.email }} · joined {{ user.created_at|dt('long') }} · {{ courses }} classes · {{ ai_used }} AI actions this month · 🪙 {{ balance }}</p></div></div>
 <div class="grid grid-2">

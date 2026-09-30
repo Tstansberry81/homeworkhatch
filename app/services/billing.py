@@ -30,7 +30,7 @@ class Plan:
 
 
 PLANS: dict[str, Plan] = {
-    "free": Plan("free", "Free", 0, 25, "Canvas sync, planner, flashcards, chat and games, plus 25 AI actions a month."),
+    "free": Plan("free", "Free", 0, 25, "Canvas sync, calendar, flashcards, chat and games, plus 25 AI actions a month."),
     "normal": Plan("normal", "Normal", 10, 200, "200 AI actions a month for tutoring, summaries and generated study sets.",
                    "STRIPE_PRICE_NORMAL"),
     "premium": Plan("premium", "Premium", 20, 600, "600 AI actions a month for heavy study weeks.", "STRIPE_PRICE_PREMIUM"),

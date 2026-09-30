@@ -47,7 +47,7 @@
     {% if ai_available and a.description_html %}
     <div class="card"><h2>Study help</h2>
       <p class="small muted">The tutor can explain the concepts behind this assignment and check your reasoning. It won't write it for you.</p>
-      <form method="post" action="{{ url_for('tutor.new') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn btn-block">🤖 Open the tutor for this class</button></form>
+      <form method="post" action="{{ url_for('tutor.new') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn btn-block">Open the tutor for this class</button></form>
     </div>
     {% endif %}
   </div>

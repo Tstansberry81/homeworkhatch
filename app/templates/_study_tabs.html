@@ -1,0 +1,13 @@
+{# The Study area: your sets, making new ones, live quizzes and citations. #}
+{% from "_icons.html" import icon %}
+{% set ep = request.endpoint or '' %}
+<nav class="tabs" aria-label="Study">
+  {% for endpoint, label, ico, on in [
+    ("study.index", "Sets", "study", ep.startswith("study.") and ep != "study.generate"),
+    ("study.generate", "Make new", "plus", ep == "study.generate"),
+    ("live.join", "Live quiz", "bolt", ep.startswith("live.")),
+    ("tools.citation_generator", "Citations", "quote", ep.startswith("tools.")),
+  ] %}
+  <a href="{{ url_for(endpoint) }}" class="{{ 'active' if on }}">{{ icon(ico, 16) }} {{ label }}</a>
+  {% endfor %}
+</nav>

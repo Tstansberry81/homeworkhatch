@@ -1,59 +1,93 @@
 {% extends "base.html" %}
-{% from "_macros.html" import assignment_row, grade_text, empty %}
-{% block title %}Dashboard{% endblock %}
-{% block content %}
-<div class="page-head">
+{% from "_macros.html" import grade_text, empty %}
+{% from "_icons.html" import icon %}
+{% block title %}Home{% endblock %}
+{% macro task(a) %}
+{% set cd = a.due_at|countdown %}
+<div class="task {{ 'done' if a.user_done }}" style="--c: {{ course_color(a.course_id) }}">
+  <span class="bar"></span>
   <div>
-    <h1>Hi, {{ current_user.display_name }} 👋</h1>
-    <p class="muted">{% if accounts %}Last Canvas sync {{ accounts[0].last_sync_at|ago }} from {{ accounts[0].host }}.{% else %}Connect Canvas to fill this in.{% endif %}</p>
+    <a class="title" href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a>
+    <div class="meta">{{ a.course.course_code.replace('_', ' ') if a.course.course_code else a.course.name }} · {{ a.due_at|dt('time') }}{% if a.points_possible %} · {{ '%g' % a.points_possible }} pts{% endif %}</div>
   </div>
   <div class="btn-row">
-    <a class="btn btn-ghost" href="{{ url_for('main.study_planner') }}">🗓️ Study plan</a>
-    {% if ai_available %}<a class="btn" href="{{ url_for('tutor.index') }}">🤖 Ask the tutor</a>{% endif %}
+    {% if cd[0] %}<span class="countdown {{ cd[1] }}" title="{{ a.due_at|dt('long') }}">{{ cd[0] }}</span>{% endif %}
+    <form method="post" action="{{ url_for('main.toggle_done', assignment_id=a.id) }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-ghost btn-sm" title="{{ 'Not done' if a.user_done else 'Mark done (e.g. handed in on paper)' }}" aria-label="Mark done">{{ icon('check', 16) }}</button>
+    </form>
   </div>
+</div>
+{% endmacro %}
+{% block content %}
+<div class="today-head">
+  <div>
+    <p class="kicker">{{ today.strftime("%A · %B %-d") }}</p>
+    <h1>{{ "Morning" if today.hour < 12 else "Afternoon" if today.hour < 18 else "Evening" }}, <span class="hl">{{ current_user.display_name }}</span>.</h1>
+  </div>
+  {% if accounts %}
+  <a class="sync-pill {{ 'stale' if stale }}" href="{{ url_for('settings.sync') }}"><span class="dot"></span>synced {{ accounts[0].last_sync_at|ago }} · {{ accounts[0].host }}</a>
+  {% endif %}
 </div>
 
 {% if not accounts %}
-<div class="card mb" style="border-color:var(--accent)">
-  <h2>🔌 Connect your Canvas</h2>
-  <p>Install the Homework Hatch browser extension, sign in to Canvas like you always do, and your classes, due dates, grades and files show up here, then stay in sync every hour.</p>
-  <a class="btn" href="{{ url_for('settings.sync') }}">Set up in 2 minutes</a>
+<div class="card accent mb">
+  <h2>Connect your Canvas</h2>
+  <p>Add the extension, sign in to Canvas like always, and your classes, due dates, grades and files land here, then stay in sync every hour.</p>
+  <a class="btn btn-ghost" href="{{ url_for('settings.sync') }}">Set it up {{ icon('arrow', 16) }}</a>
 </div>
 {% endif %}
 
-<div class="grid grid-4 mb">
-  <div class="card stat"><div class="value">{{ upcoming|length }}</div><div class="label">due in the next 2 weeks</div></div>
-  <div class="card stat"><div class="value" style="{{ 'color:var(--err)' if missing }}">{{ missing|length }}</div><div class="label">missing</div></div>
-  <div class="card stat"><div class="value">{{ decks }}</div><div class="label"><a href="{{ url_for('study.index') }}">flashcard decks</a></div></div>
-  <div class="card stat"><div class="value">🔥 {{ current_user.streak_days or 0 }}</div><div class="label">day streak</div></div>
+<div class="week" aria-label="This week">
+  {% for d in week %}
+  <a class="day-cell {{ 'today' if loop.first }} {{ 'empty-day' if not d['items'] and not loop.first }}" href="{{ url_for('main.calendar_view', y=d.date.year, m=d.date.month) }}"
+     title="{{ d['items']|length }} due {{ d.date.strftime('%A') }}">
+    <span class="dow">{{ 'Today' if loop.first else d.date.strftime('%a') }}</span>
+    <span class="date">{{ d.date.day }}</span>
+    <span class="dots">{% for a in d['items'][:8] %}<i style="--c: {{ course_color(a.course_id) }}" title="{{ a.name }}"></i>{% endfor %}</span>
+  </a>
+  {% endfor %}
 </div>
 
 <div class="grid grid-main">
   <div>
     <div class="card">
-      <h2>Due soon <a class="small" href="{{ url_for('main.calendar_view') }}">Calendar →</a></h2>
-      {% if upcoming %}
-      <ul class="list">{% for a in upcoming %}{{ assignment_row(a) }}{% endfor %}</ul>
-      {% else %}{{ empty("🎉", "Nothing due in the next two weeks." if accounts else "Your deadlines will show up here.") }}{% endif %}
+      <h2>Up next <a href="{{ url_for('main.calendar_view') }}">Calendar {{ icon('arrow', 14) }}</a></h2>
+      {% if agenda %}
+        {% for label, items in agenda %}
+        <div class="agenda-day">
+          <p class="kicker" {% if label == 'Overdue' %}style="color:var(--err)"{% endif %}>{{ label }} · {{ items|length }}</p>
+          {% for a in items %}{{ task(a) }}{% endfor %}
+        </div>
+        {% endfor %}
+      {% else %}{{ empty("🐣", "Nothing due in the next two weeks." if accounts else "Your deadlines will show up here.") }}{% endif %}
     </div>
     {% if missing %}
-    <div class="card">
-      <h2>Missing (per Canvas)</h2>
-      <ul class="list">{% for a in missing %}{{ assignment_row(a) }}{% endfor %}</ul>
-      <p class="small muted">Handed something in on paper? Hit ✓ to mark it done here. Canvas won't change.</p>
+    <div class="card" style="border-color:var(--err)">
+      <h2>Missing <span class="badge missing">{{ missing|length }}</span></h2>
+      {% for a in missing %}{{ task(a) }}{% endfor %}
+      <p class="small muted mt">Canvas marks these missing. Handed one in on paper? Tick it here; Canvas won't change.</p>
     </div>
     {% endif %}
   </div>
   <div>
     <div class="card">
-      <h2>Grades <a class="small" href="{{ url_for('courses.index') }}">All classes →</a></h2>
-      {% if classes %}
-      <ul class="list">
-        {% for c in classes %}
-        <li><a class="grow title" href="{{ url_for('courses.detail', course_id=c.id) }}">{{ c.name }}</a><strong class="nowrap">{{ grade_text(c) }}</strong></li>
-        {% endfor %}
-      </ul>
-      {% else %}{{ empty("📚", "No classes yet.") }}{% endif %}
+      <h2>Grades <a href="{{ url_for('courses.index') }}">Classes {{ icon('arrow', 14) }}</a></h2>
+      {% for c in classes %}
+      <div class="gradebar" style="--c: {{ course_color(c.id) }}">
+        <a class="name" href="{{ url_for('courses.detail', course_id=c.id) }}">{{ c.name }}</a>
+        <span class="score">{{ grade_text(c) }}</span>
+        <span class="track"><span style="width: {{ [[c.current_score or 0, 0]|max, 100]|min }}%"></span></span>
+      </div>
+      {% else %}{{ empty("📚", "No classes yet.") }}{% endfor %}
+    </div>
+    <div class="card">
+      <h2>Quick</h2>
+      <div class="quick">
+        <a href="{{ url_for('study.generate') }}">{{ icon('study') }} Make flashcards</a>
+        <a href="{{ url_for('tutor.index') }}">{{ icon('tutor') }} Ask the tutor</a>
+        <a href="{{ url_for('uploads.index') }}">{{ icon('upload') }} Add a file</a>
+      </div>
     </div>
     <div class="card">
       <h2>Announcements</h2>
@@ -61,10 +95,10 @@
       <ul class="list">
         {% for n in announcements %}
         <li><div class="grow"><a class="title" href="{{ url_for('courses.detail', course_id=n.course_id, tab='announcements') }}">{{ n.title }}</a>
-          <div class="small muted">{{ course_by_id(n.course_id).name }} · {{ n.posted_at|ago }}</div></div></li>
+          <div class="small muted mono">{{ course_by_id(n.course_id).name }} · {{ n.posted_at|ago }}</div></div></li>
         {% endfor %}
       </ul>
-      {% else %}<p class="muted small">No announcements in the last 10 days.</p>{% endif %}
+      {% else %}<p class="muted small">Nothing new in the last 10 days.</p>{% endif %}
     </div>
   </div>
 </div>

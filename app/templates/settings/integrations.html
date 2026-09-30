@@ -2,11 +2,12 @@
 {% from "_gcal_card.html" import gcal_card %}
 {% block title %}Google{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>🔗 Google</h1><p class="muted">Connect Google Calendar and Google Drive. Sign-in is handled by Composio; Homework Hatch never sees your Google password.</p></div></div>
+{% include "_account_tabs.html" %}
+<div class="page-head"><div><h1>Google</h1><p class="muted">Connect Google Calendar and Google Drive. Sign-in is handled by Composio; Homework Hatch never sees your Google password.</p></div></div>
 <div class="grid grid-2">
   {{ gcal_card(calendar, url_for('settings.integrations_page')) }}
   <div class="card">
-    <div class="btn-row" style="justify-content:space-between"><h2 style="margin:0">📁 Google Drive</h2>{% if drive and drive.connected %}<span class="badge ok">Connected</span>{% endif %}</div>
+    <div class="btn-row" style="justify-content:space-between"><h2 style="margin:0">Google Drive</h2>{% if drive and drive.connected %}<span class="badge ok">Connected</span>{% endif %}</div>
     <p class="small muted">Pick files from your Drive to use in flashcards, quizzes and tutor chats. Only the files you add are copied.</p>
     {% if drive and drive.connected %}
       <a class="btn btn-block" href="{{ url_for('uploads.index') }}">Add files from Drive</a>

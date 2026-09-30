@@ -13,7 +13,7 @@ from .. import queries
 from ..config import BASE_DIR
 from ..extensions import db
 from ..models import Assignment, CalendarEvent, Course, User, utcnow
-from ..services import ics, integrations, planner
+from ..services import ics, integrations
 from ..utils import local_now, to_local
 from .auth import valid_timezone
 
@@ -93,16 +93,33 @@ def dashboard():
     if not current_user.onboarded:
         return redirect(url_for("main.onboarding"))
     courses = queries.visible_courses(current_user.id)
+    upcoming = queries.upcoming(current_user.id)
+    today = local_now(current_user).date()
+    by_day: dict[date, list] = {}
+    for a in upcoming:
+        by_day.setdefault(to_local(a.due_at).date(), []).append(a)
+    week = [{"date": today + timedelta(days=i), "items": by_day.get(today + timedelta(days=i), [])} for i in range(7)]
+    agenda = []
+    overdue = [a for d, items in by_day.items() if d < today for a in items]
+    if overdue:
+        agenda.append(("Overdue", overdue))
+    for d in sorted(k for k in by_day if k >= today):
+        label = "Today" if d == today else "Tomorrow" if d == today + timedelta(days=1) else d.strftime("%a · %b %-d")
+        agenda.append((label, by_day[d]))
+    accounts = queries.accounts(current_user.id)
+    last_sync = accounts[0].last_sync_at if accounts else None
     return render_template(
-        "dashboard.html",
-        upcoming=queries.upcoming(current_user.id),
-        missing=queries.missing(current_user.id),
-        classes=queries.class_rows(courses),
-        announcements=queries.recent_announcements(current_user.id),
-        accounts=queries.accounts(current_user.id),
-        decks=queries.deck_count(current_user.id),
-        now=utcnow(),
+        "dashboard.html", week=week, agenda=agenda, upcoming=upcoming, today=local_now(current_user),
+        missing=queries.missing(current_user.id), classes=queries.class_rows(courses),
+        announcements=queries.recent_announcements(current_user.id), accounts=accounts,
+        stale=last_sync is None or (utcnow() - last_sync) > timedelta(hours=3),
     )
+
+
+@bp.route("/account")
+@login_required
+def account():
+    return redirect(url_for("settings.profile"))
 
 
 @bp.route("/assignments/<int:assignment_id>/done", methods=["POST"])
@@ -179,25 +196,6 @@ def reset_feed():
     db.session.commit()
     flash("Calendar link reset. Re-subscribe with the new link; the old one stopped working.", "info")
     return redirect(url_for("main.calendar_view"))
-
-
-# ---------------------------------------------------------------- planner
-
-
-@bp.route("/planner", methods=["GET", "POST"])
-@login_required
-def study_planner():
-    if request.method == "POST":
-        try:
-            minutes = int(request.form.get("minutes", current_user.study_minutes_per_day))
-        except ValueError:
-            minutes = current_user.study_minutes_per_day
-        current_user.study_minutes_per_day = max(15, min(minutes, 720))
-        db.session.commit()
-        return redirect(url_for("main.study_planner"))
-    work = queries.upcoming(current_user.id, days=planner.HORIZON_DAYS)
-    plan = planner.build_plan(work, local_now(current_user).date(), current_user.study_minutes_per_day, current_user)
-    return render_template("planner.html", plan=plan, today=local_now(current_user).date())
 
 
 # ---------------------------------------------------------------- extension download

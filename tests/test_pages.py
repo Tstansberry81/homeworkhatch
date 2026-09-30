@@ -33,7 +33,7 @@ def test_every_student_page_renders(app, synced_user, client):
     quiz = PracticeQuiz(user_id=synced_user.id, title="Q", questions=[{"question": "q", "choices": ["a", "b"], "answer": 0, "explanation": ""}])
     db.session.add_all([deck, quiz])
     db.session.commit()
-    paths = ["/dashboard", "/welcome", "/courses/", "/calendar", "/calendar?y=2026&m=2", "/planner", "/study/",
+    paths = ["/dashboard", "/welcome", "/courses/", "/calendar", "/calendar?y=2026&m=2", "/study/",
              "/study/generate", "/study/decks/new", f"/study/decks/{deck.id}", f"/study/decks/{deck.id}/review",
              "/study/quizzes/new", f"/study/quizzes/{quiz.id}",
              f"/study/quizzes/{quiz.id}/edit", "/tutor/", "/chat/", f"/chat/course/{course.id}", "/coins", "/tools/citations", "/billing/",
@@ -76,7 +76,7 @@ def test_mark_done_and_hide_course(synced_user, client):
     client.post(f"/assignments/{quiz1.id}/done")
     db.session.refresh(quiz1)
     assert quiz1.effective_status == "done"
-    assert "Quiz 1" not in client.get("/dashboard").get_data(as_text=True).split("Due soon")[1].split("Grades")[0]
+    assert "Quiz 1" not in client.get("/dashboard").get_data(as_text=True).split("Up next")[1].split("Grades")[0]
     course = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
     client.post(f"/courses/{course.id}/visibility")
     assert "HW 3" not in client.get("/dashboard").get_data(as_text=True)

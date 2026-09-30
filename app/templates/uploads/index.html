@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}My files{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>📁 My files</h1><p class="muted">Your own notes, readings and study guides, from your computer or Google Drive. File them under a class and use them for flashcards, quizzes and the tutor, just like Canvas files.</p></div>
-  <a class="btn" href="{{ url_for('study.generate', course=none) }}">✨ Make flashcards or a quiz</a></div>
+<div class="page-head"><div><h1>My files</h1><p class="muted">Your own notes, readings and study guides, from your computer or Google Drive. File them under a class and use them for flashcards, quizzes and the tutor, just like Canvas files.</p></div>
+  <a class="btn" href="{{ url_for('study.generate', course=none) }}">Make flashcards or a quiz</a></div>
 <div class="grid grid-main">
   <div class="card">
     <h2>Your files</h2>
@@ -12,7 +12,7 @@
       <li style="align-items:flex-start">
         <div class="grow">
           <a class="title" href="{{ url_for('uploads.download', upload_id=u.id, inline=1) }}" target="_blank" rel="noopener">{{ u.name }}</a>
-          <div class="small muted">{{ '📁 Google Drive · ' if u.source == 'drive' }}{% if u.size %}{{ (u.size / 1024)|round(0)|int }} KB · {% endif %}added {{ u.created_at|ago }}
+          <div class="small muted">{{ 'Google Drive · ' if u.source == 'drive' }}{% if u.size %}{{ (u.size / 1024)|round(0)|int }} KB · {% endif %}added {{ u.created_at|ago }}
             {% if u.text_status == 'ok' %}· readable by AI{% elif u.text_status in ('pending', 'extracting') %}· reading text…{% elif u.text_status == 'empty' %}· no text layer (a scan){% elif u.text_status == 'unsupported' %}· can't be read by AI{% elif u.text_status == 'too_large' %}· too large to read{% elif u.text_status == 'error' %}· couldn't be read{% endif %}</div>
           <form method="post" action="{{ url_for('uploads.set_course', upload_id=u.id) }}" class="btn-row mt">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -24,8 +24,8 @@
         </div>
         <div class="btn-row">
           {% if u.text_status == 'ok' %}
-          <a class="btn btn-ghost btn-sm" href="{{ url_for('study.generate', refs='upload:%d' % u.id, output='deck') }}">🃏 Cards</a>
-          <a class="btn btn-ghost btn-sm" href="{{ url_for('study.generate', refs='upload:%d' % u.id, output='quiz') }}">❓ Quiz</a>
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('study.generate', refs='upload:%d' % u.id, output='deck') }}">Cards</a>
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('study.generate', refs='upload:%d' % u.id, output='quiz') }}">Quiz</a>
           {% endif %}
           <form method="post" action="{{ url_for('uploads.delete', upload_id=u.id) }}" data-confirm="Delete {{ u.name }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="linklike small">delete</button></form>
         </div>
@@ -37,7 +37,7 @@
   <div>
     <form method="post" action="{{ url_for('uploads.upload') }}" enctype="multipart/form-data" class="card" id="upload-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <h2>⬆️ Upload from your computer</h2>
+      <h2>Upload from your computer</h2>
       <label class="dropzone" id="drop">
         <input type="file" name="files" multiple id="file-input" hidden>
         <strong>Drop files here</strong> or click to choose<br><span class="small muted">PDF, Word, PowerPoint or text files · up to {{ config.MAX_FILE_MB }} MB each</span>
@@ -48,7 +48,7 @@
     </form>
     {% if drive_available %}
     <div class="card">
-      <h2>📁 Add from Google Drive</h2>
+      <h2>Add from Google Drive</h2>
       {% if drive_connected %}
       <p class="small muted">Search your Drive and add files. Google Docs come in as text, Slides as PDF, Sheets as CSV.</p>
       <input type="search" id="drive-q" placeholder="Search your Drive (empty = recent files)">

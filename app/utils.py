@@ -165,3 +165,28 @@ def log_activity(user_id: int, event: str, detail: str | None = None) -> None:
 
 def clamp(value, low, high):
     return max(low, min(high, value))
+
+
+# Class colors: fills that read on paper and on ink, paired with an ink outline in the CSS.
+CLASS_COLORS = ("#ffc629", "#ff8a65", "#7b9bff", "#3ddc8a", "#c3a6ff", "#5fd3e0", "#ff7eb6", "#b8e05a")
+
+
+def course_color(course_id: int | None) -> str:
+    return CLASS_COLORS[(course_id or 0) * 5 % len(CLASS_COLORS)]
+
+
+def countdown(dt: datetime | None) -> tuple[str, str]:
+    """("5h", "urgent") style label and urgency class for a due date."""
+    if dt is None:
+        return "", ""
+    seconds = (dt - utcnow()).total_seconds()
+    hours = abs(seconds) / 3600
+    if seconds < 0:
+        return (f"{max(1, round(hours))}h late" if hours < 36 else f"{round(hours / 24)}d late"), "late"
+    if hours < 1:
+        return f"{max(1, round(seconds / 60))}m", "urgent"
+    if hours < 24:
+        return f"{round(hours)}h", "urgent"
+    if hours < 72:
+        return f"{round(hours / 24)}d", "soon"
+    return f"{round(hours / 24)}d", ""

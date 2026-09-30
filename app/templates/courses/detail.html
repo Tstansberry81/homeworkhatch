@@ -9,9 +9,9 @@
   </div>
   <div class="btn-row">
     {% if ai_available %}
-    <form method="post" action="{{ url_for('tutor.new') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn">🤖 Ask about this class</button></form>
+    <form method="post" action="{{ url_for('tutor.new') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn">Ask about this class</button></form>
     {% endif %}
-    <a class="btn btn-ghost" href="{{ url_for('chat.room', course_id=course.id) }}">💬 Class chat</a>
+    <a class="btn btn-ghost" href="{{ url_for('chat.room', course_id=course.id) }}">Class chat</a>
     {% if course.html_url %}<a class="btn btn-ghost" href="{{ course.html_url }}" target="_blank" rel="noopener">Open in Canvas ↗</a>{% endif %}
   </div>
 </div>
@@ -102,12 +102,12 @@
     {% for it in m.items or [] %}
     <li><div class="grow">
       {% if it.type == "Page" %}{% set p = course.pages|selectattr('slug', 'equalto', it.page_url)|first %}{% endif %}
-      {% if it.type == "Page" and p %}<a href="{{ url_for('courses.page', page_id=p.id) }}">📄 {{ it.title }}</a>
+      {% if it.type == "Page" and p %}<a href="{{ url_for('courses.page', page_id=p.id) }}">{{ it.title }}</a>
       {% elif it.type == "File" %}{% set f = course.files|selectattr('canvas_id', 'equalto', it.content_id)|first %}
-        {% if f %}<a href="{{ url_for('courses.file_detail', file_id=f.id) }}">📎 {{ it.title }}</a>{% else %}📎 {{ it.title }}{% endif %}
+        {% if f %}<a href="{{ url_for('courses.file_detail', file_id=f.id) }}">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %}
       {% elif it.type == "Assignment" %}{% set a = course.assignments|selectattr('canvas_id', 'equalto', it.content_id)|first %}
-        {% if a %}<a href="{{ url_for('courses.assignment', assignment_id=a.id) }}">📝 {{ it.title }}</a>{% else %}📝 {{ it.title }}{% endif %}
-      {% elif it.type == "ExternalUrl" and it.external_url %}<a href="{{ it.external_url }}" target="_blank" rel="noopener">🔗 {{ it.title }}</a>
+        {% if a %}<a href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ it.title }}</a>{% else %}📝 {{ it.title }}{% endif %}
+      {% elif it.type == "ExternalUrl" and it.external_url %}<a href="{{ it.external_url }}" target="_blank" rel="noopener">{{ it.title }}</a>
       {% elif it.type == "SubHeader" %}<strong>{{ it.title }}</strong>
       {% else %}{% if it.html_url %}<a href="{{ it.html_url }}" target="_blank" rel="noopener">{{ it.title }}</a>{% else %}{{ it.title }}{% endif %} <span class="small muted">{{ it.type }}</span>{% endif %}
     </div>{% if it.completed %}<span class="badge ok">✓</span>{% endif %}</li>
@@ -130,8 +130,8 @@
   <form id="pick" action="{{ url_for('study.generate') }}" method="get" class="pick-bar">
     <input type="hidden" name="course" value="{{ course.id }}"><input type="hidden" name="refs" id="pick-refs">
     <span class="small muted" id="pick-count">Tick files to study from them.</span>
-    <button class="btn btn-sm" name="output" value="deck" disabled>🃏 Flashcards</button>
-    <button class="btn btn-sm" name="output" value="quiz" disabled>❓ Quiz</button>
+    <button class="btn btn-sm" name="output" value="deck" disabled>Flashcards</button>
+    <button class="btn btn-sm" name="output" value="quiz" disabled>Quiz</button>
     <button type="button" class="linklike small" id="pick-all">Select all readable</button>
   </form>
   <p class="small muted">{{ listed|selectattr('storage_key')|list|length }} of {{ listed|length }} Canvas files stored.{% if course.files_tab_hidden %} This class hides its Files tab; these were found through modules and links.{% endif %}

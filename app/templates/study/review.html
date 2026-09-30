@@ -13,7 +13,7 @@
 </div>
 <p class="center viewer-pos" id="pos" aria-live="polite"></p>
 <div class="btn-row" style="justify-content:center"><button type="button" class="btn" id="flip">Flip card</button></div>
-<p class="center small muted mt">Keys: <kbd>Space</kbd> flip · <kbd>←</kbd> <kbd>→</kbd> previous / next</p>
+<p class="center small muted mt keys-hint">Keys: <kbd>Space</kbd> flip · <kbd>←</kbd> <kbd>→</kbd> previous / next</p>
 {% else %}
 <div class="card empty"><div class="big">🃏</div><p>This deck has no cards yet.</p>
   <div class="btn-row" style="justify-content:center"><a class="btn" href="{{ url_for('study.deck', deck_id=deck.id) }}">Add cards</a></div></div>

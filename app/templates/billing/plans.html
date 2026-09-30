@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Plans{% endblock %}
 {% block content %}
+{% include "_account_tabs.html" %}
 <div class="page-head">
-  <div><h1>⭐ Plans</h1><p class="muted">Every plan includes Canvas sync, the planner, flashcards, quizzes, class chat and games. Plans differ in monthly AI actions (tutor answers, summaries, generated study sets).</p></div>
+  <div><h1>Plans</h1><p class="muted">Every plan includes Canvas sync, the calendar, flashcards, quizzes, class chat and games. Plans differ in monthly AI actions (tutor answers, summaries, generated study sets).</p></div>
   <div class="card-flat small">This month: <strong>{{ used }}</strong> AI actions used{% if remaining is not none %}, <strong>{{ remaining }}</strong> left{% else %} (unlimited){% endif %}</div>
 </div>
 {% if not enabled %}<div class="flash">Payments aren't set up on this server, so everyone's on the free plan.</div>{% endif %}

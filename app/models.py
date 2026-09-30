@@ -51,7 +51,6 @@ class User(UserMixin, db.Model):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(120), index=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(120))
 
-    study_minutes_per_day: Mapped[int] = mapped_column(Integer, default=90)
     streak_days: Mapped[int] = mapped_column(Integer, default=0)
     last_active_date: Mapped[str | None] = mapped_column(String(10))  # YYYY-MM-DD in the user's timezone
     show_on_leaderboards: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -4,61 +4,52 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{ csrf_token() }}">
+  <meta name="theme-color" content="#141311">
   <title>{% block title %}{{ app_name }}{% endblock %} · Homework Hatch</title>
   <link rel="icon" href="{{ url_for('static', filename='img/logo.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Geist:wght@400..700&family=Geist+Mono:wght@400..700&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   {% block head %}{% endblock %}
 </head>
 <body>
+{% from "_icons.html" import icon %}
 {% if current_user.is_authenticated %}
 {% set ep = request.endpoint or '' %}
-<div class="topbar">
-  <button class="btn btn-ghost btn-sm" data-toggle-sidebar aria-label="Menu">☰</button>
-  <a class="brand" href="{{ url_for('main.dashboard') }}" style="padding:0"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""> Homework Hatch</a>
-  <span class="coins-chip">🪙 {{ coin_balance }}</span>
-</div>
+{% set account_active = ep.startswith('settings.') or ep.startswith('billing.') or ep.startswith('admin.') or ep == 'coins.wallet' %}
+<header class="mobilebar">
+  <button type="button" data-toggle-sidebar aria-label="Open menu">{{ icon("menu") }}</button>
+  <a class="brand" href="{{ url_for('main.dashboard') }}"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""><span>Homework Hatch</span></a>
+  <a class="pill-dark" href="{{ url_for('coins.wallet') }}" title="Buddy Coins">{{ icon("coin", 16) }} {{ coin_balance }}</a>
+</header>
 <div class="shell">
-  <aside class="sidebar" id="sidebar">
-    <a class="brand" href="{{ url_for('main.dashboard') }}"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""> Homework Hatch</a>
-    <nav class="nav">
-      <div class="nav-group">
-        <a href="{{ url_for('main.dashboard') }}" class="{{ 'active' if ep == 'main.dashboard' }}"><span class="ico">🏠</span> Dashboard</a>
-        <a href="{{ url_for('courses.index') }}" class="{{ 'active' if ep.startswith('courses.') }}"><span class="ico">📚</span> Classes</a>
-        <a href="{{ url_for('main.calendar_view') }}" class="{{ 'active' if ep == 'main.calendar_view' }}"><span class="ico">📅</span> Calendar</a>
-        <a href="{{ url_for('main.study_planner') }}" class="{{ 'active' if ep == 'main.study_planner' }}"><span class="ico">🗓️</span> Study plan</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-label">Study</div>
-        <a href="{{ url_for('tutor.index') }}" class="{{ 'active' if ep.startswith('tutor.') }}"><span class="ico">🤖</span> AI tutor</a>
-        <a href="{{ url_for('study.index') }}" class="{{ 'active' if ep.startswith('study.') }}"><span class="ico">🃏</span> Flashcards & quizzes</a>
-        <a href="{{ url_for('uploads.index') }}" class="{{ 'active' if ep.startswith('uploads.') }}"><span class="ico">📁</span> My files</a>
-        <a href="{{ url_for('live.join') }}" class="{{ 'active' if ep.startswith('live.') }}"><span class="ico">⚡</span> Live quiz</a>
-        <a href="{{ url_for('chat.index') }}" class="{{ 'active' if ep.startswith('chat.') }}"><span class="ico">💬</span> Class chat</a>
-      </div>
-      <div class="nav-group">
-        <div class="nav-label">More</div>
-        <a href="{{ url_for('coins.wallet') }}" class="{{ 'active' if ep == 'coins.wallet' }}"><span class="ico">🪙</span> Buddy Coins</a>
-        {% if feature_simulations and current_user.is_adult %}
-        <a href="{{ url_for('coins.lab') }}" class="{{ 'active' if ep == 'coins.lab' }}"><span class="ico">🎲</span> Probability Lab</a>
-        {% endif %}
-        <a href="{{ url_for('tools.citation_generator') }}" class="{{ 'active' if ep.startswith('tools.') }}"><span class="ico">📝</span> Citations</a>
-      </div>
-      <div class="nav-group">
-        <a href="{{ url_for('settings.sync') }}" class="{{ 'active' if ep == 'settings.sync' }}"><span class="ico">🔌</span> Connect Canvas</a>
-        {% if integrations_available %}<a href="{{ url_for('settings.integrations_page') }}" class="{{ 'active' if ep.startswith('settings.integration') or ep.startswith('settings.calendar') }}"><span class="ico">🔗</span> Google</a>{% endif %}
-        <a href="{{ url_for('settings.profile') }}" class="{{ 'active' if ep in ('settings.profile', 'settings.data') }}"><span class="ico">⚙️</span> Settings</a>
-        <a href="{{ url_for('billing.plans') }}" class="{{ 'active' if ep.startswith('billing.') }}"><span class="ico">⭐</span> Plan</a>
-        {% if current_user.is_admin %}<a href="{{ url_for('admin.overview') }}" class="{{ 'active' if ep.startswith('admin.') }}"><span class="ico">🛡️</span> Admin</a>{% endif %}
-      </div>
+  <aside class="rail" id="sidebar">
+    <a class="brand" href="{{ url_for('main.dashboard') }}"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""><span>Homework<br>Hatch</span></a>
+    <nav class="nav" aria-label="Main">
+      {% for endpoint, label, ico, active in [
+        ("main.dashboard", "Home", "home", ep == "main.dashboard"),
+        ("courses.index", "Classes", "classes", ep.startswith("courses.") or ep.startswith("chat.")),
+        ("main.calendar_view", "Calendar", "calendar", ep == "main.calendar_view"),
+        ("study.index", "Study", "study", ep.startswith("study.") or ep.startswith("live.") or ep.startswith("tools.") or ep == "coins.lab"),
+        ("tutor.index", "Tutor", "tutor", ep.startswith("tutor.")),
+        ("uploads.index", "Files", "files", ep.startswith("uploads.")),
+      ] %}
+      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if active }}"{% if active %} aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ label }}</span></a>
+      {% endfor %}
     </nav>
-    <div class="sidebar-foot">
-      <div class="btn-row" style="justify-content:space-between">
-        <span><strong>{{ current_user.display_name }}</strong>{% if current_user.streak_days and current_user.streak_days > 1 %} · 🔥 {{ current_user.streak_days }}{% endif %}</span>
-        <span class="coins-chip" title="Buddy Coins">🪙 {{ coin_balance }}</span>
+    <div class="rail-foot">
+      <div class="rail-stats">
+        <a class="pill-dark" href="{{ url_for('coins.wallet') }}" title="Buddy Coins">{{ icon("coin", 15) }} {{ coin_balance }}</a>
+        {% if current_user.streak_days and current_user.streak_days > 1 %}<span class="pill-dark" title="Day streak">{{ icon("flame", 15) }} {{ current_user.streak_days }}</span>{% endif %}
       </div>
-      <form method="post" action="{{ url_for('auth.logout') }}" class="mt">
+      <a class="me {{ 'active' if account_active }}" href="{{ url_for('settings.profile') }}">
+        <span class="avatar">{{ (current_user.display_name or current_user.username)[:1]|upper }}</span>
+        <span><strong>{{ current_user.display_name }}</strong><small>Account & settings</small></span>
+      </a>
+      <form method="post" action="{{ url_for('auth.logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="linklike small" type="submit">Sign out</button>
+        <button class="signout" type="submit">{{ icon("logout", 15) }} Sign out</button>
       </form>
     </div>
   </aside>
@@ -70,7 +61,7 @@
   </main>
 </div>
 {% else %}
-  {% block public %}{% endblock %}
+  <div class="public">{% block public %}{% endblock %}</div>
 {% endif %}
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% block scripts %}{% endblock %}

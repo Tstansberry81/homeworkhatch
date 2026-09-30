@@ -1,7 +1,7 @@
 // The source picker (templates/_source_picker.html): pick files, pages and your own uploads from
 // a class, upload more, or import from Google Drive. Fires "picker:change" with {refs, sources}.
 (() => {
-  const ICON = { file: "📄", page: "📃", upload: "⬆️" };
+  const KIND = { file: "", page: "page", upload: "yours" };
   const kb = (n) => (n == null ? "" : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
   function init(root) {
@@ -31,7 +31,7 @@
       $("[data-list]").innerHTML = list.map((s) => {
         const on = selected.has(s.ref), ok = s.status === "ready";
         return `<li class="${ok ? "" : "muted"}"><label class="check grow"><input type="checkbox" value="${hh.escape(s.ref)}"
-          ${on ? "checked" : ""} ${ok || on ? "" : "disabled"}> ${ICON[s.kind] || "📄"} ${hh.escape(s.title)}</label>
+          ${on ? "checked" : ""} ${ok || on ? "" : "disabled"}> ${hh.escape(s.title)}${KIND[s.kind] ? ` <span class="kind">${KIND[s.kind]}</span>` : ""}</label>
           <span class="small muted">${hh.escape(ok ? kb(s.size) : s.note)}</span></li>`;
       }).join("") || `<li class="muted">${items.length ? "Nothing matches that filter." :
         courseId() ? "No files or pages synced for this class yet." : "No files of your own yet. Upload some below."}</li>`;

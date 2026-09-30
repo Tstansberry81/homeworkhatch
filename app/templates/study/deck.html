@@ -5,7 +5,7 @@
   <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · {{ deck.course.name }}{% endif %}</div><h1>{{ deck.title }}</h1>
     {% if deck.description %}<p class="muted">{{ deck.description }}</p>{% endif %}</div>
   <div class="btn-row">
-    {% if deck.cards %}<a class="btn" href="{{ url_for('study.review', deck_id=deck.id) }}">▶ Study</a>{% endif %}
+    {% if deck.cards %}<a class="btn" href="{{ url_for('study.review', deck_id=deck.id) }}">Study</a>{% endif %}
   </div>
 </div>
 <div class="card">

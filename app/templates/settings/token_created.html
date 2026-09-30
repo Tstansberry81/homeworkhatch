@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Token created{% endblock %}
 {% block content %}
+{% include "_account_tabs.html" %}
 <div style="max-width:640px;margin:0 auto" class="card">
-  <h1>🔑 Your server token</h1>
+  <h1>Your server token</h1>
   <p>Paste this into the extension's <em>Server token</em> field. <strong>It's shown only once</strong>. If you lose it, just make a new one.</p>
   <div class="card-flat"><code id="tok" style="overflow-wrap:anywhere">{{ token }}</code></div>
   <div class="btn-row mt"><button class="btn" data-copy="#tok">Copy token</button><button class="btn btn-ghost" data-copy-text="{{ server_url }}">Copy server address</button></div>

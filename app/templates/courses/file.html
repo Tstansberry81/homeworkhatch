@@ -8,8 +8,8 @@
   <div class="btn-row">
     {% if f.storage_key %}<a class="btn" href="{{ url_for('courses.download', file_id=f.id) }}">Download</a>{% endif %}
     {% if ai_available and f.text %}
-    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='file', ref=f.id, output='deck') }}">🃏 Flashcards</a>
-    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='file', ref=f.id, output='quiz') }}">❓ Quiz</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='file', ref=f.id, output='deck') }}">Flashcards</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.generate', kind='file', ref=f.id, output='quiz') }}">Quiz</a>
     {% endif %}
   </div>
 </div>
@@ -35,7 +35,7 @@
       <p class="small">This looks like a scanned PDF (no text layer). The AI can read the scan so the tutor, summaries and study sets can use it.</p>
       <form method="post" action="{{ url_for('courses.transcribe', file_id=f.id) }}" data-busy="Reading the scan… this can take a minute or two.">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button class="btn btn-block">📖 Read this scan with AI (1 AI action)</button>
+        <button class="btn btn-block">Read this scan with AI (1 AI action)</button>
       </form>
       {% else %}
       <p class="small muted">{% if f.text_status == 'empty' %}No text layer in this file (a scan or image), so AI tools can't read it.{% elif f.text_status == 'unsupported' %}AI tools can read PDF, Word, PowerPoint and text files.{% elif f.text_status == 'too_large' %}This file is too large to read.{% elif f.text_status in ('pending', 'extracting') %}Reading the text from this file… refresh in a minute.{% else %}Text will be available after upload.{% endif %}</p>
@@ -43,7 +43,7 @@
     {% elif ai_available %}
     <form method="post" action="{{ url_for('courses.summarize', kind='file', ident=f.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button class="btn {{ 'btn-ghost' if summary }} btn-block mt">{{ 'Regenerate' if summary else '✨ Summarize this file' }}</button>
+      <button class="btn {{ 'btn-ghost' if summary }} btn-block mt">{{ 'Regenerate' if summary else 'Summarize this file' }}</button>
     </form>
     {% else %}<p class="small muted">AI isn't enabled on this server yet.</p>
     {% endif %}
