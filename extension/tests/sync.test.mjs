@@ -133,3 +133,37 @@ test("no school-specific assumptions: varied course naming across schools", () =
   // Students who never starred courses see everything.
   assert.equal(isVisible({ id: "1", on_dashboard: null }), true);
 });
+
+test("uploads straight to storage when the server hands out upload URLs, else through the server", async () => {
+  const { uploadSnapshot } = await import("../upload.js");
+  const calls = [];
+  const fakeFetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method, headers: init.headers || {} });
+    const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+    if (url.endsWith("/v1/snapshots")) {
+      return json({ snapshot_id: "s1", files_needed: ["1", "2", "3"], upload_urls: {
+        1: { url: "https://storage.test/one", headers: { "Content-Type": "application/pdf" } },
+        2: { url: "https://storage.test/broken", headers: { "Content-Type": "text/plain" } },
+      } });
+    }
+    if (url === "https://storage.test/broken") return json({}, 403);
+    return json({ ok: true });
+  };
+  const plan = ["1", "2", "3"].map((id) => ({ file: { id, updated_at: "2026-01-01T00:00:00Z", name: `${id}.pdf`, content_type: "application/pdf" }, path: `${id}.pdf` }));
+  const progress = [];
+  const result = await uploadSnapshot({ serverUrl: "https://hatch.test", token: "t", snapshot: {}, plan, fetchImpl: fakeFetch,
+    fetchBytes: async () => new Uint8Array([1, 2, 3]), onProgress: (p) => progress.push(p.done), retryDelayMs: 0 });
+  assert.equal(result.uploaded, 3);
+  assert.deepEqual(result.failed, []);
+  const seen = (m, u) => calls.some((c) => c.method === m && c.url.startsWith(u));
+  // 1: direct upload with the signed Content-Type, then a confirm; never sent through the server
+  assert.ok(seen("PUT", "https://storage.test/one"));
+  assert.equal(calls.find((c) => c.url === "https://storage.test/one").headers["Content-Type"], "application/pdf");
+  assert.ok(seen("POST", "https://hatch.test/v1/files/1/uploaded?"));
+  assert.ok(!seen("PUT", "https://hatch.test/v1/files/1?"));
+  // 2: storage refused three times, so it falls back to the server; 3: no URL, straight to the server
+  assert.equal(calls.filter((c) => c.url === "https://storage.test/broken").length, 3);
+  assert.ok(seen("PUT", "https://hatch.test/v1/files/2?") && !seen("POST", "https://hatch.test/v1/files/2/uploaded"));
+  assert.ok(seen("PUT", "https://hatch.test/v1/files/3?"));
+  assert.equal(Math.max(...progress), 3);
+});

@@ -83,7 +83,7 @@ def test_sync_upload_and_download_through_object_storage(s3_app, snapshot, manif
     user = make_user()
     sync(client, api_token(user), snapshot, manifest, {"9002": b"The chain rule, stored in object storage."})
     f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
-    assert f.storage_key.endswith("/notes.txt") and f.text_status == "ok", "text extracted without re-downloading"
+    assert f.storage_key.endswith("/notes.txt") and f.text_status == "ok" and f.sha256
     login(client, user)
     r = client.get(f"/courses/files/{f.id}/download")
     assert r.status_code == 302, "downloads redirect to a signed URL instead of streaming through the app"
@@ -111,6 +111,91 @@ def test_oversized_upload_is_rejected_cleanly(s3_app, snapshot, manifest):
     r = client.put(f"/v1/files/9002?updated_at={manifest[1]['updated_at']}", data=b"x" * (2 * 1024 * 1024),
                    headers={**auth, "X-Snapshot-Id": run["snapshot_id"]})
     assert r.status_code == 413
+
+
+def test_direct_upload_to_storage_then_confirm(s3_app, snapshot, manifest):
+    """The extension PUTs bytes straight to storage with a presigned URL; the app only confirms."""
+    import hashlib
+
+    from app.services.storage import get_storage
+
+    client = s3_app.test_client()
+    user = make_user()
+    auth = {"Authorization": f"Bearer {api_token(user)}"}
+    body = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
+    assert set(body["upload_urls"]) == set(body["files_needed"]) == {"9001", "9002"}
+    target = body["upload_urls"]["9002"]
+    assert target["headers"] == {"Content-Type": "text/plain"}
+    q = f"?updated_at={manifest[1]['updated_at']}"
+    hdrs = {**auth, "X-Snapshot-Id": body["snapshot_id"]}
+
+    # Confirming before the bytes arrived is refused.
+    assert client.post(f"/v1/files/9002/uploaded{q}", headers=hdrs).status_code == 400
+
+    data = b"Direct to storage: the chain rule."
+    assert requests.put(target["url"], data=data, headers=target["headers"], timeout=10).status_code == 200
+    r = client.post(f"/v1/files/9002/uploaded{q}", headers=hdrs)
+    assert r.status_code == 200, r.get_json()
+    f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
+    assert f.is_stored and f.size == len(data)
+    assert f.text_status == "ok" and "chain rule" in f.text, "text read back from storage"
+    assert f.sha256 == hashlib.sha256(data).hexdigest()
+    assert get_storage().read(f.storage_key) == data
+
+    # Over the size limit: the object is removed and the version isn't requested again.
+    s3_app.config["MAX_FILE_MB"] = 0
+    assert requests.put(body["upload_urls"]["9001"]["url"], data=b"%PDF big", timeout=10,
+                        headers=body["upload_urls"]["9001"]["headers"]).status_code == 200
+    r = client.post(f"/v1/files/9001/uploaded?updated_at={manifest[0]['updated_at']}", headers=hdrs)
+    assert r.status_code == 413
+    big = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9001"))
+    assert big.text_status == "too_large" and big.storage_key is None
+
+
+def test_local_storage_has_no_upload_urls(client, snapshot, manifest):
+    user = make_user()
+    body = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest},
+                       headers={"Authorization": f"Bearer {api_token(user)}"}).get_json()
+    assert body["files_needed"] and body["upload_urls"] == {}
+
+
+def test_text_is_read_in_a_background_thread(tmp_path, snapshot, manifest):
+    import time
+
+    app = create_app("test", {"SQLALCHEMY_DATABASE_URI": f"sqlite:///{tmp_path}/bg.db", "STORAGE_DIR": str(tmp_path / "st"),
+                              "EXTRACT_INLINE": False})
+    with app.app_context():
+        db.create_all()
+        user = make_user()
+        body, _ = sync(app.test_client(), api_token(user), snapshot, manifest, {"9002": b"Read me later, in the background."})
+        f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
+        for _ in range(100):
+            db.session.expire_all()
+            if f.text_status == "ok":
+                break
+            time.sleep(0.05)
+        assert f.text_status == "ok" and "background" in f.text and f.sha256 and f.text_started_at is None
+        db.session.remove()
+        db.drop_all()
+
+
+def test_stale_text_claims_are_retried(app, snapshot, manifest):
+    from datetime import timedelta
+
+    from app.models import utcnow
+    from app.services import textjobs
+
+    user = make_user()
+    sync(app.test_client(), api_token(user), snapshot, manifest, {"9002": b"Retry me."})
+    f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
+    f.text, f.text_status, f.text_started_at = None, "extracting", utcnow()  # a reader is on it
+    db.session.commit()
+    assert textjobs.run_pending() == 0
+    f.text_started_at = utcnow() - timedelta(minutes=30)  # ...and died with a restart
+    db.session.commit()
+    assert textjobs.run_pending() == 1
+    db.session.refresh(f)
+    assert f.text_status == "ok" and f.text == "Retry me."
 
 
 # ---------------------------------------------------------------- configuration

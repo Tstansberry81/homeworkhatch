@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from ..extensions import db
 from ..models import ApiToken, SyncRun, User, utcnow
-from ..services import ingest
+from ..services import ingest, textjobs
 from ..services.storage import StorageError, TooLarge
 
 bp = Blueprint("api", __name__, url_prefix="/v1")
@@ -91,7 +91,13 @@ def post_snapshot():
     except ingest.IngestError as exc:
         db.session.rollback()
         return _error(exc.status, str(exc))
-    return jsonify({"snapshot_id": run.id, "files_needed": needed})
+    try:
+        targets = ingest.upload_targets(run, needed)
+    except Exception as exc:  # without presigned URLs the extension uploads through us instead
+        current_app.logger.warning("could not presign uploads: %s", exc)
+        targets = {}
+    textjobs.kick()  # resumes reading any files left pending by a restart
+    return jsonify({"snapshot_id": run.id, "files_needed": needed, "upload_urls": targets})
 
 
 def _run_for(snapshot_id: str | None) -> SyncRun | None:
@@ -101,30 +107,52 @@ def _run_for(snapshot_id: str | None) -> SyncRun | None:
     return run if run and run.user_id == g.api_user.id else None
 
 
-@bp.route("/files/<file_id>", methods=["PUT"])
-def put_file(file_id: str):
+def _file_request(file_id: str):
     run = _run_for(request.headers.get("X-Snapshot-Id"))
     if run is None:
-        return _error(400, "unknown snapshot")
+        return None, _error(400, "unknown snapshot")
     if not file_id.isdigit() and not file_id.replace("-", "").isalnum():
-        return _error(400, "bad file id")
-    if (request.content_length or 0) > current_app.config["MAX_FILE_MB"] * 1024 * 1024:
-        return _error(413, "file too large")
+        return None, _error(400, "bad file id")
+    return run, None
+
+
+def _store(run: SyncRun, file_id: str, action):
+    updated_at = request.args.get("updated_at")
     try:
-        row = ingest.store_file(g.api_user, run, file_id, request.args.get("updated_at"), request.stream,
-                                request.headers.get("Content-Type"))
+        row = action(updated_at)
     except ingest.IngestError as exc:
         db.session.rollback()
         return _error(400, str(exc))
     except TooLarge as exc:
         db.session.rollback()
-        ingest.mark_too_large(run, file_id, request.args.get("updated_at"))
+        ingest.mark_too_large(run, file_id, updated_at)
         return _error(413, str(exc))
     except StorageError as exc:
         db.session.rollback()
         current_app.logger.error("file storage failed: %s", exc)
         return _error(502, "file storage is unavailable; the file will be retried next sync")
     return jsonify({"ok": True, "size": row.size, "sha256": row.sha256, "text": row.text_status})
+
+
+@bp.route("/files/<file_id>", methods=["PUT"])
+def put_file(file_id: str):
+    """The file's bytes, sent through the app."""
+    run, error = _file_request(file_id)
+    if error:
+        return error
+    if (request.content_length or 0) > current_app.config["MAX_FILE_MB"] * 1024 * 1024:
+        return _error(413, "file too large")
+    return _store(run, file_id, lambda updated_at: ingest.store_file(
+        g.api_user, run, file_id, updated_at, request.stream, request.headers.get("Content-Type")))
+
+
+@bp.route("/files/<file_id>/uploaded", methods=["POST"])
+def file_uploaded(file_id: str):
+    """The extension PUT the file straight to storage using a URL from upload_urls."""
+    run, error = _file_request(file_id)
+    if error:
+        return error
+    return _store(run, file_id, lambda updated_at: ingest.confirm_upload(g.api_user, run, file_id, updated_at))
 
 
 @bp.route("/snapshots/<snapshot_id>/complete", methods=["POST"])

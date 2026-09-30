@@ -38,7 +38,7 @@
         <button class="btn btn-block">📖 Read this scan with AI (1 AI action)</button>
       </form>
       {% else %}
-      <p class="small muted">{% if f.text_status == 'empty' %}No text layer in this file (a scan or image), so AI tools can't read it.{% elif f.text_status == 'unsupported' %}AI tools can read PDF, Word, PowerPoint and text files.{% elif f.text_status == 'too_large' %}This file is too large to read.{% else %}Text will be available after upload.{% endif %}</p>
+      <p class="small muted">{% if f.text_status == 'empty' %}No text layer in this file (a scan or image), so AI tools can't read it.{% elif f.text_status == 'unsupported' %}AI tools can read PDF, Word, PowerPoint and text files.{% elif f.text_status == 'too_large' %}This file is too large to read.{% elif f.text_status in ('pending', 'extracting') %}Reading the text from this file… refresh in a minute.{% else %}Text will be available after upload.{% endif %}</p>
       {% endif %}
     {% elif ai_available %}
     <form method="post" action="{{ url_for('courses.summarize', kind='file', ident=f.id) }}">

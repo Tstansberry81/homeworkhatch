@@ -6,6 +6,8 @@ import io
 import logging
 
 log = logging.getLogger(__name__)
+# pypdf logs a warning for every malformed object in real-world PDFs, which floods the logs.
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 TEXT_TYPES = ("text/", "application/json", "application/xml", "application/javascript")
 TEXT_EXTS = (".txt", ".md", ".py", ".java", ".c", ".cpp", ".h", ".js", ".ts", ".html", ".css", ".csv", ".json", ".r",

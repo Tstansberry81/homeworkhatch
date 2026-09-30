@@ -119,8 +119,13 @@ tests/                pytest suite + tests/js (real extension code against a liv
 
 **Upload protocol.** The extension POSTs a snapshot to `/v1/snapshots`. The server
 upserts everything by (Canvas host, Canvas ID) and replies with the file IDs it lacks
-at the current version. The extension then PUTs just those to `/v1/files/<id>` and
-POSTs `/complete`. An unchanged hourly sync sends only JSON.
+at the current version, with a presigned upload URL for each when storage is Supabase or
+S3. The extension PUTs each file straight to storage and confirms it with
+`POST /v1/files/<id>/uploaded`, so file bytes never pass through the web instance (without
+upload URLs, or if a direct upload keeps failing, it PUTs the bytes to `/v1/files/<id>`
+instead). Then it POSTs `/complete`. A background thread in the web process reads each new
+file's text afterwards for search and the AI tools (`app/services/textjobs.py`). An
+unchanged hourly sync sends only JSON.
 
 **AI.** Claude (`claude-opus-5-5` by default, `AI_MODEL` to change) with server-side
 refusal fallbacks. Structured JSON output is used for flashcards and quizzes. Every

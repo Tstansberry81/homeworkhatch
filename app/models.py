@@ -315,7 +315,10 @@ class CanvasFile(db.Model):
     stored_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Deferred: extracted text can be hundreds of KB and most queries never need it.
     text: Mapped[str | None] = mapped_column(Text, deferred=True)
-    text_status: Mapped[str | None] = mapped_column(String(40))
+    # "pending" until the background reader (services/textjobs.py) gets to it, then "extracting"
+    # since text_started_at, then ok / empty / unsupported / too_large / error / ai.
+    text_status: Mapped[str | None] = mapped_column(String(40), index=True)
+    text_started_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (UniqueConstraint("account_id", "canvas_id"),)
 

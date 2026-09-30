@@ -116,6 +116,11 @@ def load_config(env_name: str) -> dict:
         "SUPABASE_URL": supabase_url,
         # Downloads are served as short-lived signed URLs from object storage.
         "DOWNLOAD_URL_TTL": env_int("DOWNLOAD_URL_TTL", 300),
+        # The extension uploads files straight to storage with presigned URLs valid this long
+        # (a first sync of a big semester can take a while).
+        "UPLOAD_URL_TTL": env_int("UPLOAD_URL_TTL", 6 * 3600),
+        # Read text from uploaded files in the request instead of a background thread (tests).
+        "EXTRACT_INLINE": env_bool("EXTRACT_INLINE", False),
 
         "MAX_SNAPSHOT_MB": env_int("MAX_SNAPSHOT_MB", 64),
         # Supabase's Free plan caps each file at 50 MB; raise this with a paid plan.
@@ -162,7 +167,7 @@ def load_config(env_name: str) -> dict:
     if env_name == "test":
         test_url = os.environ.get("TEST_DATABASE_URL")  # set to run the suite against Postgres
         cfg.update(TESTING=True, SECRET_KEY="test", WTF_CSRF_ENABLED=False, AI_ENABLED=True, STORAGE_BACKEND="local",
-                   FEATURE_SIMULATIONS=False, REQUIRE_APPROVAL=False,
+                   FEATURE_SIMULATIONS=False, REQUIRE_APPROVAL=False, EXTRACT_INLINE=True,
                    SQLALCHEMY_DATABASE_URI=normalize_database_url(test_url) if test_url else "sqlite://",
                    SQLALCHEMY_ENGINE_OPTIONS=engine_options(normalize_database_url(test_url)) if test_url else {})
     return cfg

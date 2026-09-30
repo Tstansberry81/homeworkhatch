@@ -5,8 +5,8 @@ Backends behind one small interface:
 - "supabase": Supabase Storage through its S3-compatible API.
 - "s3": any S3-compatible service (AWS S3, Cloudflare R2, MinIO).
 
-Object storage serves downloads via short-lived presigned URLs, so large files never
-stream through the web worker. Keys look like
+Object storage serves downloads via short-lived presigned URLs, and the extension uploads
+straight to presigned PUT URLs, so large files never stream through the web worker. Keys look like
 "u/<user id>/files/<account id>/<canvas file id>/<version>/<filename>".
 """
 
@@ -37,6 +37,8 @@ class Storage(Protocol):
     def read(self, key: str) -> bytes: ...
     def delete_prefix(self, prefix: str) -> None: ...
     def signed_url(self, key: str, filename: str, content_type: str | None, inline: bool, ttl: int) -> str | None: ...
+    def presign_put(self, key: str, content_type: str, ttl: int) -> str | None: ...
+    def size(self, key: str) -> int | None: ...
 
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._() -]+")
@@ -94,6 +96,13 @@ class LocalStorage:
 
     def signed_url(self, key, filename, content_type, inline, ttl):
         return None  # served by the app with send_file
+
+    def presign_put(self, key, content_type, ttl):
+        return None  # no direct uploads; the extension sends files through the app
+
+    def size(self, key):
+        path = self._path(key)
+        return path.stat().st_size if path.is_file() else None
 
 
 def _xml_content_type(request, **kwargs):
@@ -181,6 +190,22 @@ class S3Storage:
         if content_type:
             params["ResponseContentType"] = content_type
         return self.s3.generate_presigned_url("get_object", Params=params, ExpiresIn=ttl)
+
+    def presign_put(self, key, content_type, ttl):
+        """A URL the browser extension can PUT the file to directly. The signature covers the
+        Content-Type, so the upload must send exactly that header."""
+        return self.s3.generate_presigned_url("put_object", ExpiresIn=ttl,
+                                              Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type})
+
+    def size(self, key):
+        from botocore.exceptions import ClientError
+
+        try:
+            return self.s3.head_object(Bucket=self.bucket, Key=key)["ContentLength"]
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                return None
+            raise StorageError(str(exc)) from exc
 
 
 def get_storage() -> Storage:

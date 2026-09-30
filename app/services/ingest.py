@@ -2,9 +2,13 @@
 
 The protocol (see extension/upload.js):
   1. POST /v1/snapshots {snapshot, files}   -> ingest_snapshot(): upsert everything and
-     answer with the file ids whose current version we don't hold yet.
-  2. PUT /v1/files/<id>?updated_at=...     -> store_file(): one request per needed file.
+     answer with the file ids whose current version we don't hold yet, plus presigned
+     storage URLs for them (upload_targets) when storage supports direct uploads.
+  2. Per needed file, either
+     PUT <presigned url>, then POST /v1/files/<id>/uploaded?updated_at=... -> confirm_upload()
+     or PUT /v1/files/<id>?updated_at=... with the bytes                    -> store_file().
   3. POST /v1/snapshots/<id>/complete      -> complete_run().
+Text is read from stored files afterwards, in the background (services/textjobs.py).
 
 Everything is keyed by (Canvas host, Canvas IDs), so this works for any school.
 """
@@ -24,8 +28,7 @@ from ..extensions import db
 from ..models import (Announcement, Assignment, AssignmentGroup, CalendarEvent, CanvasAccount, CanvasFile, Course,
                       Discussion, Module, Page, SyncRun, User, utcnow)
 from ..utils import log_activity, parse_ts
-from . import coins, retrieval
-from .extract import extract_text
+from . import coins, retrieval, textjobs
 from .storage import TooLarge, get_storage, safe_key_part
 
 
@@ -369,44 +372,89 @@ def _spool(stream, limit: int):
     return spool, size, digest.hexdigest()
 
 
-def store_file(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | None, stream,
-               content_type: str | None) -> CanvasFile:
+def file_key(row: CanvasFile, version: str) -> str:
+    return f"u/{row.user_id}/files/{row.account_id}/{safe_key_part(row.canvas_id)}/{version}/{safe_key_part(row.name)}"
+
+
+def _upload_type(row: CanvasFile) -> str:
+    return row.content_type or "application/octet-stream"
+
+
+def upload_targets(run: SyncRun, needed: list[str]) -> dict[str, dict]:
+    """Presigned PUT URLs for the needed files, or {} when storage can't take direct uploads."""
+    if not needed:
+        return {}
+    storage = get_storage()
+    ttl = current_app.config["UPLOAD_URL_TTL"]
+    rows = db.session.scalars(select(CanvasFile).where(CanvasFile.account_id == run.account_id,
+                                                       CanvasFile.canvas_id.in_(needed)))
+    targets = {}
+    for row in rows:
+        url = storage.presign_put(file_key(row, row.wanted_version), _upload_type(row), ttl)
+        if url is None:
+            return {}
+        targets[row.canvas_id] = {"url": url, "headers": {"Content-Type": _upload_type(row)}}
+    return targets
+
+
+def _file_row(user: User, run: SyncRun, canvas_file_id: str) -> CanvasFile:
     row = db.session.scalar(select(CanvasFile).where(CanvasFile.account_id == run.account_id,
                                                      CanvasFile.canvas_id == canvas_file_id))
     if row is None or row.user_id != user.id or row.wanted_version is None:
         raise IngestError("file is not part of this sync")
-    version = version_key(updated_at)
-    cfg = current_app.config
-    if content_type and content_type != "application/octet-stream":
-        row.content_type = content_type
-    spool, size, digest = _spool(stream, cfg["MAX_FILE_MB"] * 1024 * 1024)
-    try:
-        # Extract text first: boto3's upload_fileobj closes the file object it's given.
-        if size <= cfg["MAX_EXTRACT_MB"] * 1024 * 1024:
-            text, status = extract_text(spool.read(), row.name, row.content_type)
-            spool.seek(0)
-        else:
-            text, status = None, "too_large"
-        key = f"u/{user.id}/files/{row.account_id}/{safe_key_part(row.canvas_id)}/{version}/{safe_key_part(row.name)}"
-        storage = get_storage()
-        storage.put_file(key, spool, row.content_type)
-        old_key = row.storage_key
-        row.storage_key = key
-        row.stored_version = version
-        row.sha256 = digest
-        row.size = size
-        row.stored_at = utcnow()
-    finally:
-        spool.close()
-    row.text, row.text_status = text, status
-    retrieval.rebuild_file_chunks(row)
+    return row
+
+
+def _record_stored(row: CanvasFile, run: SyncRun, key: str, version: str, size: int, digest: str | None) -> None:
+    old_key = row.storage_key
+    row.storage_key = key
+    row.stored_version = version
+    row.size = size
+    row.sha256 = digest  # filled in by the text reader for direct uploads
+    row.stored_at = utcnow()
+    # The previous version's text stays searchable until the new text is read.
+    row.text_status, row.text_started_at = "pending", None
     run.files_uploaded = (run.files_uploaded or 0) + 1
     db.session.commit()
     if old_key and old_key != key:  # an older version of this file is no longer needed
         try:
-            storage.delete_prefix(old_key)
+            get_storage().delete_prefix(old_key)
         except Exception as exc:
             current_app.logger.warning("could not delete old file version %s: %s", old_key, exc)
+    textjobs.kick()
+
+
+def store_file(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | None, stream,
+               content_type: str | None) -> CanvasFile:
+    """The file's bytes came through the app (local storage, or an extension without direct uploads)."""
+    row = _file_row(user, run, canvas_file_id)
+    version = version_key(updated_at)
+    if content_type and content_type != "application/octet-stream":
+        row.content_type = content_type
+    spool, size, digest = _spool(stream, current_app.config["MAX_FILE_MB"] * 1024 * 1024)
+    key = file_key(row, version)
+    try:
+        get_storage().put_file(key, spool, row.content_type)
+    finally:
+        spool.close()
+    _record_stored(row, run, key, version, size, digest)
+    return row
+
+
+def confirm_upload(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | None) -> CanvasFile:
+    """The extension PUT the file straight to storage with a URL from upload_targets()."""
+    row = _file_row(user, run, canvas_file_id)
+    version = version_key(updated_at)
+    key = file_key(row, version)
+    storage = get_storage()
+    size = storage.size(key)
+    if size is None:
+        raise IngestError("the file never reached storage")
+    limit = current_app.config["MAX_FILE_MB"] * 1024 * 1024
+    if size > limit:
+        storage.delete_prefix(key)
+        raise TooLarge(f"file exceeds the {limit // (1024 * 1024)} MB limit")
+    _record_stored(row, run, key, version, size, None)
     return row
 
 
