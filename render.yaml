@@ -46,6 +46,8 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: COMPOSIO_API_KEY
+        sync: false  # Google Calendar + Drive; hidden without it
       - key: PUBLIC_URL
         sync: false  # e.g. https://homeworkhatch.onrender.com (defaults to Render's URL)
       - key: STRIPE_SECRET_KEY
@@ -57,6 +59,4 @@ services:
       - key: STRIPE_PRICE_PREMIUM
         sync: false
       - key: STRIPE_PRICE_PRO
-        sync: false
-      - key: COLLEGE_SCORECARD_API_KEY
         sync: false

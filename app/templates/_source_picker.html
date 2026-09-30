@@ -1,0 +1,31 @@
+{# Pick files, pages and uploads from a class. Selected refs submit as hidden inputs named `name`.
+   See static/js/sources.js. #}
+{% macro source_picker(courses, course_id=None, refs=[], name="refs") %}
+<div class="picker" data-picker data-name="{{ name }}" data-selected='{{ refs|tojson }}'
+     data-sources-url="{{ url_for('study.sources_json') }}" data-upload-url="{{ url_for('uploads.upload') }}"
+     {% if integrations_available %}data-drive-search="{{ url_for('uploads.drive_search') }}" data-drive-import="{{ url_for('uploads.drive_import') }}"{% endif %}>
+  <div class="form-row">
+    <div><label>Class</label>
+      <select data-course name="picker_course">
+        {% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if c.id == course_id }}>{{ c.label }}</option>{% endfor %}
+        <option value="" {{ 'selected' if courses and course_id is none and refs }}>My files (not in a class)</option>
+      </select></div>
+    <div><label>Filter</label><input type="search" data-filter placeholder="Filter by name"></div>
+  </div>
+  <div class="small picker-tools"><button type="button" class="linklike" data-all>Select all</button> · <button type="button" class="linklike" data-none>Clear</button>
+    <span class="muted" data-count></span></div>
+  <ul class="list picker-list" data-list><li class="muted">Loading…</li></ul>
+  <div class="btn-row mt">
+    <label class="btn btn-ghost btn-sm">⬆️ Upload from computer<input type="file" data-upload multiple hidden></label>
+    {% if integrations_available %}<button type="button" class="btn btn-ghost btn-sm" data-drive>📁 Add from Google Drive</button>{% endif %}
+  </div>
+  {% if integrations_available %}
+  <div data-drive-panel hidden class="drive-panel mt">
+    <input type="search" data-drive-q placeholder="Search your Google Drive (or leave empty for recent files)">
+    <ul class="list picker-list" data-drive-list></ul>
+  </div>
+  {% endif %}
+  <p class="help" data-msg></p>
+  <div data-hidden></div>
+</div>
+{% endmacro %}

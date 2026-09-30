@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}My files{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>📁 My files</h1><p class="muted">Your own notes, readings and study guides, from your computer or Google Drive. File them under a class and use them for flashcards, quizzes and the tutor, just like Canvas files.</p></div>
+  <a class="btn" href="{{ url_for('study.generate', course=none) }}">✨ Make flashcards or a quiz</a></div>
+<div class="grid grid-main">
+  <div class="card">
+    <h2>Your files</h2>
+    {% if rows %}
+    <ul class="list">
+      {% for u in rows %}
+      <li style="align-items:flex-start">
+        <div class="grow">
+          <a class="title" href="{{ url_for('uploads.download', upload_id=u.id, inline=1) }}" target="_blank" rel="noopener">{{ u.name }}</a>
+          <div class="small muted">{{ '📁 Google Drive · ' if u.source == 'drive' }}{% if u.size %}{{ (u.size / 1024)|round(0)|int }} KB · {% endif %}added {{ u.created_at|ago }}
+            {% if u.text_status == 'ok' %}· readable by AI{% elif u.text_status in ('pending', 'extracting') %}· reading text…{% elif u.text_status == 'empty' %}· no text layer (a scan){% elif u.text_status == 'unsupported' %}· can't be read by AI{% elif u.text_status == 'too_large' %}· too large to read{% elif u.text_status == 'error' %}· couldn't be read{% endif %}</div>
+          <form method="post" action="{{ url_for('uploads.set_course', upload_id=u.id) }}" class="btn-row mt">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="course_id" onchange="this.form.submit()" style="max-width:320px">
+              <option value="">No class</option>
+              {% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if c.id == u.course_id }}>{{ c.label }}</option>{% endfor %}
+            </select>
+          </form>
+        </div>
+        <div class="btn-row">
+          {% if u.text_status == 'ok' %}
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('study.generate', refs='upload:%d' % u.id, output='deck') }}">🃏 Cards</a>
+          <a class="btn btn-ghost btn-sm" href="{{ url_for('study.generate', refs='upload:%d' % u.id, output='quiz') }}">❓ Quiz</a>
+          {% endif %}
+          <form method="post" action="{{ url_for('uploads.delete', upload_id=u.id) }}" data-confirm="Delete {{ u.name }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="linklike small">delete</button></form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="muted">Nothing here yet. Add files on the right.</p>{% endif %}
+  </div>
+  <div>
+    <form method="post" action="{{ url_for('uploads.upload') }}" enctype="multipart/form-data" class="card" id="upload-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h2>⬆️ Upload from your computer</h2>
+      <label class="dropzone" id="drop">
+        <input type="file" name="files" multiple id="file-input" hidden>
+        <strong>Drop files here</strong> or click to choose<br><span class="small muted">PDF, Word, PowerPoint or text files · up to {{ config.MAX_FILE_MB }} MB each</span>
+      </label>
+      <label for="upload-course">Class <span class="hint">(optional)</span></label>
+      <select id="upload-course" name="course_id"><option value="">No class</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select>
+      <button class="btn btn-block mt" id="upload-btn" disabled>Upload</button>
+    </form>
+    {% if drive_available %}
+    <div class="card">
+      <h2>📁 Add from Google Drive</h2>
+      {% if drive_connected %}
+      <p class="small muted">Search your Drive and add files. Google Docs come in as text, Slides as PDF, Sheets as CSV.</p>
+      <input type="search" id="drive-q" placeholder="Search your Drive (empty = recent files)">
+      <ul class="list picker-list" id="drive-list"><li class="muted">Loading…</li></ul>
+      <form method="post" action="{{ url_for('settings.integration_disconnect', kind='drive') }}" class="mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('uploads.index') }}"><button class="linklike small">Disconnect Google Drive</button></form>
+      {% else %}
+      <p class="small muted">Connect your Google account to pick files from Drive. Homework Hatch only reads the files you add.</p>
+      <a class="btn btn-block" href="{{ url_for('settings.integration_connect', kind='drive', next=url_for('uploads.index')) }}">Connect Google Drive</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const input = document.getElementById("file-input"), drop = document.getElementById("drop"), btn = document.getElementById("upload-btn");
+  const show = () => { const n = input.files.length; btn.disabled = !n; btn.textContent = n ? `Upload ${n} file${n === 1 ? "" : "s"}` : "Upload";
+    drop.querySelector("strong").textContent = n ? [...input.files].map((f) => f.name).join(", ") : "Drop files here"; };
+  input.addEventListener("change", show);
+  ["dragover", "dragenter"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove("over")));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); input.files = e.dataTransfer.files; show(); });
+  document.getElementById("upload-form").addEventListener("submit", () => { btn.disabled = true; btn.textContent = "Uploading…"; });
+
+  const q = document.getElementById("drive-q"), list = document.getElementById("drive-list");
+  if (!q) return;
+  let seq = 0, timer;
+  const search = async () => {
+    const mine = ++seq;
+    try {
+      const data = await hh.get(`{{ url_for('uploads.drive_search') }}?q=${encodeURIComponent(q.value.trim())}`);
+      if (mine !== seq) return;
+      if (!data.connected) { location.reload(); return; }
+      list.innerHTML = data.files.map((f) => `<li><span class="grow">${f.icon ? `<img src="${hh.escape(f.icon)}" alt="" width="16" height="16"> ` : ""}${hh.escape(f.name)}</span>
+        <button class="btn btn-ghost btn-sm" data-id="${hh.escape(f.id)}" data-mime="${hh.escape(f.mimeType)}">Add</button></li>`).join("") || '<li class="muted">No files found.</li>';
+    } catch (e) { list.innerHTML = `<li class="muted">${hh.escape(e.message)}</li>`; }
+  };
+  q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(search, 400); });
+  list.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-id]");
+    if (!b) return;
+    b.disabled = true; b.textContent = "Adding…";
+    try {
+      await hh.post("{{ url_for('uploads.drive_import') }}", { id: b.dataset.id, mimeType: b.dataset.mime, course_id: document.getElementById("upload-course").value });
+      location.reload();
+    } catch (err) { b.disabled = false; b.textContent = "Add"; b.insertAdjacentHTML("afterend", `<span class="small" style="color:var(--err)"> ${hh.escape(err.message)}</span>`); }
+  });
+  search();
+})();
+</script>
+{% endblock %}

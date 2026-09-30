@@ -12,7 +12,7 @@ from .conftest import api_token, login, make_user, sync
 
 def test_generate_flashcards_from_a_synced_file(synced_user, client, fake_ai):
     f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
-    r = client.post("/study/generate", data={"output": "deck", "kind": "file", "file_id": f.id, "count": 10})
+    r = client.post("/study/generate", data={"output": "deck", "mode": "sources", "refs": [f"file:{f.id}"], "count": 10})
     assert r.status_code == 302
     deck = db.session.scalar(select(Deck))
     assert deck.source == "ai" and deck.title == "Derivatives"
@@ -25,7 +25,7 @@ def test_generate_flashcards_from_a_synced_file(synced_user, client, fake_ai):
 
 def test_generate_quiz_from_topic_search_and_take_it(synced_user, client):
     course = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
-    r = client.post("/study/generate", data={"output": "quiz", "kind": "course", "course_id": course.id, "topic": "chain rule"})
+    r = client.post("/study/generate", data={"output": "quiz", "mode": "course", "course_id": course.id, "topic": "chain rule"})
     assert r.status_code == 302
     quiz = db.session.scalar(select(PracticeQuiz))
     assert len(quiz.questions) == 2, "malformed questions are dropped"
@@ -60,18 +60,18 @@ def test_quiz_editor_round_trips_multiline_text(synced_user, client):
 
 
 def test_generate_reports_unusable_sources(synced_user, client):
-    r = client.post("/study/generate", data={"output": "deck", "kind": "paste", "pasted": "too short"})
+    r = client.post("/study/generate", data={"output": "deck", "mode": "paste", "pasted": "too short"})
     assert r.status_code == 400 and b"Paste at least" in r.data
     f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9001"))  # fake PDF bytes -> no text
-    r = client.post("/study/generate", data={"output": "deck", "kind": "file", "file_id": f.id})
-    assert r.status_code == 400 and b"No readable text" in r.data
+    r = client.post("/study/generate", data={"output": "deck", "mode": "sources", "refs": [f"file:{f.id}"]})
+    assert r.status_code == 400 and b"readable text" in r.data
 
 
 def test_ai_quota_is_enforced(synced_user, client):
     for _ in range(25):  # free plan allowance
         db.session.add(AIUsage(user_id=synced_user.id, kind="x"))
     db.session.commit()
-    r = client.post("/study/generate", data={"output": "deck", "kind": "paste", "pasted": "Notes about the chain rule " * 5})
+    r = client.post("/study/generate", data={"output": "deck", "mode": "paste", "pasted": "Notes about the chain rule " * 5})
     assert r.status_code == 400 and b"used all 25 AI actions" in r.data
 
 
@@ -84,6 +84,7 @@ def test_summary_is_rendered_safely(synced_user, client):
 
 
 def test_tutor_streams_with_citations_and_saves_history(synced_user, client, fake_ai):
+    fake_ai.close_session_before_streaming = True  # as in production: the answer outlives the request
     course = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
     r = client.post("/tutor/new", data={"course_id": course.id})
     conv_url = r.headers["Location"]
@@ -116,7 +117,7 @@ def test_tutor_rejects_when_quota_used(synced_user, client):
 
 def test_ai_errors_are_shown_not_crashed(synced_user, client, fake_ai):
     fake_ai.fail_with = ai.AIError("The AI is busy right now. Try again in a minute.")
-    r = client.post("/study/generate", data={"output": "deck", "kind": "paste", "pasted": "Notes about the chain rule " * 5})
+    r = client.post("/study/generate", data={"output": "deck", "mode": "paste", "pasted": "Notes about the chain rule " * 5})
     assert r.status_code == 400 and b"busy right now" in r.data
 
 

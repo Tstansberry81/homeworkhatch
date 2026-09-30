@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from ..extensions import db
 from ..models import ApiToken, SyncRun, User, utcnow
-from ..services import ingest, textjobs
+from ..services import gcal, ingest, integrations, textjobs
 from ..services.storage import StorageError, TooLarge
 
 bp = Blueprint("api", __name__, url_prefix="/v1")
@@ -97,6 +97,8 @@ def post_snapshot():
         current_app.logger.warning("could not presign uploads: %s", exc)
         targets = {}
     textjobs.kick()  # resumes reading any files left pending by a restart
+    if integrations.available() and gcal.enabled(g.api_user):
+        gcal.kick(g.api_user.id)  # new or changed due dates go to Google Calendar
     return jsonify({"snapshot_id": run.id, "files_needed": needed, "upload_urls": targets})
 
 

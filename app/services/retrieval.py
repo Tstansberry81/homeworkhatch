@@ -88,13 +88,20 @@ def rebuild_course_chunks(course: Course, force: bool = False) -> bool:
     return True
 
 
-def rebuild_file_chunks(f: CanvasFile) -> None:
-    db.session.execute(delete(ContentChunk).where(ContentChunk.source_type == "file", ContentChunk.source_id == f.id))
+def rebuild_file_chunks(f: CanvasFile, source_type: str = "file") -> None:
+    """Search chunks for a file's text. Files outside any class (an upload not filed under a
+    class) aren't searched; they reach the tutor only when attached to a chat."""
+    db.session.execute(delete(ContentChunk).where(ContentChunk.source_type == source_type, ContentChunk.source_id == f.id))
     if not f.text or not f.course_id:
         return
     for n, piece in enumerate(chunk_text(f.text)):
-        db.session.add(ContentChunk(user_id=f.user_id, course_id=f.course_id, source_type="file", source_id=f.id,
+        db.session.add(ContentChunk(user_id=f.user_id, course_id=f.course_id, source_type=source_type, source_id=f.id,
                                     title=f.name[:500], url=None, ordinal=n, text=piece))
+
+
+def rebuild_chunks_for(row) -> None:
+    """A Canvas file or one of the student's own uploads."""
+    rebuild_file_chunks(row, "upload" if row.__class__.__name__ == "Upload" else "file")
 
 
 def search(user_id: int, query: str, course_ids: list[int] | None = None, k: int = 8,

@@ -19,6 +19,9 @@ class FakeAI:
     def __init__(self):
         self.calls = []
         self.fail_with = None
+        # A streamed *response* (the tutor) outlives the request's database session in production,
+        # but not in the test client; tests of streamed responses turn this on to match.
+        self.close_session_before_streaming = False
 
     def complete(self, *, system, messages, max_tokens, effort, schema=None):
         self.calls.append({"system": system, "messages": messages, "effort": effort, "schema": schema})
@@ -44,6 +47,10 @@ class FakeAI:
         answer = "The chain rule multiplies derivatives [S1]. Try it on $\\sin(x^2)$."
 
         def gen():
+            if self.close_session_before_streaming:
+                from app.extensions import db
+
+                db.session.remove()  # what Flask's teardown has done by now in production
             for piece in re.findall(r".{1,12}", answer):
                 yield piece
             handle.result = AIResult(answer, 900, 60, "fake-model")

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_gcal_card.html" import gcal_card %}
 {% block title %}Calendar{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -32,8 +33,9 @@
     </tbody>
   </table>
 </div>
+{% if integrations_available %}{{ gcal_card(gcal, url_for('main.calendar_view')) }}{% endif %}
 <div class="card">
-  <h2>Add to your phone's calendar</h2>
+  <h2>{{ 'Or subscribe from any calendar app' if integrations_available else "Add to your phone's calendar" }}</h2>
   <p class="small muted">Subscribe to this private link in Google Calendar ("From URL"), Apple Calendar ("New Calendar Subscription") or Outlook. It updates on its own. Anyone with the link can see your due dates, so keep it to yourself.</p>
   <div class="btn-row"><code id="feed" style="overflow-wrap:anywhere">{{ feed_url }}</code><button class="btn btn-ghost btn-sm" data-copy="#feed">Copy</button></div>
   <form method="post" action="{{ url_for('main.reset_feed') }}" class="mt" data-confirm="Reset the link? Calendars using the old one will stop updating.">

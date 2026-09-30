@@ -1,4 +1,4 @@
-"""Pure-logic tests: grades, spaced repetition, planner, college odds, citations, moderation, iCal."""
+"""Pure-logic tests: grades, spaced repetition, planner, citations, moderation, iCal."""
 
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models import Assignment, AssignmentGroup, Card, utcnow
-from app.services import citations, college, grades, ics, moderation, planner, srs
+from app.services import citations, grades, ics, moderation, planner, srs
 
 
 def A(id, score, possible, group="g", status="graded", **kw):
@@ -96,37 +96,6 @@ def test_planner_spreads_work_and_flags_overflow():
     assert any(r["assignment"].name == "Final Exam" for r in plan["at_risk"]), "180 min of exam prep can't fit in 2 days at 60/day"
     essay_days = [d.day for d in plan["days"] for i in d.items if i.assignment.name == "Essay"]
     assert max(essay_days) <= date(2026, 9, 5)
-
-
-# ---------------------------------------------------------------- college
-
-def school(**kw):
-    base = dict(admit_rate=0.5, oos_admit_rate=None, public=False, state="VA", sat25=1200, sat75=1400, act25=None, act75=None)
-    base.update(kw)
-    return SimpleNamespace(**base)
-
-
-def profile(**kw):
-    base = dict(gpa=3.8, gpa_scale=4.0, sat=1300, act=None, home_state="VA")
-    base.update(kw)
-    return SimpleNamespace(**base)
-
-
-def test_college_estimate_moves_with_scores_and_caps_selective_schools():
-    low, mid, high = (college.estimate(profile(sat=s), school()).chance for s in (1100, 1300, 1550))
-    assert low < mid < high
-    elite = college.estimate(profile(sat=1600, gpa=4.0), school(admit_rate=0.05, sat25=1500, sat75=1570))
-    assert elite.label == "Reach" and elite.chance <= 0.15
-    safe = college.estimate(profile(sat=1500), school(admit_rate=0.8, sat25=1000, sat75=1200))
-    assert safe.label == "Safety"
-
-
-def test_out_of_state_rate_used_for_public_schools():
-    s = school(public=True, state="VA", admit_rate=0.24, oos_admit_rate=0.16)
-    in_state = college.estimate(profile(home_state="VA"), s).chance
-    out = college.estimate(profile(home_state="MD"), s)
-    assert out.chance < in_state and any("out-of-state" in r for r in out.reasons)
-    assert college.estimate(profile(), school(admit_rate=None)).chance is None
 
 
 # ---------------------------------------------------------------- citations

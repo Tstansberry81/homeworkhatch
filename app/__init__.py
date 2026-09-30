@@ -46,11 +46,11 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
     login_manager.init_app(app)
     csrf.init_app(app)
 
-    from .blueprints import (admin, api, auth, billing, chat, coins, college, courses, live, main, settings, study,
-                             tools, tutor)
+    from .blueprints import (admin, api, auth, billing, chat, coins, courses, live, main, settings, study, tools, tutor,
+                             uploads)
 
-    for bp in (main.bp, auth.bp, courses.bp, api.bp, study.bp, live.bp, tutor.bp, chat.bp, coins.bp, college.bp,
-               tools.bp, billing.bp, settings.bp, admin.bp):
+    for bp in (main.bp, auth.bp, courses.bp, api.bp, study.bp, live.bp, tutor.bp, chat.bp, coins.bp, tools.bp,
+               billing.bp, settings.bp, admin.bp, uploads.bp):
         app.register_blueprint(bp)
     # Token-authenticated / signature-verified endpoints don't use browser CSRF tokens.
     csrf.exempt(api.bp)
@@ -77,6 +77,7 @@ def load_user(user_id: str):
 
 def _register_template_helpers(app: Flask) -> None:
     from .services import ai as ai_service
+    from .services import integrations as integration_service
     from .services import coins as coin_service
     from .utils import fmt_dt, relative, safe_canvas_html, to_local
 
@@ -89,7 +90,8 @@ def _register_template_helpers(app: Flask) -> None:
     @app.context_processor
     def inject():
         ctx = {"ai_available": ai_service.available(), "app_name": "Homework Hatch",
-               "feature_simulations": app.config["FEATURE_SIMULATIONS"]}
+               "feature_simulations": app.config["FEATURE_SIMULATIONS"],
+               "integrations_available": integration_service.available()}
         if current_user.is_authenticated:
             ctx["coin_balance"] = coin_service.balance(current_user.id)
         return ctx

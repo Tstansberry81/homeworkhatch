@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from .. import queries
 from ..extensions import db
-from ..models import Assignment, CanvasFile, Page, Summary
+from ..models import Assignment, CanvasFile, Page, Summary, Upload
 from ..services import ai, grades, study
 from ..services.storage import get_storage
 
@@ -27,8 +27,10 @@ def detail(course_id: int):
     tab = request.args.get("tab", "overview")
     result = grades.compute(course.groups, course.assignments, weighted=course.group_weighting)
     base_url = course.account.base_url if course.account else None
+    uploads = db.session.scalars(select(Upload).where(Upload.user_id == current_user.id, Upload.course_id == course.id)
+                                 .order_by(Upload.name)).all() if tab == "files" else []
     return render_template("courses/detail.html", course=course, tab=tab, grade=result, base_url=base_url,
-                           upcoming=queries.upcoming_for_course(course))
+                           upcoming=queries.upcoming_for_course(course), uploads=uploads)
 
 
 @bp.route("/<int:course_id>/visibility", methods=["POST"])

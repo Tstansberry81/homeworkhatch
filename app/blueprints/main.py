@@ -13,7 +13,7 @@ from .. import queries
 from ..config import BASE_DIR
 from ..extensions import db
 from ..models import Assignment, CalendarEvent, Course, User, utcnow
-from ..services import ics, planner
+from ..services import ics, integrations, planner
 from ..utils import local_now, to_local
 from .auth import valid_timezone
 
@@ -151,7 +151,8 @@ def calendar_view():
     next_month = (first + timedelta(days=32)).replace(day=1)
     feed_url = url_for("main.ics_feed", token=current_user.calendar_token, _external=True)
     return render_template("calendar.html", weeks=weeks, first=first, today=today, by_day=by_day,
-                           prev_month=prev_month, next_month=next_month, feed_url=feed_url)
+                           prev_month=prev_month, next_month=next_month, feed_url=feed_url,
+                           gcal=integrations.get(current_user, "calendar") if integrations.available() else None)
 
 
 @bp.route("/calendar/<token>.ics")

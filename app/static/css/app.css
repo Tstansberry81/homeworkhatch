@@ -280,3 +280,17 @@ a.cite { display: inline-block; font-size: .72rem; font-weight: 700; padding: 0 
 
 /* ---------- probability lab ---------- */
 .dice { font-size: 3rem; letter-spacing: .1em; }
+
+/* Source picker (flashcards/quizzes, tutor attachments) */
+.picker-list { max-height: 320px; overflow-y: auto; margin-top: 6px; }
+.picker-list li { gap: 10px; }
+.picker-tools { margin-top: 4px; }
+.drive-panel { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; }
+.attach-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 0; }
+.attach-panel { border-top: 1px solid var(--border); padding: 10px 0; }
+.chip { display: inline-flex; gap: 4px; align-items: center; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 10px; font-size: .85rem; max-width: 100%; }
+.dropzone { display: block; border: 2px dashed var(--border); border-radius: var(--radius); padding: 22px 14px; text-align: center; cursor: pointer; margin-bottom: 10px; }
+.dropzone.over, .dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
+.pick-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--surface); z-index: 1; }

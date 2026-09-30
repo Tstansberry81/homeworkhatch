@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import secrets
+from urllib.parse import urlsplit
 
-from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import (Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request,
+                   session, url_for)
 from flask_login import current_user, login_required, logout_user
 from sqlalchemy import func, select
 
 from .. import queries
 from ..extensions import db
-from ..models import (ApiToken, ChatMessage, CoinTransaction, Deck, PracticeQuiz, SavedCollege, SyncRun,
+from ..models import (ApiToken, ChatMessage, CoinTransaction, Deck, PracticeQuiz, SyncRun,
                       TutorConversation, User, utcnow)
+from ..services import gcal, integrations
 from ..services.storage import get_storage
 from .api import hash_token
 from .auth import USERNAME_RE, valid_timezone
@@ -136,7 +139,7 @@ def export():
     payload = {
         "exported_at": utcnow().isoformat() + "Z",
         "profile": {"email": u.email, "username": u.username, "display_name": u.display_name, "plan": u.plan,
-                    "timezone": u.timezone, "grade_level": u.grade_level, "gpa": u.gpa, "sat": u.sat, "act": u.act},
+                    "timezone": u.timezone, "grade_level": u.grade_level},
         "courses": [{
             "name": c.name, "code": c.course_code, "term": c.term_name, "current_score": c.current_score,
             "assignments": [{"name": a.name, "due_at": a.due_at.isoformat() if a.due_at else None, "status": a.status,
@@ -152,8 +155,6 @@ def export():
                           for m in db.session.scalars(select(ChatMessage).where(ChatMessage.user_id == u.id))],
         "coins": [{"amount": t.amount, "reason": t.reason, "at": t.created_at.isoformat()}
                   for t in db.session.scalars(select(CoinTransaction).where(CoinTransaction.user_id == u.id))],
-        "colleges": [{"name": s.name, "state": s.state} for s in
-                     db.session.scalars(select(SavedCollege).where(SavedCollege.user_id == u.id))],
     }
     return Response(json.dumps(payload, indent=2), mimetype="application/json",
                     headers={"Content-Disposition": "attachment; filename=homeworkhatch-export.json"})
@@ -181,3 +182,116 @@ def delete_account():
     db.session.commit()
     flash("Your account and all of its data were deleted.", "info")
     return redirect(url_for("main.landing"))
+
+
+# ---------------------------------------------------------------- Google (through Composio)
+
+
+def _kind(kind: str) -> str:
+    if kind not in integrations.TOOLKITS or not integrations.available():
+        abort(404)
+    return kind
+
+
+def _safe_next(target: str | None) -> str | None:
+    return target if target and target.startswith("/") and not target.startswith("//") else None
+
+
+@bp.route("/integrations")
+@login_required
+def integrations_page():
+    if not integrations.available():
+        abort(404)
+    return render_template("settings/integrations.html", calendar=integrations.get(current_user, "calendar"),
+                           drive=integrations.get(current_user, "drive"))
+
+
+@bp.route("/integrations/<kind>/connect")
+@login_required
+def integration_connect(kind: str):
+    kind = _kind(kind)
+    ref = urlsplit(request.referrer or "")
+    back = ref.path + (f"?{ref.query}" if ref.query else "") if ref.netloc == request.host else None
+    session["integration_next"] = _safe_next(request.args.get("next")) or _safe_next(back)
+    try:
+        url = integrations.connect_url(current_user, kind,
+                                       url_for("settings.integration_callback", kind=kind, _external=True))
+    except integrations.IntegrationError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("settings.integrations_page"))
+    if url is None:  # already connected
+        return redirect(url_for("settings.integration_callback", kind=kind))
+    return redirect(url)
+
+
+@bp.route("/integrations/<kind>/callback")
+@login_required
+def integration_callback(kind: str):
+    kind = _kind(kind)
+    try:
+        ok = integrations.refresh(current_user, kind)
+    except integrations.IntegrationError as exc:
+        flash(str(exc), "error")
+        ok = False
+    if ok:
+        flash(f"{integrations.LABELS[kind]} connected.", "success")
+        if kind == "calendar":
+            row = integrations.get(current_user, "calendar")
+            if "enabled" not in (row.settings or {}):  # first connection: turn syncing on
+                row.settings = {**(row.settings or {}), "enabled": True}
+                db.session.commit()
+            gcal.kick(current_user.id)
+    elif request.args.get("status") not in (None, "success"):
+        flash(f"{integrations.LABELS[kind]} wasn't connected.", "error")
+    return redirect(session.pop("integration_next", None) or url_for("settings.integrations_page"))
+
+
+@bp.route("/integrations/<kind>/disconnect", methods=["POST"])
+@login_required
+def integration_disconnect(kind: str):
+    kind = _kind(kind)
+    try:
+        if kind == "calendar" and gcal.enabled(current_user) and request.form.get("remove_events"):
+            gcal.remove_all(current_user)
+        integrations.disconnect(current_user, kind)
+        flash(f"{integrations.LABELS[kind]} disconnected.", "info")
+    except integrations.IntegrationError as exc:
+        flash(str(exc), "error")
+    return redirect(_safe_next(request.form.get("next")) or url_for("settings.integrations_page"))
+
+
+@bp.route("/integrations/calendar/toggle", methods=["POST"])
+@login_required
+def calendar_toggle():
+    _kind("calendar")
+    row = integrations.get(current_user, "calendar", create=True)
+    turn_on = request.form.get("enabled") == "1"
+    row.settings = {**(row.settings or {}), "enabled": turn_on}
+    db.session.commit()
+    if turn_on:
+        if not row.connected:
+            return redirect(url_for("settings.integration_connect", kind="calendar", next=request.form.get("next")))
+        gcal.kick(current_user.id)
+        flash("Adding your due dates to Google Calendar. This takes a minute the first time.", "success")
+    else:
+        try:
+            removed = gcal.remove_all(current_user) if request.form.get("remove_events") else 0
+        except integrations.IntegrationError as exc:
+            removed = 0
+            flash(str(exc), "error")
+        flash("Stopped adding due dates to Google Calendar." +
+              (f" Removed {removed} upcoming event{'s' if removed != 1 else ''}." if removed else ""), "info")
+    return redirect(_safe_next(request.form.get("next")) or url_for("settings.integrations_page"))
+
+
+@bp.route("/integrations/calendar/sync", methods=["POST"])
+@login_required
+def calendar_sync_now():
+    _kind("calendar")
+    if not gcal.enabled(current_user):
+        flash("Turn on Google Calendar first.", "error")
+    else:
+        gcal.kick(current_user.id)
+        flash("Syncing your due dates to Google Calendar…", "info")
+    return redirect(_safe_next(request.form.get("next")) or url_for("settings.integrations_page"))
+

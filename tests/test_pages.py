@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from app.extensions import db
-from app.models import (Assignment, CanvasFile, CoinTransaction, Course, Deck, Page, PracticeQuiz, SavedCollege, User)
+from app.models import (Assignment, CanvasFile, CoinTransaction, Course, Deck, Page, PracticeQuiz, User)
 from app.services import coins
 
 from .conftest import login, make_user
@@ -31,12 +31,12 @@ def test_every_student_page_renders(app, synced_user, client):
     f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
     deck = Deck(user_id=synced_user.id, title="D")
     quiz = PracticeQuiz(user_id=synced_user.id, title="Q", questions=[{"question": "q", "choices": ["a", "b"], "answer": 0, "explanation": ""}])
-    db.session.add_all([deck, quiz, SavedCollege(user_id=synced_user.id, name="State U", admit_rate=0.6, sat25=1100, sat75=1300)])
+    db.session.add_all([deck, quiz])
     db.session.commit()
     paths = ["/dashboard", "/welcome", "/courses/", "/calendar", "/calendar?y=2026&m=2", "/planner", "/study/",
              "/study/generate", "/study/decks/new", f"/study/decks/{deck.id}", f"/study/decks/{deck.id}/review",
              f"/study/decks/{deck.id}/cram", "/study/quizzes/new", f"/study/quizzes/{quiz.id}",
-             f"/study/quizzes/{quiz.id}/edit", "/tutor/", "/chat/", f"/chat/course/{course.id}", "/coins", "/college/", "/tools/citations", "/billing/",
+             f"/study/quizzes/{quiz.id}/edit", "/tutor/", "/chat/", f"/chat/course/{course.id}", "/coins", "/tools/citations", "/billing/",
              "/settings/", "/settings/sync", "/settings/data", f"/courses/assignments/{a.id}", f"/courses/pages/{page.id}",
              f"/courses/files/{f.id}", "/live/join"]
     paths += [f"/courses/{course.id}?tab={t}" for t in ("overview", "assignments", "grades", "modules", "pages", "files", "announcements")]

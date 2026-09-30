@@ -3,14 +3,14 @@ from __future__ import annotations
 import re
 from datetime import timezone
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
 
 from .. import queries
 from ..extensions import db
 from ..models import Card, Deck, PracticeQuiz, QuizAttempt, utcnow
-from ..services import ai, coins, srs, study
+from ..services import ai, coins, sources, srs, study
 from ..utils import local_now
 
 bp = Blueprint("study", __name__, url_prefix="/study")
@@ -41,21 +41,17 @@ def _course_id(value) -> int | None:
     return cid
 
 
-def _preset_course(preset: dict) -> int | None:
-    """The class that owns the preselected file/page, so it shows even when hidden."""
-    from ..models import CanvasFile, Page
-
-    try:
-        ref = int(preset.get("ref") or 0)
-    except ValueError:
-        return None
-    if preset.get("kind") == "file":
-        f = db.session.get(CanvasFile, ref)
-        return f.course_id if f and f.user_id == current_user.id else None
-    if preset.get("kind") == "page":
-        p = db.session.get(Page, ref)
-        return p.course_id if p else None
-    return None
+def _preset(args) -> dict:
+    """What the generator opens with: ?course=&refs=file:1,page:2&output= (from a class's Files
+    tab), or ?kind=file|page&ref= (the buttons on a file or page)."""
+    refs = [r for r in (args.get("refs") or "").split(",") if r]
+    if args.get("kind") in ("file", "page") and str(args.get("ref") or "").isdigit():
+        refs.append(f"{args['kind']}:{args['ref']}")
+    course_id = args.get("course", type=int) if hasattr(args, "getlist") else None
+    if not course_id and refs:
+        course_id = next((s.course_id for s in sources.describe(current_user, refs) if s.course_id), None)
+    return {"course_id": course_id, "refs": refs, "output": args.get("output", "deck"),
+            "mode": args.get("mode") if args.get("mode") in ("sources", "course", "paste") else "sources"}
 
 
 # ---------------------------------------------------------------- hub
@@ -78,22 +74,33 @@ def index():
 # ---------------------------------------------------------------- AI generation
 
 
+@bp.route("/sources")
+@login_required
+def sources_json():
+    """The picker's list for one class (or the student's unfiled uploads with no course_id)."""
+    raw = request.args.get("course_id", "")
+    course_id = _course_id(raw) if raw else None
+    return jsonify({"sources": [s.to_dict() for s in sources.for_course(current_user, course_id)]})
+
+
 @bp.route("/generate", methods=["GET", "POST"])
 @login_required
 def generate():
-    preset = {"kind": request.args.get("kind", "file"), "ref": request.args.get("ref", ""),
-              "output": request.args.get("output", "deck")}
-    options = study.material_options(current_user, _preset_course(preset))
     if request.method == "GET":
-        return render_template("study/generate.html", options=options, preset=preset,
-                               remaining=ai.remaining(current_user))
+        preset = _preset(request.args)
+        return _generate_page(preset)
     f = request.form
-    kind = f.get("kind", "file")
-    ref = {"file": f.get("file_id"), "page": f.get("page_id"), "course": f.get("course_id")}.get(kind)
+    mode = f.get("mode", "sources")
     output = f.get("output", "deck")
+    preset = {"course_id": f.get("picker_course", type=int), "refs": f.getlist("refs"), "output": output, "mode": mode}
     try:
         count = int(f.get("count") or (15 if output == "deck" else 10))
-        material = study.gather_material(current_user, kind, ref, topic=f.get("topic"), pasted=f.get("pasted"))
+        if mode == "course":
+            material = study.gather_material(current_user, "course", f.get("course_id"), topic=f.get("topic"))
+        elif mode == "paste":
+            material = study.gather_material(current_user, "paste", pasted=f.get("pasted"))
+        else:
+            material = study.gather_sources(current_user, f.getlist("refs"))
         if output == "quiz":
             data = study.generate_quiz(current_user, material, count)
             quiz = PracticeQuiz(user_id=current_user.id, course_id=material.course_id, source="ai",
@@ -112,13 +119,17 @@ def generate():
             target = url_for("study.deck", deck_id=deck.id)
     except (study.MaterialError, ai.AIError, ValueError) as exc:
         flash(str(exc), "error")
-        return render_template("study/generate.html", options=options, preset={"kind": kind, "ref": ref or "",
-                                                                                "output": output},
-                               remaining=ai.remaining(current_user)), 400
+        return _generate_page(preset), 400
     if material.truncated:
-        flash("That source is very long, so only its first part was used.", "info")
+        flash("The picked sources are long, so each one was trimmed to fit (every source still contributes).", "info")
     flash("Generated! Review the items and fix anything that looks off.", "success")
     return redirect(target)
+
+
+def _generate_page(preset: dict):
+    options = study.material_options(current_user, preset.get("course_id"))
+    return render_template("study/generate.html", courses=options["courses"], preset=preset,
+                           remaining=ai.remaining(current_user))
 
 
 # ---------------------------------------------------------------- decks

@@ -17,16 +17,16 @@ login, so no school password or API key is ever involved.
 | **Dashboard** | What's due, what's missing (per Canvas), grades by class (lecture and discussion sections merged), recent announcements. |
 | **Classes** | Assignments with rubrics and teacher feedback, modules, pages (sanitized), files with in-app preview, announcements. |
 | **Grades** | Canvas-accurate calculator (weighted groups, optimal drop lowest/highest, extra credit), what-if scores, and "what do I need on X". |
-| **Calendar** | Month view, plus a private iCal feed for Google, Apple or Outlook calendars. |
+| **Calendar** | Month view, a private iCal feed for any calendar app, and a Google Calendar toggle that adds every upcoming due date and keeps it updated (through Composio). |
 | **Study plan** | Spreads the next two weeks of work across daily study time and flags what won't fit. |
-| **AI tutor** | Streaming chat per class or across all classes, grounded in synced materials with `[S1]` citations. Built to teach rather than do the work. |
-| **Study sets** | AI-generated flashcards and practice quizzes from a file, page, topic or pasted notes. SM-2 spaced repetition, cram mode, a manual editor. |
+| **AI tutor** | Streaming chat per class or across all classes, grounded in synced materials with `[S1]` citations. Attach files (Canvas, uploads, Google Drive) to a chat and it answers from them. Built to teach rather than do the work. |
+| **Study sets** | AI-generated flashcards and practice quizzes from any files and pages you tick in a class (plus your own uploads), a topic, or pasted notes. SM-2 spaced repetition, cram mode, a manual editor. |
+| **My files** | Upload notes and readings from your computer or pick them from Google Drive (through Composio); file them under a class and study from them like Canvas files. |
 | **Live quiz** | Kahoot-style: the host shows questions, classmates join with a code (no account needed), and faster correct answers score more. |
 | **Summaries** | AI study summaries of any synced file or page. Scanned PDFs (no text layer) can be read by Claude so the tutor and generators can use them too. |
 | **Class chat** | A room per Canvas course. Classmates confirm each other through the class rosters their extensions sync, so a made-up account can't get into a real class's room. Profanity masking, slur and threat blocking, reports, and auto-hide after 3 reports. |
 | **Buddy Coins** | Original rules: assignment 10, quiz 20, test 30, plus a grade bonus; late work earns half. Also pays for studying and live-quiz wins. Achievements and leaderboards (opt-in). |
 | **Probability Lab** | 18+, off by default (`FEATURE_SIMULATIONS=1`). Dice odds with the exact probability and expected value shown. Virtual coins only, as in the original terms of service. |
-| **College odds** | College Scorecard search (or manual entry), out-of-state rates, and a transparent reach/target/safety estimate. |
 | **Citations** | MLA 9, APA 7 and Chicago 17 for websites, books and articles. |
 | **Plans** | Free / Normal $10 / Premium $20 / Pro $25, differing in monthly AI actions. Stripe Checkout, customer portal, signature-verified webhooks. |
 | **Admin** | Stats, user management, approvals, comped plans, coin adjustments, password resets, chat moderation, activity log. |
@@ -79,8 +79,7 @@ git-ignored.
 **2. Render** (render.com → New → **Blueprint**, pick this repo)
 - It reads `render.yaml` and asks once for the secret values: `DATABASE_URL`,
   `SUPABASE_URL`, `SUPABASE_S3_REGION`, `SUPABASE_S3_ACCESS_KEY_ID`,
-  `SUPABASE_S3_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY`, and optionally Stripe and College
-  Scorecard. `SECRET_KEY` is generated for you.
+  `SUPABASE_S3_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY`, and optionally Stripe. `SECRET_KEY` is generated for you.
 - Migrations run on start (`flask db upgrade`). On a paid plan you can move them to
   `preDeployCommand`.
 - The app refuses to boot in production with an unsafe config: no `SECRET_KEY`, a SQLite
@@ -108,9 +107,9 @@ Notes:
 extension/            Chrome MV3 extension: canvas.js (sync engine), upload.js (protocol), zip.js
 app/
   blueprints/         auth, main (dashboard/calendar/planner), courses, api (ingest), study, live,
-                      tutor, chat, coins (wallet/lab), college, tools, billing, settings, admin
+                      tutor, chat, coins (wallet/lab), tools, billing, settings, admin
   services/           ingest, retrieval (BM25), ai (Claude + quotas), study (generators), grades,
-                      planner, srs, coins, college, citations, moderation, billing, storage
+                      planner, srs, coins, citations, moderation, billing, storage
                       (local / Supabase / S3), dbsecurity (Supabase RLS lockdown), ics
   models.py           SQLAlchemy models (Supabase Postgres in production, SQLite locally)
 migrations/           Alembic

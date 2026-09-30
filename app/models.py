@@ -51,13 +51,6 @@ class User(UserMixin, db.Model):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(120), index=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(120))
 
-    # Academic profile for the college calculator.
-    gpa: Mapped[float | None] = mapped_column(Float)
-    gpa_scale: Mapped[float] = mapped_column(Float, default=4.0)
-    sat: Mapped[int | None] = mapped_column(Integer)
-    act: Mapped[int | None] = mapped_column(Integer)
-    home_state: Mapped[str | None] = mapped_column(String(2))
-
     study_minutes_per_day: Mapped[int] = mapped_column(Integer, default=90)
     streak_days: Mapped[int] = mapped_column(Integer, default=0)
     last_active_date: Mapped[str | None] = mapped_column(String(10))  # YYYY-MM-DD in the user's timezone
@@ -174,6 +167,13 @@ class Course(db.Model):
                                                              order_by="Announcement.posted_at.desc()")
     discussions: Mapped[list[Discussion]] = relationship(cascade="all, delete-orphan")
     files: Mapped[list[CanvasFile]] = relationship(cascade="all, delete-orphan", order_by="CanvasFile.name")
+
+    @property
+    def label(self) -> str:
+        """The name plus its section code, so a lecture and its discussion section can be told
+        apart in menus ("Intro to Moral & Pol Phil · PHIL 1730-102")."""
+        code = (self.course_code or "").replace("_", " ").strip()
+        return f"{self.name} · {code}" if code and code.lower() not in self.name.lower() else self.name
 
     @property
     def listed_files(self) -> list[CanvasFile]:
@@ -510,6 +510,9 @@ class TutorConversation(db.Model):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="SET NULL"))
     title: Mapped[str] = mapped_column(String(200), default="New conversation")
+    # Sources the student attached to this chat ("file:12", "page:3", "upload:7"; see
+    # services/sources.py). Their text goes with every question.
+    attachments: Mapped[list | None] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -578,24 +581,59 @@ class CoinTransaction(db.Model):
     __table_args__ = (UniqueConstraint("user_id", "ref"),)
 
 
-# ---------------------------------------------------------------- college
+# ---------------------------------------------------------------- your own files and integrations
 
 
-class SavedCollege(db.Model):
+class Upload(db.Model):
+    """A file the student added themselves: from their computer or from Google Drive. Text is
+    read in the background like Canvas files (services/textjobs.py)."""
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
-    scorecard_id: Mapped[str | None] = mapped_column(String(20))
-    name: Mapped[str] = mapped_column(String(300))
-    city: Mapped[str | None] = mapped_column(String(120))
-    state: Mapped[str | None] = mapped_column(String(2))
-    public: Mapped[bool | None] = mapped_column(Boolean)
-    admit_rate: Mapped[float | None] = mapped_column(Float)
-    oos_admit_rate: Mapped[float | None] = mapped_column(Float)
-    sat25: Mapped[int | None] = mapped_column(Integer)
-    sat75: Mapped[int | None] = mapped_column(Integer)
-    act25: Mapped[int | None] = mapped_column(Integer)
-    act75: Mapped[int | None] = mapped_column(Integer)
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="SET NULL"), index=True)
+    name: Mapped[str] = mapped_column(String(500))
+    content_type: Mapped[str | None] = mapped_column(String(200))
+    size: Mapped[int | None] = mapped_column(BigInteger)
+    storage_key: Mapped[str | None] = mapped_column(String(500))
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(20), default="upload")  # upload | drive
+    external_id: Mapped[str | None] = mapped_column(String(200))  # the Drive file id
+    text: Mapped[str | None] = mapped_column(Text, deferred=True)
+    text_status: Mapped[str | None] = mapped_column(String(40), index=True)
+    text_started_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    course: Mapped[Course | None] = relationship()
+
+
+class Integration(db.Model):
+    """A Google account connected through Composio, per kind ("calendar", "drive")."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    connected: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Calendar: {"enabled": bool, "calendar_id": "primary"}; last sync outcome for the page.
+    settings: Mapped[dict | None] = mapped_column(JSON, default=dict)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "kind"),)
+
+
+class CalendarPush(db.Model):
+    """An assignment's event in the student's Google Calendar, so it's updated, not duplicated."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    # SET NULL, not CASCADE: when Canvas deletes the assignment we still need the event id to
+    # remove it from Google Calendar.
+    assignment_id: Mapped[int | None] = mapped_column(ForeignKey("assignment.id", ondelete="SET NULL"), index=True)
+    event_id: Mapped[str] = mapped_column(String(1024))
+    calendar_id: Mapped[str] = mapped_column(String(300), default="primary")
+    fingerprint: Mapped[str] = mapped_column(String(40))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "assignment_id"),)
 
 
 Index("ix_chunk_course_source", ContentChunk.course_id, ContentChunk.source_type, ContentChunk.source_id)

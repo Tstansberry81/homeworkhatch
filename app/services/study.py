@@ -1,7 +1,8 @@
 """AI study-material generation: flashcards, practice quizzes and summaries.
 
-Material comes from the student's own synced Canvas content (a file, a page, an
-assignment, or a topic searched across a course) or from pasted notes. Generated sets
+Material comes from the student's own content: any mix of synced Canvas files, pages and
+their own uploads picked from one class (services/sources.py), an assignment, a topic
+searched across a course, or pasted notes. Generated sets
 are saved as ordinary decks/quizzes the student can edit.
 """
 
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from ..extensions import db
 from ..models import Assignment, CanvasFile, Course, Page, User
 from ..utils import html_to_text
-from . import ai, retrieval
+from . import ai, retrieval, sources
 
 # Roughly 40k tokens of source material per request. Longer sources are trimmed and the
 # student is told so (never silently).
@@ -35,6 +36,7 @@ class Material:
     text: str
     truncated: bool
     course_id: int | None
+    sources: int = 1
 
 
 class MaterialError(ValueError):
@@ -101,7 +103,25 @@ def gather_material(user: User, kind: str, ref: str | int | None = None, topic: 
     raise MaterialError("Unknown material type.")
 
 
+def gather_sources(user: User, refs) -> Material:
+    """Several picked sources as one material; each gets a fair share of the length budget."""
+    picked = sources.texts(user, refs)
+    if not picked:
+        raise MaterialError("Pick at least one file or page with readable text.")
+    heads = [f"=== {src.title} ===\n" for src, _ in picked]
+    budget = MAX_MATERIAL_CHARS - sum(len(h) + 2 for h in heads)
+    caps = sources.fair_share([len(text) for _, text in picked], budget)
+    text = "\n\n".join(head + body[:cap] for head, (_, body), cap in zip(heads, picked, caps))
+    truncated = any(cap < len(body) for (_, body), cap in zip(picked, caps))
+    course_ids = {src.course_id for src, _ in picked if src.course_id}
+    title = picked[0][0].title if len(picked) == 1 else f"{len(picked)} sources"
+    return Material(title, text, truncated, course_ids.pop() if len(course_ids) == 1 else None, len(picked))
+
+
 def _prompt(material: Material, instruction: str) -> str:
+    if material.sources > 1:
+        instruction += (f" The material combines {material.sources} sources, each starting with a === title === line; "
+                        "cover all of them, roughly in proportion to how much each one contains.")
     return (f"<material title=\"{material.title}\">\n{material.text}\n</material>\n\n{instruction}")
 
 
@@ -282,15 +302,9 @@ def render_markdown(text: str) -> str:
 
 
 def material_options(user: User, include_course_id: int | None = None) -> dict:
-    """Everything the generator form can draw from (visible classes, plus one explicitly
-    requested class even if it's hidden, so "Make flashcards" from its file page works)."""
+    """Classes the generator can draw from: the visible ones, plus one explicitly requested class
+    even if it's hidden (so "Make flashcards" from a hidden class's file still works)."""
     visible = (Course.hidden.is_(False)) | (Course.id == include_course_id) if include_course_id else Course.hidden.is_(False)
     courses = db.session.scalars(select(Course).where(Course.user_id == user.id, Course.active.is_(True),
                                                       visible).order_by(Course.name)).all()
-    course_ids = [c.id for c in courses]
-    files = db.session.scalars(select(CanvasFile).where(CanvasFile.user_id == user.id,
-                                                        CanvasFile.course_id.in_(course_ids),
-                                                        CanvasFile.text.is_not(None)).order_by(CanvasFile.name)).all()
-    pages = db.session.scalars(select(Page).where(Page.course_id.in_(course_ids), Page.body_html.is_not(None))
-                               .order_by(Page.title)).all()
-    return {"courses": courses, "files": files, "pages": pages}
+    return {"courses": courses}

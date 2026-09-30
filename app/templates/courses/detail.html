@@ -125,18 +125,51 @@
 
 {% elif tab == "files" %}
 <div class="card">
-  {% if course.files %}
+  {% if course.files or uploads %}
   {% set listed = course.listed_files %}
-  <p class="small muted">{{ listed|selectattr('storage_key')|list|length }} of {{ listed|length }} files stored.{% if course.files_tab_hidden %} This class hides its Files tab; these were found through modules and links.{% endif %}</p>
-  <ul class="list">
+  <form id="pick" action="{{ url_for('study.generate') }}" method="get" class="pick-bar">
+    <input type="hidden" name="course" value="{{ course.id }}"><input type="hidden" name="refs" id="pick-refs">
+    <span class="small muted" id="pick-count">Tick files to study from them.</span>
+    <button class="btn btn-sm" name="output" value="deck" disabled>🃏 Flashcards</button>
+    <button class="btn btn-sm" name="output" value="quiz" disabled>❓ Quiz</button>
+    <button type="button" class="linklike small" id="pick-all">Select all readable</button>
+  </form>
+  <p class="small muted">{{ listed|selectattr('storage_key')|list|length }} of {{ listed|length }} Canvas files stored.{% if course.files_tab_hidden %} This class hides its Files tab; these were found through modules and links.{% endif %}
+    <a href="{{ url_for('uploads.index') }}">Add your own files</a>.</p>
+  <ul class="list" id="pick-list">
     {% for f in listed %}
-    <li><div class="grow"><a class="title" href="{{ url_for('courses.file_detail', file_id=f.id) }}">{{ f.name }}</a>
-      <div class="small muted">{% if f.size %}{{ (f.size / 1024)|round(0)|int }} KB{% endif %}{% if f.text_status in ('ok', 'ai') %} · readable by AI{% elif f.text_status in ('pending', 'extracting') %} · reading text…{% elif f.text_status in ('empty', 'error') and (f.name|lower).endswith('.pdf') %} · scanned{% endif %}</div></div>
+    {% set ready = f.text_status in ('ok', 'ai') %}
+    <li><label class="check"><input type="checkbox" value="file:{{ f.id }}" {{ 'disabled' if not ready }} aria-label="Pick {{ f.name }}"></label>
+      <div class="grow"><a class="title" href="{{ url_for('courses.file_detail', file_id=f.id) }}">{{ f.name }}</a>
+      <div class="small muted">{% if f.size %}{{ (f.size / 1024)|round(0)|int }} KB{% endif %}{% if ready %} · readable by AI{% elif f.text_status in ('pending', 'extracting') %} · reading text…{% elif f.text_status in ('empty', 'error') and (f.name|lower).endswith('.pdf') %} · scanned{% endif %}</div></div>
       {% if f.storage_key %}<a class="btn btn-ghost btn-sm" href="{{ url_for('courses.download', file_id=f.id) }}">Download</a>{% else %}<span class="badge">not uploaded yet</span>{% endif %}</li>
+    {% endfor %}
+    {% for u in uploads %}
+    {% set ready = u.text_status == 'ok' %}
+    <li><label class="check"><input type="checkbox" value="upload:{{ u.id }}" {{ 'disabled' if not ready }} aria-label="Pick {{ u.name }}"></label>
+      <div class="grow"><a class="title" href="{{ url_for('uploads.download', upload_id=u.id, inline=1) }}" target="_blank" rel="noopener">{{ u.name }}</a>
+      <div class="small muted">{{ 'Google Drive' if u.source == 'drive' else 'Your upload' }}{% if ready %} · readable by AI{% elif u.text_status in ('pending', 'extracting') %} · reading text…{% endif %}</div></div>
+      <a class="btn btn-ghost btn-sm" href="{{ url_for('uploads.download', upload_id=u.id) }}">Download</a></li>
     {% endfor %}
   </ul>
   {% else %}{{ empty("📎", "No files synced for this class.") }}{% endif %}
 </div>
+<script>
+(() => {
+  const list = document.getElementById("pick-list"), form = document.getElementById("pick");
+  if (!list) return;
+  const boxes = () => [...list.querySelectorAll("input[type=checkbox]")];
+  const sync = () => {
+    const refs = boxes().filter((b) => b.checked).map((b) => b.value);
+    document.getElementById("pick-refs").value = refs.join(",");
+    form.querySelectorAll("button[name=output]").forEach((b) => b.disabled = !refs.length);
+    document.getElementById("pick-count").textContent = refs.length ? `${refs.length} selected` : "Tick files to study from them.";
+  };
+  list.addEventListener("change", sync);
+  document.getElementById("pick-all").onclick = () => { boxes().filter((b) => !b.disabled).forEach((b) => b.checked = true); sync(); };
+  sync();
+})();
+</script>
 
 {% elif tab == "announcements" %}
 {% for n in course.announcements %}

@@ -1,0 +1,38 @@
+{# Google Calendar toggle. `calendar` is the Integration row (or None); `back` is where forms return. #}
+{% macro gcal_card(calendar, back) %}
+{% set on = calendar and calendar.connected and (calendar.settings or {}).get('enabled') %}
+{% set stats = (calendar.settings or {}).get('last_stats') if calendar else none %}
+<div class="card">
+  <div class="btn-row" style="justify-content:space-between">
+    <h2 style="margin:0">📆 Google Calendar</h2>
+    {% if on %}<span class="badge ok">On</span>{% elif calendar and calendar.connected %}<span class="badge">Off</span>{% endif %}
+  </div>
+  <p class="small muted">Put every upcoming due date on your Google Calendar automatically, as a 30-minute block ending when it's due. Changes in Canvas update the event; nothing is added twice.</p>
+  {% if not calendar or not calendar.connected %}
+    {% if calendar and calendar.last_error %}<p class="small" style="color:var(--err)">Google asked to reconnect: {{ calendar.last_error[:160] }}</p>{% endif %}
+    <form method="post" action="{{ url_for('settings.calendar_toggle') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="enabled" value="1"><input type="hidden" name="next" value="{{ back }}">
+      <button class="btn btn-block">Connect Google Calendar</button>
+    </form>
+  {% else %}
+    {% if on %}
+      <p class="small">{% if calendar.last_sync_at %}Last updated {{ calendar.last_sync_at|ago }}{% if stats %} · {{ stats.created }} added, {{ stats.updated }} updated, {{ stats.removed }} removed{% endif %}.{% else %}Adding your due dates now… refresh in a minute.{% endif %}</p>
+      {% if calendar.last_error %}<p class="small" style="color:var(--err)">Last attempt failed: {{ calendar.last_error[:200] }}</p>{% endif %}
+      <div class="btn-row">
+        <form method="post" action="{{ url_for('settings.calendar_sync_now') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ back }}"><button class="btn btn-ghost btn-sm">Sync now</button></form>
+        <form method="post" action="{{ url_for('settings.calendar_toggle') }}" data-confirm="Stop adding due dates to Google Calendar and remove the upcoming ones it added?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="enabled" value="0"><input type="hidden" name="remove_events" value="1"><input type="hidden" name="next" value="{{ back }}">
+          <button class="btn btn-ghost btn-sm">Turn off</button></form>
+      </div>
+    {% else %}
+      <form method="post" action="{{ url_for('settings.calendar_toggle') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="enabled" value="1"><input type="hidden" name="next" value="{{ back }}">
+        <button class="btn btn-block">Turn on</button>
+      </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('settings.integration_disconnect', kind='calendar') }}" class="mt" data-confirm="Disconnect Google Calendar? Upcoming events it added are removed.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="remove_events" value="1"><input type="hidden" name="next" value="{{ back }}">
+      <button class="linklike small">Disconnect Google account</button></form>
+  {% endif %}
+</div>
+{% endmacro %}

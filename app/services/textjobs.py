@@ -1,6 +1,6 @@
 """Reads text out of stored files in the background, so uploads return immediately.
 
-Uploading a file marks it text_status="pending". `kick()` starts one reader thread per web
+Storing a file (a synced Canvas file or the student's own upload) marks it text_status="pending". `kick()` starts one reader thread per web
 process; the thread claims pending files one at a time through the database (so several
 processes never read the same file), downloads each from storage, hashes it, extracts its
 text and rebuilds its search chunks. A claim older than STALE is taken over, so a file whose
@@ -18,19 +18,20 @@ from flask import current_app
 from sqlalchemy import and_, exists, or_, select, update
 
 from ..extensions import db
-from ..models import CanvasFile, utcnow
+from ..models import CanvasFile, Upload, utcnow
 from . import retrieval
 from .extract import extract_text
 from .storage import get_storage
 
 STALE = timedelta(minutes=10)
+MODELS = (CanvasFile, Upload)
 _lock = threading.Lock()
 
 
-def _claimable(now):
-    return and_(CanvasFile.storage_key.is_not(None),
-                or_(CanvasFile.text_status == "pending",
-                    and_(CanvasFile.text_status == "extracting", CanvasFile.text_started_at < now - STALE)))
+def _claimable(model, now):
+    return and_(model.storage_key.is_not(None),
+                or_(model.text_status == "pending",
+                    and_(model.text_status == "extracting", model.text_started_at < now - STALE)))
 
 
 def kick() -> None:
@@ -60,7 +61,8 @@ def _reader(app) -> None:
             # A file marked pending after our last claim, whose kick saw us still running,
             # would otherwise wait for the next sync.
             try:
-                more = db.session.scalar(select(exists().where(_claimable(utcnow()))))
+                now = utcnow()
+                more = any(db.session.scalar(select(exists().where(_claimable(m, now)))) for m in MODELS)
             finally:
                 db.session.remove()
             with _lock:
@@ -72,33 +74,34 @@ def _reader(app) -> None:
 def run_pending(limit: int | None = None) -> int:
     done = 0
     while limit is None or done < limit:
-        file_id = _claim()
-        if file_id is None:
+        claim = _claim()
+        if claim is None:
             break
-        _read(file_id)
+        _read(*claim)
         done += 1
     return done
 
 
-def _claim() -> int | None:
-    for _ in range(20):  # another process may win the race for the same row
-        now = utcnow()
-        file_id = db.session.scalar(select(CanvasFile.id).where(_claimable(now)).order_by(CanvasFile.id).limit(1))
-        if file_id is None:
-            db.session.rollback()
-            return None
-        claimed = db.session.execute(
-            update(CanvasFile).where(CanvasFile.id == file_id, _claimable(now))
-            .values(text_status="extracting", text_started_at=now)
-            .execution_options(synchronize_session=False)).rowcount
-        db.session.commit()
-        if claimed:
-            return file_id
+def _claim() -> tuple[type, int] | None:
+    for model in MODELS:
+        for _ in range(20):  # another process may win the race for the same row
+            now = utcnow()
+            row_id = db.session.scalar(select(model.id).where(_claimable(model, now)).order_by(model.id).limit(1))
+            if row_id is None:
+                db.session.rollback()
+                break
+            claimed = db.session.execute(
+                update(model).where(model.id == row_id, _claimable(model, now))
+                .values(text_status="extracting", text_started_at=now)
+                .execution_options(synchronize_session=False)).rowcount
+            db.session.commit()
+            if claimed:
+                return model, row_id
     return None
 
 
-def _read(file_id: int) -> None:
-    row = db.session.get(CanvasFile, file_id)
+def _read(model, row_id: int) -> None:
+    row = db.session.get(model, row_id)
     key = row.storage_key
     limit = current_app.config["MAX_EXTRACT_MB"] * 1024 * 1024
     digest = hashlib.sha256()
@@ -132,5 +135,5 @@ def _read(file_id: int) -> None:
     row.sha256 = digest.hexdigest()
     row.size = total
     row.text, row.text_status, row.text_started_at = text, status, None
-    retrieval.rebuild_file_chunks(row)
+    retrieval.rebuild_chunks_for(row)
     db.session.commit()

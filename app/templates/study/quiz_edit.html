@@ -10,7 +10,7 @@
     <div><label for="seconds">Seconds per question <span class="hint">(live mode)</span></label><input id="seconds" name="seconds" type="number" min="5" max="120" value="{{ quiz.seconds_per_question }}"></div>
     {% else %}
     <div><label for="course_id">Class <span class="hint">(optional)</span></label>
-      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select></div>
     {% endif %}
   </div>
   <label for="body">Questions</label>

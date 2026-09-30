@@ -7,7 +7,7 @@
   <div class="form-row">
     <div><label for="title">Title</label><input id="title" name="title" type="text" maxlength="200" required></div>
     <div><label for="course_id">Class <span class="hint">(optional)</span></label>
-      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select></div>
   </div>
   <label for="description">Description <span class="hint">(optional)</span></label>
   <input id="description" name="description" type="text" maxlength="1000">

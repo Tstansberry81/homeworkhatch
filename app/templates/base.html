@@ -31,6 +31,7 @@
         <div class="nav-label">Study</div>
         <a href="{{ url_for('tutor.index') }}" class="{{ 'active' if ep.startswith('tutor.') }}"><span class="ico">🤖</span> AI tutor</a>
         <a href="{{ url_for('study.index') }}" class="{{ 'active' if ep.startswith('study.') }}"><span class="ico">🃏</span> Flashcards & quizzes</a>
+        <a href="{{ url_for('uploads.index') }}" class="{{ 'active' if ep.startswith('uploads.') }}"><span class="ico">📁</span> My files</a>
         <a href="{{ url_for('live.join') }}" class="{{ 'active' if ep.startswith('live.') }}"><span class="ico">⚡</span> Live quiz</a>
         <a href="{{ url_for('chat.index') }}" class="{{ 'active' if ep.startswith('chat.') }}"><span class="ico">💬</span> Class chat</a>
       </div>
@@ -40,11 +41,11 @@
         {% if feature_simulations and current_user.is_adult %}
         <a href="{{ url_for('coins.lab') }}" class="{{ 'active' if ep == 'coins.lab' }}"><span class="ico">🎲</span> Probability Lab</a>
         {% endif %}
-        <a href="{{ url_for('college.index') }}" class="{{ 'active' if ep.startswith('college.') }}"><span class="ico">🎓</span> College odds</a>
         <a href="{{ url_for('tools.citation_generator') }}" class="{{ 'active' if ep.startswith('tools.') }}"><span class="ico">📝</span> Citations</a>
       </div>
       <div class="nav-group">
         <a href="{{ url_for('settings.sync') }}" class="{{ 'active' if ep == 'settings.sync' }}"><span class="ico">🔌</span> Connect Canvas</a>
+        {% if integrations_available %}<a href="{{ url_for('settings.integrations_page') }}" class="{{ 'active' if ep.startswith('settings.integration') or ep.startswith('settings.calendar') }}"><span class="ico">🔗</span> Google</a>{% endif %}
         <a href="{{ url_for('settings.profile') }}" class="{{ 'active' if ep in ('settings.profile', 'settings.data') }}"><span class="ico">⚙️</span> Settings</a>
         <a href="{{ url_for('billing.plans') }}" class="{{ 'active' if ep.startswith('billing.') }}"><span class="ico">⭐</span> Plan</a>
         {% if current_user.is_admin %}<a href="{{ url_for('admin.overview') }}" class="{{ 'active' if ep.startswith('admin.') }}"><span class="ico">🛡️</span> Admin</a>{% endif %}

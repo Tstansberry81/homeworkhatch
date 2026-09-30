@@ -89,6 +89,16 @@ def engine_options(url: str) -> dict:
 # ---------------------------------------------------------------- config objects
 
 
+def env_pairs(name: str) -> dict:
+    """ "a=1, b=2" -> {"a": "1", "b": "2"} """
+    out = {}
+    for part in (os.environ.get(name) or "").split(","):
+        key, sep, value = part.partition("=")
+        if sep and key.strip() and value.strip():
+            out[key.strip()] = value.strip()
+    return out
+
+
 def load_config(env_name: str) -> dict:
     database_url = normalize_database_url(os.environ.get("DATABASE_URL"))
     storage_backend = os.environ.get("STORAGE_BACKEND", "local").strip().lower()
@@ -139,13 +149,19 @@ def load_config(env_name: str) -> dict:
         "STRIPE_PRICE_PREMIUM": os.environ.get("STRIPE_PRICE_PREMIUM", ""),
         "STRIPE_PRICE_PRO": os.environ.get("STRIPE_PRICE_PRO", ""),
 
-        # College acceptance calculator: free key from https://api.data.gov/signup/
-        "COLLEGE_SCORECARD_API_KEY": os.environ.get("COLLEGE_SCORECARD_API_KEY", ""),
 
         # Chrome extension ids the Connect Canvas page links automatically: the Web Store id
         # first (its store page is the install link), then any unpacked/dev ids.
         "EXTENSION_IDS": [x.strip() for x in os.environ.get("EXTENSION_IDS", "plnbpopfekhdcbllmdcmkjgcemikllch").split(",")
                           if x.strip()],
+
+        # Google Calendar + Google Drive through Composio (https://composio.dev). Without a key
+        # the integrations are hidden. Auth configs are found or created automatically;
+        # COMPOSIO_AUTH_CONFIGS="googlecalendar=ac_...,googledrive=ac_..." pins them, and
+        # COMPOSIO_TOOLKIT_VERSIONS="googlecalendar=20260101_00,..." pins tool versions.
+        "COMPOSIO_API_KEY": os.environ.get("COMPOSIO_API_KEY", "").strip(),
+        "COMPOSIO_AUTH_CONFIGS": env_pairs("COMPOSIO_AUTH_CONFIGS"),
+        "COMPOSIO_TOOLKIT_VERSIONS": env_pairs("COMPOSIO_TOOLKIT_VERSIONS"),
 
         # Shown on /support (and used as the Chrome Web Store support contact). Without it the
         # page points to GitHub issues.
@@ -176,7 +192,7 @@ def load_config(env_name: str) -> dict:
     if env_name == "test":
         test_url = os.environ.get("TEST_DATABASE_URL")  # set to run the suite against Postgres
         cfg.update(TESTING=True, SECRET_KEY="test", WTF_CSRF_ENABLED=False, AI_ENABLED=True, STORAGE_BACKEND="local",
-                   FEATURE_SIMULATIONS=False, REQUIRE_APPROVAL=False, EXTRACT_INLINE=True,
+                   FEATURE_SIMULATIONS=False, REQUIRE_APPROVAL=False, EXTRACT_INLINE=True, COMPOSIO_API_KEY="",
                    SQLALCHEMY_DATABASE_URI=normalize_database_url(test_url) if test_url else "sqlite://",
                    SQLALCHEMY_ENGINE_OPTIONS=engine_options(normalize_database_url(test_url)) if test_url else {})
     return cfg

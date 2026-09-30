@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_source_picker.html" import source_picker %}
 {% block title %}Tutor · {{ conv.title }}{% endblock %}
 {% block head %}{% include "_katex.html" %}{% endblock %}
 {% block content %}
@@ -6,7 +7,7 @@
   <aside>
     <form method="post" action="{{ url_for('tutor.new') }}" class="card" style="padding:12px">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <select name="course_id"><option value="">All my classes</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>
+      <select name="course_id"><option value="">All my classes</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select>
       <button class="btn btn-block mt">+ New conversation</button>
     </form>
     <nav class="convo-list mt">
@@ -30,8 +31,17 @@
           </div></div>
         {% endfor %}
       </div>
+      <div class="attach-bar">
+        <span id="chips">{% for s in attached %}<span class="chip" title="{{ s.note }}">📎 {{ s.title }}{% if s.status != 'ready' %} <span class="muted">(reading…)</span>{% endif %} <button type="button" class="linklike" data-unattach="{{ s.ref }}" aria-label="Remove">×</button></span>{% endfor %}</span>
+        <button type="button" class="btn btn-ghost btn-sm" id="attach-toggle">📎 {{ 'Change files' if attached else 'Attach files' }}</button>
+      </div>
+      <div id="attach-panel" class="attach-panel" hidden>
+        <p class="small muted">Attached files go with every question, so the tutor answers from them. Pick from any class, upload, or add from Google Drive.</p>
+        {{ source_picker(courses, conv.course_id or (courses[0].id if courses else none), conv.attachments or [], name="attach") }}
+        <button type="button" class="btn btn-sm mt" id="attach-done">Done</button>
+      </div>
       <form class="composer" id="composer">
-        <textarea id="input" placeholder="Ask a question… (Enter to send, Shift+Enter for a new line)" {{ 'disabled' if not ai_available }}></textarea>
+        <textarea id="input" placeholder="{{ 'Ask about the attached files…' if attached else 'Ask a question…' }} (Enter to send, Shift+Enter for a new line)" {{ 'disabled' if not ai_available }}></textarea>
         <button class="btn" id="send" {{ 'disabled' if not ai_available }}>Send</button>
       </form>
     </div>
@@ -39,6 +49,32 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/sources.js') }}"></script>
+<script>
+(() => {
+  const panel = document.getElementById("attach-panel"), chips = document.getElementById("chips");
+  const picker = panel.querySelector("[data-picker]");
+  const url = "{{ url_for('tutor.attachments', conversation_id=conv.id) }}";
+  let timer, first = true;
+  const chip = (s) => `<span class="chip" title="${hh.escape(s.note)}">📎 ${hh.escape(s.title)}${s.status !== "ready" ? ' <span class="muted">(reading…)</span>' : ""}
+    <button type="button" class="linklike" data-unattach="${hh.escape(s.ref)}" aria-label="Remove">×</button></span>`;
+  const save = (refs) => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const data = await hh.post(url, { refs });
+        chips.innerHTML = data.sources.map(chip).join("");
+        document.getElementById("attach-toggle").textContent = data.sources.length ? "📎 Change files" : "📎 Attach files";
+        document.getElementById("input").placeholder = (data.sources.length ? "Ask about the attached files…" : "Ask a question…") + " (Enter to send, Shift+Enter for a new line)";
+      } catch (e) { /* the next change retries */ }
+    }, 300);
+  };
+  picker.addEventListener("picker:change", (e) => { if (first) { first = false; return; } save(e.detail.refs); });
+  document.getElementById("attach-toggle").onclick = () => { panel.hidden = !panel.hidden; };
+  document.getElementById("attach-done").onclick = () => { panel.hidden = true; };
+  chips.addEventListener("click", (e) => { const b = e.target.closest("[data-unattach]"); if (b) picker.picker.remove(b.dataset.unattach); });
+})();
+</script>
 <script>
 (() => {
   const log = document.getElementById("log"), input = document.getElementById("input"), send = document.getElementById("send");
