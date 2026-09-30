@@ -22,7 +22,7 @@ import tempfile
 from urllib.parse import urlparse
 
 from flask import current_app
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..extensions import db
 from ..models import (Announcement, Assignment, AssignmentGroup, CalendarEvent, CanvasAccount, CanvasFile, Course,
@@ -414,7 +414,8 @@ def _record_stored(row: CanvasFile, run: SyncRun, key: str, version: str, size: 
     row.stored_at = utcnow()
     # The previous version's text stays searchable until the new text is read.
     row.text_status, row.text_started_at = "pending", None
-    run.files_uploaded = (run.files_uploaded or 0) + 1
+    # Incremented in SQL: parallel uploads each loaded the same count, so += lost updates.
+    run.files_uploaded = func.coalesce(SyncRun.files_uploaded, 0) + 1
     db.session.commit()
     if old_key and old_key != key:  # an older version of this file is no longer needed
         try:

@@ -141,6 +141,9 @@ def test_direct_upload_to_storage_then_confirm(s3_app, snapshot, manifest):
     assert f.text_status == "ok" and "chain rule" in f.text, "text read back from storage"
     assert f.sha256 == hashlib.sha256(data).hexdigest()
     assert get_storage().read(f.storage_key) == data
+    from app.models import SyncRun
+
+    assert db.session.get(SyncRun, body["snapshot_id"]).files_uploaded == 1
 
     # Over the size limit: the object is removed and the version isn't requested again.
     s3_app.config["MAX_FILE_MB"] = 0
