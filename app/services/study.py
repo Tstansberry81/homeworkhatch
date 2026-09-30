@@ -179,11 +179,16 @@ def valid_questions(raw) -> list[dict]:
     for q in raw or []:
         if not isinstance(q, dict):
             continue
-        choices = [str(c).strip()[:500] for c in q.get("choices") or [] if str(c).strip()]
+        raw_choices = [str(c).strip()[:500] for c in q.get("choices") or []]
         try:
             answer = int(q.get("answer"))
         except (TypeError, ValueError):
             continue
+        if not 0 <= answer < len(raw_choices) or not raw_choices[answer]:
+            continue  # the marked answer is missing or blank
+        # Drop blank choices and move the answer index along with them.
+        answer -= sum(1 for c in raw_choices[:answer] if not c)
+        choices = [c for c in raw_choices if c]
         question = str(q.get("question") or "").strip()[:2000]
         if not question or not 2 <= len(choices) <= 6 or not 0 <= answer < len(choices):
             continue
@@ -223,6 +228,46 @@ def summarize(user: User, material: Material) -> str:
     return ai.complete(user, "summary", system=SYSTEM, prompt=_prompt(material, instruction), effort="low").text
 
 
+# ---------------------------------------------------------------- scanned PDFs
+
+# Claude reads PDFs natively, including scanned pages (as images). The request limit is
+# 32 MB and base64 adds a third, so cap the source file below that.
+MAX_TRANSCRIBE_BYTES = 20 * 1024 * 1024
+
+TRANSCRIBE_INSTRUCTION = (
+    "Transcribe all of the readable text in this document, in reading order. Output only the text: keep "
+    "paragraph breaks and headings on their own lines, write math in LaTeX between $...$, and mark "
+    "illegible passages as [illegible]. Don't add commentary, summaries, or page numbers unless they're part "
+    "of the text."
+)
+
+
+def transcribe_pdf(user: User, pdf_bytes: bytes, name: str) -> str:
+    """Turn a scanned (image-only) PDF into text with Claude, streaming because output can be long."""
+    import base64
+
+    if len(pdf_bytes) > MAX_TRANSCRIBE_BYTES:
+        raise MaterialError("That PDF is too large for AI reading (limit 20 MB).")
+    usage = ai.reserve(user, "transcribe")
+    content = [
+        {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
+                                        "data": base64.standard_b64encode(pdf_bytes).decode()},
+         "title": name[:200]},
+        {"type": "text", "text": TRANSCRIBE_INSTRUCTION},
+    ]
+    try:
+        handle = ai.provider().stream(system="You transcribe course documents accurately.",
+                                      messages=[{"role": "user", "content": content}], max_tokens=64000, effort="low")
+        text = "".join(handle).strip()
+    except ai.AIError:
+        ai.release(usage)
+        raise
+    ai.finish(usage, handle.result)
+    if not text:
+        raise ai.AIError("The AI couldn't find readable text in that PDF.")
+    return text
+
+
 # ---------------------------------------------------------------- rendering
 
 _MD_TAGS = {"p", "br", "strong", "em", "code", "pre", "ul", "ol", "li", "h1", "h2", "h3", "h4", "blockquote",
@@ -236,10 +281,12 @@ def render_markdown(text: str) -> str:
                      link_rel="noopener noreferrer")
 
 
-def material_options(user: User) -> dict:
-    """Everything the generator form can draw from."""
+def material_options(user: User, include_course_id: int | None = None) -> dict:
+    """Everything the generator form can draw from (visible classes, plus one explicitly
+    requested class even if it's hidden, so "Make flashcards" from its file page works)."""
+    visible = (Course.hidden.is_(False)) | (Course.id == include_course_id) if include_course_id else Course.hidden.is_(False)
     courses = db.session.scalars(select(Course).where(Course.user_id == user.id, Course.active.is_(True),
-                                                      Course.hidden.is_(False)).order_by(Course.name)).all()
+                                                      visible).order_by(Course.name)).all()
     course_ids = [c.id for c in courses]
     files = db.session.scalars(select(CanvasFile).where(CanvasFile.user_id == user.id,
                                                         CanvasFile.course_id.in_(course_ids),

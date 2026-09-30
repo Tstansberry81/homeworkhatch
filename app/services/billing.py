@@ -111,6 +111,11 @@ def handle_event(event: dict) -> str:
             user = db.session.get(User, int(meta_user)) if meta_user and str(meta_user).isdigit() else None
         if user is None:
             return "subscription for unknown customer"
+        tracked = user.stripe_subscription_id
+        if tracked and obj.get("id") != tracked and user.plan_status in ACTIVE_STATUSES:
+            # Another subscription on the same customer (e.g. an old or duplicate one): it must
+            # not change the plan of the one the user is actually paying for.
+            return f"ignored {kind} for untracked subscription {obj.get('id')}"
         status = "canceled" if kind.endswith("deleted") else obj.get("status")
         items = ((obj.get("items") or {}).get("data") or [])
         price_id = ((items[0].get("price") or {}).get("id")) if items else None
@@ -124,3 +129,14 @@ def handle_event(event: dict) -> str:
         db.session.commit()
         return f"user {user.id} subscription {status}"
     return f"ignored {kind}"
+
+
+def has_active_subscription(user: User) -> bool:
+    return bool(user.stripe_subscription_id) and user.plan_status in ACTIVE_STATUSES and not user.plan_comped
+
+
+def cancel_subscription(user: User) -> None:
+    """Used when an account is deleted, so the card isn't charged for a deleted account."""
+    if not enabled() or not user.stripe_subscription_id:
+        return
+    _stripe().Subscription.cancel(user.stripe_subscription_id)

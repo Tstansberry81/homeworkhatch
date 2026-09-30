@@ -140,3 +140,80 @@ def test_two_students_share_a_room_key(app, client, snapshot, manifest):
     keys = db.session.execute(select(Course.room_key, func.count(Course.id)).where(Course.canvas_id == "101")
                               .group_by(Course.room_key)).all()
     assert keys == [("school.instructure.com:101", 2)]
+
+
+def test_failed_or_unknown_lists_never_delete_data(app, client, snapshot, manifest):
+    user = make_user()
+    token = api_token(user)
+    sync(client, token, snapshot, manifest)
+    calc = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
+    hw1 = next(a for a in calc.assignments if a.canvas_id == "1001")
+    hw1.user_done = True
+    db.session.commit()
+    counts = (len(calc.assignments), len(calc.pages), len(calc.modules))
+
+    # New extension: a list it couldn't fetch is null.
+    snapshot["courses"][0]["assignments"] = None
+    snapshot["courses"][0]["modules"] = None
+    sync(client, token, snapshot, manifest)
+    # Old extension: the list is [] but the snapshot's errors say the fetch failed.
+    snapshot["courses"][0]["assignments"] = []
+    snapshot["courses"][0]["pages"] = []
+    snapshot["errors"] = [{"endpoint": "assignments:101", "message": "Canvas 500"},
+                          {"endpoint": "pages:101", "message": "Canvas 500"}]
+    sync(client, token, snapshot, manifest)
+    db.session.expire_all()
+    calc = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
+    assert (len(calc.assignments), len(calc.pages), len(calc.modules)) == counts
+    assert next(a for a in calc.assignments if a.canvas_id == "1001").user_done is True
+
+
+def test_long_canvas_values_and_huge_files_dont_break_sync(app, client, snapshot, manifest):
+    user = make_user()
+    token = api_token(user)
+    snapshot["courses"][0]["grade"]["current_grade"] = "Exceeds Expectations (with distinction)"
+    snapshot["courses"][0]["assignments"][0]["submission"]["grade"] = "complete " * 20
+    snapshot["courses"][0]["term"]["name"] = "T" * 400
+    manifest[0]["size"] = 10 ** 10  # 10 GB: over the upload limit
+    body, uploaded = sync(client, token, snapshot, manifest)
+    assert "9001" not in body["files_needed"], "oversized files aren't requested"
+    body, _ = sync(client, token, snapshot, manifest)
+    assert body["files_needed"] == [], "...and not on later syncs either"
+    calc = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
+    assert calc.current_grade == "Exceeds Expectations"[:20]
+
+
+def test_one_canvas_identity_per_account(app, client, snapshot, manifest):
+    alice, mallory = make_user("alice"), make_user("mallory")
+    sync(client, api_token(alice), snapshot, manifest)
+    r = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest},
+                    headers={"Authorization": f"Bearer {api_token(mallory)}"})
+    assert r.status_code == 409, "someone else can't claim Alice's Canvas identity"
+
+
+def test_chat_rooms_lock_out_unconfirmed_accounts(app, client, snapshot, manifest):
+    from .conftest import login
+
+    alice, bob, mallory = make_user("alice"), make_user("bob"), make_user("mallory")
+    roster = ["501", "502"]
+    snapshot["courses"][0]["roster_ids"] = roster
+    sync(client, api_token(alice), snapshot, manifest)                       # canvas user 501
+    snapshot["user"]["id"] = "502"
+    sync(client, api_token(bob), snapshot, manifest)                         # classmate 502
+    fake = dict(snapshot, user={"id": "666", "name": "Faker"})
+    fake["courses"] = [dict(snapshot["courses"][0], roster_ids=["501", "502", "666"])]
+    sync(client, api_token(mallory), fake, manifest)                         # made-up identity
+
+    def room(user):
+        c = app.test_client()
+        login(c, user)
+        course = db.session.scalar(select(Course).where(Course.user_id == user.id, Course.canvas_id == "101"))
+        return c, course.id
+
+    (ca, a_id), (cb, b_id), (cm, m_id) = room(alice), room(bob), room(mallory)
+    assert ca.post(f"/chat/course/{a_id}/messages", json={"body": "study group tonight?"}).status_code == 200
+    assert cb.get(f"/chat/course/{b_id}/messages").get_json()["messages"][0]["body"] == "study group tonight?"
+    assert cm.get(f"/chat/course/{m_id}/messages").status_code == 403, "not on real classmates' rosters"
+    assert cm.post(f"/chat/course/{m_id}/messages", json={"body": "hi"}).status_code == 403
+    page = cb.get(f"/chat/course/{b_id}").get_data(as_text=True)
+    assert "unconfirmed" in page

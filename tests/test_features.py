@@ -32,9 +32,31 @@ def test_generate_quiz_from_topic_search_and_take_it(synced_user, client):
     before = coins.balance(synced_user.id)
     r = client.post(f"/study/quizzes/{quiz.id}", data={"q0": "1", "q1": "0"})
     assert r.status_code == 200 and b"2 / 2" in r.data
+    assert coins.balance(synced_user.id) == before, "quizzes under 5 questions don't pay coins"
+    five = PracticeQuiz(user_id=synced_user.id, title="Five", questions=[
+        {"question": f"q{i}", "choices": ["a", "b"], "answer": 0, "explanation": ""} for i in range(5)])
+    db.session.add(five)
+    db.session.commit()
+    client.post(f"/study/quizzes/{five.id}", data={f"q{i}": "0" for i in range(5)})
     assert coins.balance(synced_user.id) == before + 5
-    client.post(f"/study/quizzes/{quiz.id}", data={"q0": "1", "q1": "0"})
+    client.post(f"/study/quizzes/{five.id}", data={f"q{i}": "0" for i in range(5)})
     assert coins.balance(synced_user.id) == before + 5, "quiz coins pay once per quiz per day"
+
+
+def test_quiz_editor_round_trips_multiline_text(synced_user, client):
+    from app.blueprints.study import parse_quiz_text, quiz_to_text
+
+    quiz = PracticeQuiz(user_id=synced_user.id, title="Multi", questions=[
+        {"question": "Solve:\nx + 1 = 3", "choices": ["x = 1", "x = 2\n(check it)", "", "x = 3"], "answer": 1,
+         "explanation": "Subtract 1.\nThen done."}])
+    # blank choice dropped, answer index follows the right choice
+    from app.services.study import valid_questions
+
+    cleaned = valid_questions(quiz.questions)
+    assert cleaned[0]["choices"][cleaned[0]["answer"]] == "x = 2\n(check it)"
+    quiz.questions = cleaned
+    again = parse_quiz_text(quiz_to_text(quiz))
+    assert again == cleaned
 
 
 def test_generate_reports_unusable_sources(synced_user, client):
@@ -193,3 +215,23 @@ def test_class_chat_membership_and_moderation(app, client, snapshot, manifest):
     assert cb.post(f"/chat/messages/{mid}/delete").status_code == 403, "can't delete someone else's message"
     assert ca.post(f"/chat/messages/{mid}/delete").status_code == 200
     assert db.session.get(ChatMessage, mid).deleted is True
+
+
+def test_scanned_pdf_can_be_read_with_ai(synced_user, client, fake_ai):
+    from app.models import ContentChunk
+
+    f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9001"))  # fake PDF bytes -> no text layer
+    assert f.text_status in ("empty", "error")
+    page = client.get(f"/courses/files/{f.id}").get_data(as_text=True)
+    assert "Read this scan with AI" in page
+    r = client.post(f"/courses/files/{f.id}/transcribe")
+    assert r.status_code == 302
+    db.session.refresh(f)
+    assert f.text_status == "ai" and "chain rule" in f.text
+    sent = fake_ai.calls[-1]["messages"][0]["content"]
+    assert sent[0]["type"] == "document" and sent[0]["source"]["media_type"] == "application/pdf"
+    assert db.session.scalar(select(ContentChunk.id).where(ContentChunk.source_type == "file",
+                                                           ContentChunk.source_id == f.id)), "now searchable by the tutor"
+    assert db.session.scalar(select(AIUsage.kind).where(AIUsage.kind == "transcribe")) == "transcribe"
+    other = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
+    assert client.post(f"/courses/files/{other.id}/transcribe").status_code == 302  # not a PDF: refused politely

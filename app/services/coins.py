@@ -39,9 +39,24 @@ def balance(user_id: int) -> int:
                                  .where(CoinTransaction.user_id == user_id)) or 0)
 
 
+# Probability Lab payouts are tagged with a "lab:" ref and aren't "earned" (no achievements,
+# no leaderboard); they only move the balance.
+LAB_REF_PREFIX = "lab:"
+
+
+def earned_filter():
+    return (CoinTransaction.amount > 0) & ((CoinTransaction.ref.is_(None)) | ~CoinTransaction.ref.like(f"{LAB_REF_PREFIX}%"))
+
+
 def lifetime_earned(user_id: int) -> int:
     return int(db.session.scalar(select(func.coalesce(func.sum(CoinTransaction.amount), 0))
-                                 .where(CoinTransaction.user_id == user_id, CoinTransaction.amount > 0)) or 0)
+                                 .where(CoinTransaction.user_id == user_id, earned_filter())) or 0)
+
+
+def paid_refs(user_id: int, like: str) -> set[str]:
+    """All award refs already paid that match a LIKE pattern: one query instead of one per award."""
+    return set(db.session.scalars(select(CoinTransaction.ref).where(CoinTransaction.user_id == user_id,
+                                                                    CoinTransaction.ref.like(like))))
 
 
 def award(user_id: int, amount: int, reason: str, ref: str | None = None) -> bool:
@@ -60,28 +75,44 @@ def award(user_id: int, amount: int, reason: str, ref: str | None = None) -> boo
 
 
 def spend(user_id: int, amount: int, reason: str) -> None:
+    """Debit coins. Checks the balance after writing, so two concurrent spends can't both
+    succeed on the same coins: whichever sees a negative balance undoes itself."""
     if amount <= 0:
         return
     if balance(user_id) < amount:
         raise InsufficientCoins(f"You need {amount} coins for that.")
-    db.session.add(CoinTransaction(user_id=user_id, amount=-int(amount), reason=reason[:200]))
+    row = CoinTransaction(user_id=user_id, amount=-int(amount), reason=reason[:200])
+    db.session.add(row)
+    db.session.flush()
+    if balance(user_id) < 0:
+        db.session.delete(row)
+        db.session.flush()
+        raise InsufficientCoins(f"You need {amount} coins for that.")
 
 
-def award_for_assignment(user_id: int, account_host: str, a: Assignment) -> int:
-    """Pay for submitted/graded work found in a Canvas sync. Safe to call on every sync."""
+def award_for_assignment(user_id: int, account_host: str, a: Assignment, already: set[str] | None = None) -> int:
+    """Pay for submitted/graded work found in a Canvas sync. Safe to call on every sync.
+
+    `already` (from paid_refs) lets a sync skip refs that were paid before without a query each.
+    """
     if a.excused:
         return 0
     base = BASE_BY_TYPE[work_type(a)]
     key = f"{account_host}:{a.course.canvas_id}:{a.canvas_id}"
+    already = already or set()
+    if f"submit:{key}" in already and f"grade:{key}" in already:
+        return 0
     paid = 0
-    submitted = a.submitted_at is not None or a.status in {"submitted", "submitted_late", "graded"}
-    if submitted:
+    # Only real submissions earn "turned in" coins: a graded zero for missing work doesn't.
+    submitted = a.submitted_at is not None or a.workflow_state in {"submitted", "pending_review"} \
+        or (a.status == "graded" and a.score is not None and a.score > 0 and not a.missing)
+    if submitted and f"submit:{key}" not in already:
         late = a.late or a.status == "submitted_late"
         amount = base // 2 if late else base
         label = "Turned in (late)" if late else "Turned in"
         if award(user_id, amount, f"{label}: {a.name}", f"submit:{key}"):
             paid += amount
-    if a.status == "graded" and a.percent is not None:
+    if a.status == "graded" and a.percent is not None and f"grade:{key}" not in already:
         bonus = int(max(0.0, min(a.percent, 100.0)) / 100 * base)
         if award(user_id, bonus, f"Grade bonus: {a.name} ({a.percent:g}%)", f"grade:{key}"):
             paid += bonus

@@ -17,6 +17,16 @@ async function settings() {
   return { ...DEFAULTS, ...settings };
 }
 
+// If Chrome killed the previous worker mid-sync or mid-download, its "in progress" status is
+// still in storage. Nothing is running in this fresh worker, so mark it interrupted.
+chrome.storage.local.get("status").then(({ status }) => {
+  if (!status || (status.state !== "syncing" && !status.downloading)) return;
+  if (running || downloadRunning) return;  // that status belongs to work this worker already started
+  const patch = { downloading: null };
+  if (status.state === "syncing") Object.assign(patch, { state: "error", progress: null, error: "The last sync was interrupted. Click Sync now." });
+  setStatus(patch);
+});
+
 // Progress updates fire concurrently from the course pool, so merge into an in-memory
 // copy rather than read-modify-writing storage (which would drop fields).
 let statusCache = null;
@@ -66,7 +76,7 @@ async function push(snapshot, s, onProgress) {
     token: s.endpointToken,
     snapshot,
     plan: zipPlan(snapshot, s.courseVisibility),
-    fetchBytes: (file) => fetchFileBytes(file.download_url, tab),
+    fetchBytes: (file) => fetchFileBytes(file.download_url, tab, file.content_type),
     onProgress: ({ done, total }) => onProgress({ step: "upload", index: done, total }),
   });
   return { ...result, at: new Date().toISOString() };
@@ -111,7 +121,7 @@ async function syncOnce(trigger) {
       pushError = `Upload failed: ${e.message || e}`;
     }
     await setStatus({
-      state: "ok", progress: null, lastSync: snapshot.synced_at,
+      state: "ok", progress: null, lastSync: snapshot.synced_at, downloadError: null,
       lastPush, pushError, user: snapshot.user.name,
     });
     chrome.action.setBadgeText({ text: "" });
@@ -139,26 +149,35 @@ function base64ToBytes(b64) {
 // Canvas download URLs carry a verifier and redirect to the school's file store, which
 // behaves differently across Canvas hosts. Try, in order: no cookies (verifier only),
 // with cookies, then from inside an open Canvas tab as a first-party request.
-async function fetchFileBytes(url, tab) {
+// A download that silently redirected to Canvas's sign-in page returns HTML with a 200.
+// Unless the file really is HTML, treat that as a failed download rather than the file.
+function looksLikeLoginPage(contentType, expectedType) {
+  return /text\/html/i.test(contentType || "") && !/html/i.test(expectedType || "");
+}
+
+async function fetchFileBytes(url, tab, expectedType) {
   for (const credentials of ["omit", "include"]) {
     try {
       const r = await fetch(url, { credentials });
-      if (r.ok) return new Uint8Array(await r.arrayBuffer());
+      if (r.ok && !looksLikeLoginPage(r.headers.get("content-type"), expectedType)) {
+        return new Uint8Array(await r.arrayBuffer());
+      }
     } catch {}
   }
   if (!tab) return null;
   try {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: async (u) => {
+      func: async (u, expected) => {
         const r = await fetch(u);
         if (!r.ok) return null;
+        if (/text\/html/i.test(r.headers.get("content-type") || "") && !/html/i.test(expected || "")) return null;
         const b = new Uint8Array(await r.arrayBuffer());
         let s = "";
         for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
         return btoa(s);
       },
-      args: [url],
+      args: [url, expectedType || ""],
     });
     return result ? base64ToBytes(result) : null;
   } catch {
@@ -220,7 +239,14 @@ chrome.downloads.onChanged.addListener((d) => {
   }
 });
 
-async function downloadFiles() {
+let downloadRunning = null;
+
+function downloadFiles() {
+  downloadRunning ??= downloadFilesOnce().finally(() => { downloadRunning = null; });
+  return downloadRunning;
+}
+
+async function downloadFilesOnce() {
   const { snapshot } = await chrome.storage.local.get("snapshot");
   if (!snapshot) return;
   const s = await settings();
@@ -231,7 +257,7 @@ async function downloadFiles() {
   await setStatus({ downloading: { done, total: jobs.length }, downloadError: null });
   try {
     const results = await pool(jobs, 3, async ({ file, path }) => {
-      const data = await fetchFileBytes(file.download_url, tab);
+      const data = await fetchFileBytes(file.download_url, tab, file.content_type);
       if (!data) failed.push(path);
       await setStatus({ downloading: { done: ++done, total: jobs.length } });
       return data && { path, data, date: file.updated_at ? new Date(file.updated_at) : new Date() };
@@ -269,18 +295,30 @@ async function finishConnect() {
   runSync("connect");
 }
 
-async function schedule() {
+// (Re)creates the hourly alarm. `keep` leaves an existing alarm alone when its period is
+// already right, so a browser restart doesn't push the next sync a full interval away.
+async function schedule(keep = false) {
   const s = await settings();
+  const period = Math.max(15, Number(s.intervalMinutes) || 60);
+  const existing = await chrome.alarms.get("sync");
+  if (keep && existing && existing.periodInMinutes === period) return;
   await chrome.alarms.clear("sync");
-  chrome.alarms.create("sync", { periodInMinutes: Math.max(15, Number(s.intervalMinutes) || 60) });
+  chrome.alarms.create("sync", { periodInMinutes: period });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   schedule();
   runSync("install");
 });
-chrome.runtime.onStartup.addListener(schedule);
+chrome.runtime.onStartup.addListener(async () => {
+  await schedule(true);
+  const { status = {} } = await chrome.storage.local.get("status");
+  const s = await settings();
+  const stale = !status.lastSync || Date.now() - Date.parse(status.lastSync) > s.intervalMinutes * 60000;
+  if (s.baseUrl && stale) runSync("startup");
+});
 chrome.permissions.onAdded.addListener(async () => {
+  await schedule();  // a Settings save can change the interval and close the popup mid-save
   await finishConnect();
   // A grant from the Settings form (popup closed mid-save) should also kick a sync.
   const s = await settings();

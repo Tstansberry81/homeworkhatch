@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 from urllib.parse import urlparse
 from zoneinfo import available_timezones
 
@@ -24,6 +25,22 @@ def valid_timezone(tz: str | None) -> str:
     if _TIMEZONES is None:
         _TIMEZONES = available_timezones()
     return tz if tz in _TIMEZONES else "UTC"
+
+
+MAX_FAILED_LOGINS = 10
+LOCKOUT = timedelta(minutes=15)
+
+
+def _recent_failures(user_id: int) -> int:
+    from ..models import ActivityLog
+
+    since = utcnow() - LOCKOUT
+    last_ok = db.session.scalar(select(func.max(ActivityLog.created_at)).where(
+        ActivityLog.user_id == user_id, ActivityLog.event == "login"))
+    if last_ok and last_ok > since:
+        since = last_ok
+    return db.session.scalar(select(func.count(ActivityLog.id)).where(
+        ActivityLog.user_id == user_id, ActivityLog.event == "login_failed", ActivityLog.created_at >= since)) or 0
 
 
 def _safe_next(target: str | None) -> str | None:
@@ -61,12 +78,18 @@ def register():
             for e in errors:
                 flash(e, "error")
             return render_template("auth/register.html", form=form), 400
-        first_user = not db.session.scalar(select(User.id).limit(1))
+        # Admin rights: in production only for ADMIN_EMAIL (or via `flask create-admin`), so a
+        # stranger can't claim a fresh public deploy by registering first. Locally, the first
+        # account is the admin for convenience.
+        admin_email = (current_app.config.get("ADMIN_EMAIL") or "").strip().lower()
+        if current_app.config["ENV_NAME"] == "production":
+            make_admin = bool(admin_email) and email == admin_email
+        else:
+            make_admin = not db.session.scalar(select(User.id).limit(1)) or (bool(admin_email) and email == admin_email)
         user = User(email=email, username=username, display_name=username,
                     timezone=valid_timezone(form.get("timezone")), accepted_terms_at=utcnow(),
-                    # The very first account runs the place.
-                    is_admin=first_user,
-                    is_approved=first_user or not current_app.config["REQUIRE_APPROVAL"])
+                    is_admin=make_admin,
+                    is_approved=make_admin or not current_app.config["REQUIRE_APPROVAL"])
         user.set_password(password)
         db.session.add(user)
         db.session.flush()
@@ -87,7 +110,13 @@ def login():
         ident = request.form.get("identifier", "").strip()
         user = db.session.scalar(select(User).where(
             (User.email == ident.lower()) | (func.lower(User.username) == ident.lower())))
+        if user is not None and _recent_failures(user.id) >= MAX_FAILED_LOGINS:
+            flash("Too many failed sign-ins. Wait 15 minutes and try again.", "error")
+            return render_template("auth/login.html", identifier=ident), 429
         if user is None or not user.check_password(request.form.get("password", "")):
+            if user is not None:
+                log_activity(user.id, "login_failed", request.remote_addr)
+                db.session.commit()
             flash("Wrong email/username or password.", "error")
             return render_template("auth/login.html", identifier=ident), 401
         if not user.active:

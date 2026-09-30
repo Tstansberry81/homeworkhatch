@@ -67,7 +67,12 @@
     }
   }
   async function tick() { try { render(await hh.get(stateUrl)); } catch { /* keep polling */ } }
-  tick(); setInterval(tick, 1000);
+  let timer;
+  const wrapped = async () => {
+    await tick();
+    if (document.getElementById("done") && !document.getElementById("done").hidden) clearInterval(timer);
+  };
+  wrapped(); timer = setInterval(wrapped, 1000);
 })();
 </script>
 {% endblock %}

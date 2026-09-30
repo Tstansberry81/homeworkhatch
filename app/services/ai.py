@@ -173,26 +173,49 @@ def remaining(user: User) -> int | None:
     return max(0, billing.plan_for(user).ai_monthly - used_this_month(user.id))
 
 
-def check_quota(user: User) -> None:
-    left = remaining(user)
-    if left is not None and left <= 0:
-        raise QuotaExceeded(f"You've used all {billing.plan_for(user).ai_monthly} AI actions on your plan this month. "
-                            "Upgrade for more, or wait until next month.")
+def reserve(user: User, kind: str) -> AIUsage:
+    """Claim one AI action before calling the model.
+
+    The row is written first and the limit checked after, so concurrent requests can't all
+    pass a check-then-record window; an over-limit request removes its own claim. Claims are
+    kept for aborted or failed-mid-way answers (they cost tokens) and released only when the
+    call fails before producing anything.
+    """
+    row = AIUsage(user_id=user.id, kind=kind)
+    db.session.add(row)
+    db.session.flush()
+    if not user.is_admin:
+        limit = billing.plan_for(user).ai_monthly
+        if used_this_month(user.id) > limit:
+            db.session.delete(row)
+            db.session.commit()
+            raise QuotaExceeded(f"You've used all {limit} AI actions on your plan this month. "
+                                "Upgrade for more, or wait until next month.")
+    db.session.commit()
+    return row
 
 
-def record(user: User, kind: str, result: AIResult | None) -> None:
-    db.session.add(AIUsage(user_id=user.id, kind=kind, model=result.model if result else None,
-                           input_tokens=result.input_tokens if result else 0,
-                           output_tokens=result.output_tokens if result else 0))
+def finish(row: AIUsage, result: AIResult | None) -> None:
+    if result is not None:
+        row.model, row.input_tokens, row.output_tokens = result.model, result.input_tokens, result.output_tokens
+    db.session.commit()
+
+
+def release(row: AIUsage) -> None:
+    db.session.delete(row)
+    db.session.commit()
 
 
 def complete(user: User, kind: str, *, system: str, prompt: str, max_tokens: int = 16000, effort: str = "medium",
              schema: dict | None = None) -> AIResult:
-    check_quota(user)
-    result = provider().complete(system=system, messages=[{"role": "user", "content": prompt}],
-                                 max_tokens=max_tokens, effort=effort, schema=schema)
-    record(user, kind, result)
-    db.session.commit()
+    row = reserve(user, kind)
+    try:
+        result = provider().complete(system=system, messages=[{"role": "user", "content": prompt}],
+                                     max_tokens=max_tokens, effort=effort, schema=schema)
+    except AIError:
+        release(row)
+        raise
+    finish(row, result)
     return result
 
 

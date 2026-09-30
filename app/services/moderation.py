@@ -47,3 +47,11 @@ def check_rate(user_id: int) -> None:
         ChatMessage.user_id == user_id, ChatMessage.created_at >= utcnow() - RATE_WINDOW)) or 0
     if recent >= RATE_LIMIT:
         raise Rejected("Slow down a little — you're sending messages too fast.")
+
+
+def clean_name(name: str) -> str:
+    """Display names and live-quiz nicknames are shown to classmates: no slurs or threats."""
+    name = (name or "").strip()
+    if _blocked_re.search(name) or _profanity_re.search(name):
+        raise Rejected("Pick a different name.")
+    return name

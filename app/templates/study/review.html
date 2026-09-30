@@ -12,7 +12,7 @@
   </div>
 </div>
 <p class="center small muted" id="hint">Click the card or press <kbd>Space</kbd> to see the answer.</p>
-<form method="post" class="ratings hidden" id="ratings">
+<form method="post" class="ratings hidden" id="ratings" data-busy="Saving…">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="card_id" value="{{ card.id }}">
   <button class="btn btn-danger" name="rating" value="again" title="1">Again</button>
   <button class="btn btn-ghost" name="rating" value="hard" title="2">Hard</button>

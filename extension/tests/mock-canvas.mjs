@@ -95,6 +95,7 @@ function courseRoute(path) {
   if (!m) return null;
   const [, id, what] = m;
   if (id === "102" && what === "files") return { status: 403, body: { status: "unauthorized" } };
+  if (id === "101" && what === "discussion_topics") return { status: 401, body: { status: "unauthorized", errors: [{ message: "user not authorized to perform that action" }] } };
   if (id === "102" && what === "quizzes") return { status: 404, body: { errors: [{ message: "The specified resource does not exist." }] } };
   const data = {
     assignments: assignments[id] || [],
@@ -105,6 +106,7 @@ function courseRoute(path) {
             { id: 2, display_name: "hw.pdf", "content-type": "application/pdf", size: 99, folder_id: 5, url: "https://x/files/2/download" },
             { id: 3, display_name: "exam.pdf", "content-type": "application/pdf", size: 77, folder_id: 5, url: "https://x/files/3/download" }],
     discussion_topics: [],
+    users: [{ id: 7, name: "Traveler Test" }, { id: 8, name: "Classmate" }],
     quizzes: [{ id: 1, title: "Quiz 1", due_at: d(5), question_count: 10 }],
   }[what];
   return data ? { status: 200, body: data } : null;

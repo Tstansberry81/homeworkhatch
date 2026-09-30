@@ -20,6 +20,8 @@ services:
         value: wsgi.py
       - key: SECRET_KEY
         generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false  # the account registered with this email becomes admin
       # Supabase -> Connect -> Session pooler (IPv4; Render can't reach Supabase's IPv6-only
       # direct host). Looks like:
       # postgresql://postgres.<ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres

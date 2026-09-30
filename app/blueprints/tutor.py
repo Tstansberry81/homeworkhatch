@@ -131,8 +131,8 @@ def message(conversation_id: int):
     if not text:
         return jsonify({"error": "Type a question first."}), 400
     try:
-        ai.check_quota(current_user)
         provider = ai.provider()
+        usage = ai.reserve(current_user, "tutor")
     except ai.AIError as exc:
         return jsonify({"error": str(exc)}), 402 if isinstance(exc, ai.QuotaExceeded) else 503
 
@@ -164,14 +164,17 @@ def message(conversation_id: int):
                 parts.append(delta)
                 yield _sse("delta", {"text": delta})
         except ai.AIError as exc:
+            if parts:
+                ai.finish(usage, None)  # a partial answer still used the model
+            else:
+                ai.release(usage)
             yield _sse("error", {"message": str(exc)})
             return
         answer = "".join(parts).strip() or "(No answer.)"
         cited = {int(n) for n in re.findall(r"\[S(\d+)\]", answer)}
         used = [s for s in sources if s["n"] in cited]
         db.session.add(TutorMessage(conversation_id=conv.id, role="assistant", content=answer, sources=used))
-        ai.record(user, "tutor", handle.result)
-        db.session.commit()
+        ai.finish(usage, handle.result)
         yield _sse("done", {"html": render_answer(answer, used), "sources": used,
                             "remaining": ai.remaining(user)})
 

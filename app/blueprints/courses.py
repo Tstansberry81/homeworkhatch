@@ -25,10 +25,10 @@ def index():
 def detail(course_id: int):
     course = queries.owned_course(current_user.id, course_id)
     tab = request.args.get("tab", "overview")
-    result = grades.compute(course.groups, course.assignments)
+    result = grades.compute(course.groups, course.assignments, weighted=course.group_weighting)
     base_url = course.account.base_url if course.account else None
     return render_template("courses/detail.html", course=course, tab=tab, grade=result, base_url=base_url,
-                           upcoming=[a for a in queries.upcoming(current_user.id) if a.course_id == course.id])
+                           upcoming=queries.upcoming_for_course(course))
 
 
 @bp.route("/<int:course_id>/visibility", methods=["POST"])
@@ -55,7 +55,7 @@ def what_if(course_id: int):
                 overrides[aid] = float(value)
         except (TypeError, ValueError):
             continue
-    result = grades.compute(course.groups, course.assignments, overrides)
+    result = grades.compute(course.groups, course.assignments, overrides, weighted=course.group_weighting)
     return jsonify({
         "percent": result["percent"],
         "groups": [{"name": g.name, "weight": g.weight, "percent": None if g.percent is None else round(g.percent, 2),
@@ -73,7 +73,7 @@ def needed(course_id: int):
         goal = float(payload.get("goal"))
     except (TypeError, ValueError):
         return jsonify({"error": "Pick an assignment and a goal."}), 400
-    score = grades.needed_on(course.groups, course.assignments, aid, goal)
+    score = grades.needed_on(course.groups, course.assignments, aid, goal, weighted=course.group_weighting)
     return jsonify({"needed": score})
 
 
@@ -126,6 +126,31 @@ def download(file_id: int):
         return redirect(url, code=302)
     return send_file(storage.open(f.storage_key), mimetype=f.content_type or "application/octet-stream",
                      as_attachment=not inline, download_name=f.name)
+
+
+@bp.route("/files/<int:file_id>/transcribe", methods=["POST"])
+@login_required
+def transcribe(file_id: int):
+    """Scanned PDFs have no text layer; let Claude read them so the tutor and generators can too."""
+    f = db.session.get(CanvasFile, file_id)
+    if f is None or f.user_id != current_user.id or not f.storage_key:
+        abort(404)
+    back = url_for("courses.file_detail", file_id=f.id)
+    if not f.name.lower().endswith(".pdf") and f.content_type != "application/pdf":
+        flash("Only PDFs can be read this way.", "error")
+        return redirect(back)
+    try:
+        text = study.transcribe_pdf(current_user, get_storage().read(f.storage_key), f.name)
+    except (study.MaterialError, ai.AIError) as exc:
+        flash(str(exc), "error")
+        return redirect(back)
+    from ..services import retrieval
+
+    f.text, f.text_status = text[:400_000], "ai"
+    retrieval.rebuild_file_chunks(f)
+    db.session.commit()
+    flash("Done. The tutor, summaries and study-set generator can now read this file.", "success")
+    return redirect(back)
 
 
 @bp.route("/summarize/<kind>/<int:ident>", methods=["POST"])

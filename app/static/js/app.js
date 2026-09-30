@@ -62,10 +62,19 @@
     } catch { /* clipboard blocked */ }
   });
 
-  // Confirm dangerous submits: <form data-confirm="Are you sure?">
+  // Confirm dangerous submits: <form data-confirm="Are you sure?">. Long-running posts can
+  // show a busy note and disable their button: <form data-busy="Working…">.
   document.addEventListener("submit", (e) => {
     const msg = e.target.dataset.confirm;
-    if (msg && !window.confirm(msg)) e.preventDefault();
+    if (msg && !window.confirm(msg)) { e.preventDefault(); return; }
+    const busy = e.target.dataset.busy;
+    if (busy) {
+      e.target.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+      const note = document.createElement("p");
+      note.className = "help center";
+      note.textContent = busy;
+      e.target.appendChild(note);
+    }
   });
 
   // Render any math already on the page once KaTeX loads.

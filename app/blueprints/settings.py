@@ -42,7 +42,13 @@ def profile():
                 flash("That username isn't available.", "error")
                 return redirect(url_for("settings.profile"))
             current_user.username = username
-        current_user.display_name = (f.get("display_name") or current_user.display_name).strip()[:80]
+        from ..services import moderation
+
+        try:
+            current_user.display_name = moderation.clean_name(f.get("display_name") or current_user.display_name)[:80]
+        except moderation.Rejected as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("settings.profile"))
         current_user.grade_level = (f.get("grade_level") or "").strip()[:40] or None
         current_user.timezone = valid_timezone(f.get("timezone"))
         current_user.show_on_leaderboards = bool(f.get("show_on_leaderboards"))
@@ -144,6 +150,12 @@ def delete_account():
         flash("Type your username and password exactly to delete your account.", "error")
         return redirect(url_for("settings.data"))
     user = db.session.get(User, current_user.id)
+    from ..services import billing
+
+    try:
+        billing.cancel_subscription(user)
+    except Exception as exc:  # never keep an account the user asked to delete because Stripe hiccuped
+        current_app.logger.error("could not cancel Stripe subscription for user %s: %s", user.id, exc)
     try:
         get_storage().delete_prefix(f"u/{user.id}/")  # trailing slash: never touch u/{id}0...
     except Exception as exc:

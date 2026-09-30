@@ -12,7 +12,7 @@
         <li style="align-items:flex-start">
           <div class="grow">
             <div class="title">{{ s.name }} <span class="small muted">{{ s.city or '' }}{% if s.state %}, {{ s.state }}{% endif %}</span></div>
-            <div class="small muted">{% if s.admit_rate %}Admits {{ '%.0f' % (s.admit_rate * 100) }}%{% endif %}{% if s.sat25 %} · SAT {{ s.sat25 }}–{{ s.sat75 }}{% endif %}{% if s.act25 %} · ACT {{ s.act25 }}–{{ s.act75 }}{% endif %}{% if s.oos_admit_rate %} · out-of-state {{ '%.0f' % (s.oos_admit_rate * 100) }}%{% endif %}</div>
+            <div class="small muted">{% if s.admit_rate %}Admits {{ '%.0f' % (s.admit_rate * 100) }}%{% endif %}{% if s.sat25 and s.sat75 %} · SAT {{ s.sat25 }}–{{ s.sat75 }}{% endif %}{% if s.act25 and s.act75 %} · ACT {{ s.act25 }}–{{ s.act75 }}{% endif %}{% if s.oos_admit_rate %} · out-of-state {{ '%.0f' % (s.oos_admit_rate * 100) }}%{% endif %}</div>
             <details class="small"><summary>Why</summary><ul>{% for r in est.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
               {% if s.public %}<form method="post" action="{{ url_for('college.update', school_id=s.id) }}" class="btn-row"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input name="oos_admit_rate" type="text" placeholder="Out-of-state admit rate, e.g. 19%" value="{{ '%.0f%%' % (s.oos_admit_rate * 100) if s.oos_admit_rate else '' }}" style="max-width:260px"><button class="btn btn-ghost btn-sm">Save</button></form>{% endif %}
@@ -78,18 +78,20 @@
 <script>
 (() => {
   const q = document.getElementById("q"), results = document.getElementById("results");
-  let timer;
+  let timer, seq = 0;
   const pct = (v) => v == null ? "?" : Math.round(v * 100) + "%";
   q.addEventListener("input", () => {
     clearTimeout(timer);
     timer = setTimeout(async () => {
       if (q.value.trim().length < 3) { results.innerHTML = ""; return; }
+      const mine = ++seq;
       try {
         const data = await hh.get(`{{ url_for('college.search') }}?q=${encodeURIComponent(q.value.trim())}`);
+        if (mine !== seq) return;  // a newer search is on its way
         results.innerHTML = data.results.map((r) => {
           const fields = ["scorecard_id", "name", "city", "state", "admit_rate", "sat25", "sat75", "act25", "act75"]
             .map((k) => `<input type="hidden" name="${k}" value="${hh.escape(r[k] ?? "")}">`).join("");
-          return `<li><div class="grow"><div class="title">${hh.escape(r.name)}</div><div class="small muted">${hh.escape(r.city || "")}, ${hh.escape(r.state || "")} · admits ${pct(r.admit_rate)}${r.sat25 ? ` · SAT ${r.sat25}–${r.sat75}` : ""}</div></div>
+          return `<li><div class="grow"><div class="title">${hh.escape(r.name)}</div><div class="small muted">${hh.escape(r.city || "")}, ${hh.escape(r.state || "")} · admits ${pct(r.admit_rate)}${r.sat25 && r.sat75 ? ` · SAT ${r.sat25}–${r.sat75}` : ""}</div></div>
             <form method="post" action="{{ url_for('college.save') }}"><input type="hidden" name="csrf_token" value="${hh.csrf}">${fields}<input type="hidden" name="public" value="${r.public ? 1 : 0}"><button class="btn btn-sm">Add</button></form></li>`;
         }).join("") || '<li class="muted">No matches.</li>';
       } catch (e) { results.innerHTML = `<li class="muted">${hh.escape(e.message)}</li>`; }

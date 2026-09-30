@@ -30,7 +30,19 @@ from .storage import TooLarge, get_storage, safe_key_part
 
 
 class IngestError(ValueError):
-    pass
+    status = 400
+
+
+class IngestConflict(IngestError):
+    status = 409
+
+
+def _clip(value, length: int):
+    """Canvas strings have no length limit; our columns do (Postgres enforces them)."""
+    if value is None:
+        return None
+    value = str(value)
+    return value[:length] if len(value) > length else value
 
 
 def version_key(updated_at) -> str:
@@ -52,7 +64,12 @@ def _float(v) -> float | None:
 
 
 def _sync_rows(model, parent: dict, items, key_attr: str, key_fn, apply_fn, delete_missing: bool = True):
-    """Upsert children by natural key; optionally delete the ones that disappeared."""
+    """Upsert children by natural key; optionally delete the ones that disappeared.
+
+    `items` of None means "unknown" (the extension couldn't fetch the list): keep everything.
+    """
+    if items is None:
+        return
     filters = [getattr(model, k) == v for k, v in parent.items()]
     existing = {getattr(r, key_attr): r for r in db.session.scalars(select(model).where(*filters))}
     seen = set()
@@ -81,6 +98,7 @@ def _apply_group(row: AssignmentGroup, g: dict):
     row.position = g.get("position")
     row.drop_lowest = int(g.get("drop_lowest") or 0)
     row.drop_highest = int(g.get("drop_highest") or 0)
+    row.never_drop = [str(x) for x in g.get("never_drop") or []] or None
 
 
 def _apply_assignment(row: Assignment, a: dict):
@@ -91,19 +109,20 @@ def _apply_assignment(row: Assignment, a: dict):
     row.unlock_at = parse_ts(a.get("unlock_at"))
     row.lock_at = parse_ts(a.get("lock_at"))
     row.points_possible = _float(a.get("points_possible"))
-    row.grading_type = a.get("grading_type")
+    row.grading_type = _clip(a.get("grading_type"), 40)
+    row.omit_from_final_grade = bool(a.get("omit_from_final_grade"))
     row.submission_types = a.get("submission_types") or []
     row.is_quiz = bool(a.get("is_quiz"))
-    row.html_url = a.get("html_url")
+    row.html_url = _clip(a.get("html_url"), 500)
     row.description_html = a.get("description_html")
-    row.status = a.get("status") or "upcoming"
+    row.status = _clip(a.get("status") or "upcoming", 30)
     row.submitted_at = parse_ts(sub.get("submitted_at"))
     row.score = _float(sub.get("score"))
-    row.grade = _str(sub.get("grade"))
+    row.grade = _clip(sub.get("grade"), 40)
     row.late = bool(sub.get("late"))
     row.missing = bool(sub.get("missing"))
     row.excused = bool(sub.get("excused"))
-    row.workflow_state = sub.get("workflow_state")
+    row.workflow_state = _clip(sub.get("workflow_state"), 40)
     row.rubric = a.get("rubric") or None
     row.comments = sub.get("comments") or None
     row.attachments = sub.get("attachments") or None
@@ -114,7 +133,7 @@ def _apply_module(row: Module, m: dict):
     row.name = (m.get("name") or "Module")[:300]
     row.position = m.get("position")
     row.unlock_at = parse_ts(m.get("unlock_at"))
-    row.state = m.get("state")
+    row.state = _clip(m.get("state"), 40)
     row.items = m.get("items") or []
 
 
@@ -123,16 +142,16 @@ def _apply_page(row: Page, p: dict):
     # Keep the last known body if this sync couldn't fetch it.
     if p.get("body_html") is not None:
         row.body_html = p.get("body_html")
-    row.html_url = p.get("html_url")
+    row.html_url = _clip(p.get("html_url"), 500)
     row.canvas_updated_at = parse_ts(p.get("updated_at"))
 
 
 def _apply_announcement(row: Announcement, a: dict):
     row.title = (a.get("title") or "Announcement")[:500]
     row.message_html = a.get("message_html")
-    row.author = a.get("author")
+    row.author = _clip(a.get("author"), 200)
     row.posted_at = parse_ts(a.get("posted_at"))
-    row.html_url = a.get("html_url")
+    row.html_url = _clip(a.get("html_url"), 500)
 
 
 def _apply_discussion(row: Discussion, d: dict):
@@ -140,7 +159,7 @@ def _apply_discussion(row: Discussion, d: dict):
     row.message_html = d.get("message_html")
     row.posted_at = parse_ts(d.get("posted_at"))
     row.due_at = parse_ts(d.get("due_at"))
-    row.html_url = d.get("html_url")
+    row.html_url = _clip(d.get("html_url"), 500)
 
 
 # ---------------------------------------------------------------- snapshot
@@ -158,6 +177,15 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     if not canvas_user_id:
         raise IngestError("snapshot.user.id missing")
     host = parsed.netloc.lower()
+    canvas_user_id = _clip(canvas_user_id, 64)
+    if len(host) > 200:
+        raise IngestError("snapshot.base_url host is too long")
+    claimed = db.session.scalar(select(CanvasAccount.user_id).where(
+        CanvasAccount.host == host, CanvasAccount.canvas_user_id == canvas_user_id, CanvasAccount.user_id != user.id))
+    if claimed:
+        # One Canvas identity per Homework Hatch account: stops someone from posing as a
+        # classmate (whose chat rooms and roster checks trust that identity).
+        raise IngestConflict("This Canvas account is already linked to a different Homework Hatch account.")
 
     account = db.session.scalar(select(CanvasAccount).where(
         CanvasAccount.user_id == user.id, CanvasAccount.host == host, CanvasAccount.canvas_user_id == canvas_user_id))
@@ -166,10 +194,17 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
         db.session.add(account)
         db.session.flush()
     account.base_url = f"{parsed.scheme}://{host}"
-    account.canvas_name = canvas_user.get("name")
+    account.canvas_name = _clip(canvas_user.get("name"), 200)
     account.last_sync_at = parse_ts(snapshot.get("synced_at")) or utcnow()
     account.restricted = snapshot.get("restricted") or []
 
+    # Endpoints the extension reported as failed: e.g. {"endpoint": "assignments:123"}.
+    failed = set()
+    for err in snapshot.get("errors") or []:
+        kind, _, course_ref = str((err or {}).get("endpoint", "")).partition(":")
+        if course_ref:
+            failed.add((kind, course_ref))
+    failed_announcements = any(str((e or {}).get("endpoint", "")) == "announcements" for e in snapshot.get("errors") or [])
     courses_by_canvas_id: dict[str, Course] = {}
     existing_courses = {c.canvas_id: c for c in db.session.scalars(select(Course).where(Course.account_id == account.id))}
     seen_courses = set()
@@ -188,29 +223,40 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
         grade = c.get("grade") or {}
         course.name = (c.get("name") or "Course")[:300]
         course.course_code = (c.get("course_code") or "")[:200] or None
-        course.term_id = _str(term.get("id"))
-        course.term_name = term.get("name")
+        course.term_id = _clip(term.get("id"), 64)
+        course.term_name = _clip(term.get("name"), 200)
         course.class_key = (c.get("class_key") or f"{course.term_id}::{course.name.lower()}")[:400]
         course.room_key = f"{host}:{cid}"
         course.on_dashboard = c.get("on_dashboard")
         course.active = True
         course.current_score = _float(grade.get("current_score"))
-        course.current_grade = grade.get("current_grade")
+        course.current_grade = _clip(grade.get("current_grade"), 20)
         course.final_score = _float(grade.get("final_score"))
-        course.final_grade = grade.get("final_grade")
-        course.html_url = c.get("html_url")
+        course.final_grade = _clip(grade.get("final_grade"), 20)
+        course.html_url = _clip(c.get("html_url"), 500)
         course.syllabus_html = c.get("syllabus_html")
         course.files_tab_hidden = bool(c.get("files_tab_hidden"))
+        if "group_weighting" in c:
+            course.group_weighting = c["group_weighting"] if isinstance(c["group_weighting"], bool) else None
+        if isinstance(c.get("roster_ids"), list):
+            course.roster_ids = [str(x)[:64] for x in c["roster_ids"]][:5000]
         db.session.flush()
         courses_by_canvas_id[cid] = course
 
         parent = {"course_id": course.id}
-        _sync_rows(AssignmentGroup, parent, c.get("assignment_groups"), "canvas_id", lambda g: _str(g.get("id")), _apply_group)
-        _sync_rows(Assignment, parent, c.get("assignments"), "canvas_id", lambda a: _str(a.get("id")), _apply_assignment)
-        _sync_rows(Module, parent, c.get("modules"), "canvas_id", lambda m: _str(m.get("id")), _apply_module)
-        _sync_rows(Page, parent, c.get("pages"), "slug", lambda p: (p.get("url") or "")[:300] or None, _apply_page)
-        _sync_rows(Announcement, parent, c.get("announcements"), "canvas_id", lambda a: _str(a.get("id")), _apply_announcement)
-        _sync_rows(Discussion, parent, c.get("discussions"), "canvas_id", lambda d: _str(d.get("id")), _apply_discussion)
+
+        def items(kind):
+            # Old extensions send [] when a fetch failed; the snapshot's errors say which.
+            return None if (kind, cid) in failed else c.get(kind)
+
+        _sync_rows(AssignmentGroup, parent, items("assignment_groups"), "canvas_id", lambda g: _str(g.get("id")), _apply_group)
+        _sync_rows(Assignment, parent, items("assignments"), "canvas_id", lambda a: _str(a.get("id")), _apply_assignment)
+        _sync_rows(Module, parent, items("modules"), "canvas_id", lambda m: _str(m.get("id")), _apply_module)
+        _sync_rows(Page, parent, items("pages"), "slug", lambda p: (p.get("url") or "")[:300] or None, _apply_page,
+                   delete_missing=not c.get("pages_partial") and ("pages", cid) not in failed)
+        _sync_rows(Announcement, parent, None if failed_announcements else c.get("announcements"), "canvas_id",
+                   lambda a: _str(a.get("id")), _apply_announcement)
+        _sync_rows(Discussion, parent, items("discussions"), "canvas_id", lambda d: _str(d.get("id")), _apply_discussion)
 
     # Courses that dropped out of the student's active enrollments keep their data.
     for cid, course in existing_courses.items():
@@ -234,12 +280,13 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
                 db.session.add(row)
                 files[fid] = row
             row.name = (meta.get("name") or "file")[:500]
-            row.content_type = meta.get("content_type")
-            row.size = meta.get("size")
-            row.canvas_updated_at = _str(meta.get("updated_at"))
+            row.content_type = _clip(meta.get("content_type"), 200)
+            row.size = meta.get("size") if isinstance(meta.get("size"), int) else None
+            row.canvas_updated_at = _clip(meta.get("updated_at"), 64)
             if row.course_id is None and course:
                 row.course_id = course.id
     needed: list[str] = []
+    max_bytes = current_app.config["MAX_FILE_MB"] * 1024 * 1024
     for fid, m in manifest_by_id.items():
         row = files.get(fid)
         if row is None:  # in the manifest but not in any course listing: accept its metadata
@@ -250,6 +297,10 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
             files[fid] = row
         row.path = (m.get("path") or "")[:800] or None
         row.wanted_version = version_key(m.get("updated_at"))
+        too_big = isinstance(m.get("size"), int) and m["size"] > max_bytes
+        if too_big and row.stored_version != row.wanted_version:
+            # Over the storage limit: don't ask for it (it would be rejected every hour forever).
+            row.stored_version, row.text_status = row.wanted_version, "too_large"
         if row.stored_version != row.wanted_version:
             needed.append(fid)
 
@@ -258,13 +309,13 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
                lambda e: _str(e.get("id")), lambda row, e: _apply_event(row, e, courses_by_canvas_id))
 
     db.session.flush()
-    host_key = host
     paid = 0
+    already = coins.paid_refs(user.id, f"%:{host}:%")
     for course in courses_by_canvas_id.values():
         if course.hidden:
             continue
         for a in course.assignments:
-            paid += coins.award_for_assignment(user.id, host_key, a)
+            paid += coins.award_for_assignment(user.id, host, a, already)
         retrieval.rebuild_course_chunks(course)
 
     run = SyncRun(id=f"{utcnow():%Y%m%dT%H%M%S}-{secrets.token_hex(4)}", user_id=user.id, account_id=account.id,
@@ -290,8 +341,8 @@ def _apply_event(row: CalendarEvent, e: dict, courses: dict[str, Course]):
     row.title = (e.get("title") or "Event")[:500]
     row.start_at = parse_ts(e.get("start_at"))
     row.end_at = parse_ts(e.get("end_at"))
-    row.location = e.get("location")
-    row.html_url = e.get("html_url")
+    row.location = _clip(e.get("location"), 300)
+    row.html_url = _clip(e.get("html_url"), 500)
     course = courses.get(_str(e.get("course_id")))
     row.course_id = course.id if course else None
 
@@ -357,6 +408,16 @@ def store_file(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | 
         except Exception as exc:
             current_app.logger.warning("could not delete old file version %s: %s", old_key, exc)
     return row
+
+
+def mark_too_large(run: SyncRun, canvas_file_id: str, updated_at: str | None) -> None:
+    """Remember that this version was rejected for size, so it isn't requested every sync."""
+    row = db.session.scalar(select(CanvasFile).where(CanvasFile.account_id == run.account_id,
+                                                     CanvasFile.canvas_id == canvas_file_id))
+    if row is not None and row.user_id == run.user_id:
+        row.stored_version = version_key(updated_at)
+        row.text_status = "too_large"
+        db.session.commit()
 
 
 def complete_run(run: SyncRun, result: dict) -> None:

@@ -176,3 +176,29 @@ def test_ics_feed_is_valid_and_folded():
     unfolded = body.replace("\r\n ", "")  # RFC 5545 line folding
     assert "DTEND:20260903T035900Z" in unfolded and "Calculus\\, I\\; honors" in unfolded
     assert "DTEND:20260904T190000Z" in body, "events without an end get an hour"
+
+
+def test_canvas_grading_settings():
+    # Weights over 100% aren't scaled down (Canvas lets extra-credit groups push past 100%).
+    groups = [G("hw", 60), G("exam", 60)]
+    r = grades.compute(groups, [A(1, 10, 10, "hw"), A(2, 50, 100, "exam")])
+    assert r["percent"] == pytest.approx((0.6 * 100 + 0.6 * 50))
+    # Canvas weighting turned off: group weights are ignored, total points used.
+    r = grades.compute([G("hw", 90), G("exam", 10)], [A(1, 10, 10, "hw"), A(2, 50, 100, "exam")], weighted=False)
+    assert r["percent"] == pytest.approx(100 * 60 / 110, abs=0.01)
+    # Omitted assignments and never-drop rules.
+    omitted = A(3, 0, 100, "hw", omit_from_final_grade=True)
+    assert grades.compute([G("hw")], [A(1, 10, 10, "hw"), omitted])["percent"] == 100.0
+    g = G("g", drop_lowest=1)
+    g.never_drop = ["1"]
+    r = grades.compute([g], [A(1, 0, 10), A(2, 5, 10), A(3, 9, 10)])
+    assert r["groups"][0].dropped == [2], "the never-drop assignment can't be the one dropped"
+
+
+def test_drop_lowest_stays_fast_on_big_groups():
+    import time
+
+    items = [A(i, (i * 7) % 10, 10) for i in range(1, 41)]
+    t = time.time()
+    grades.needed_on([G("g", drop_lowest=12)], items + [A(99, None, 10, status="upcoming")], 99, 60)
+    assert time.time() - t < 5

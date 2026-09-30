@@ -48,10 +48,29 @@ def _pptx(data: bytes) -> str:
     return "\n\n".join(slides)
 
 
+# Office files are zip archives: a few KB can inflate to gigabytes of XML ("zip bomb").
+MAX_UNZIPPED_BYTES = 150 * 1024 * 1024
+MAX_COMPRESSION_RATIO = 200
+
+
+def _zip_too_big(data: bytes) -> bool:
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            total = sum(i.file_size for i in z.infolist())
+    except zipfile.BadZipFile:
+        return False  # the parser will reject it on its own
+    return total > MAX_UNZIPPED_BYTES or (len(data) and total / len(data) > MAX_COMPRESSION_RATIO)
+
+
 def extract_text(data: bytes, name: str, content_type: str | None) -> tuple[str | None, str]:
     """Returns (text, status). Status is "ok", "empty", "unsupported" or "error"."""
     lower = (name or "").lower()
     ctype = (content_type or "").lower()
+    office = lower.endswith((".docx", ".pptx")) or "officedocument" in ctype
+    if office and _zip_too_big(data):
+        return None, "too_large"
     try:
         if lower.endswith(".pdf") or ctype == "application/pdf":
             text = _pdf(data)

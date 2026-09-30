@@ -12,7 +12,7 @@ import secrets
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -63,9 +63,15 @@ class User(UserMixin, db.Model):
     last_active_date: Mapped[str | None] = mapped_column(String(10))  # YYYY-MM-DD in the user's timezone
     show_on_leaderboards: Mapped[bool] = mapped_column(Boolean, default=True)
     calendar_token: Mapped[str] = mapped_column(String(64), unique=True, default=lambda: secrets.token_urlsafe(24))
+    # Bumped on password change/reset; part of the login cookie, so old sessions stop working.
+    session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
+        self.session_version = (self.session_version or 0) + 1
+
+    def get_id(self) -> str:  # Flask-Login: "<id>:<session version>"
+        return f"{self.id}:{self.session_version or 0}"
 
     def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
@@ -80,7 +86,9 @@ class User(UserMixin, db.Model):
 
     @property
     def is_adult(self) -> bool:
-        return self.age is not None and self.age >= 18
+        # Only the birth year is known, so be conservative: someone born in 2008 may still be
+        # 17 during 2026. Adult features unlock the year the student is certainly 18.
+        return self.birth_year is not None and utcnow().year - self.birth_year >= 19
 
 
 class ApiToken(db.Model):
@@ -148,6 +156,10 @@ class Course(db.Model):
     html_url: Mapped[str | None] = mapped_column(String(500))
     syllabus_html: Mapped[str | None] = mapped_column(Text)
     files_tab_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Canvas's "weight final grade based on assignment groups" setting (None if unknown).
+    group_weighting: Mapped[bool | None] = mapped_column(Boolean)
+    # Canvas user ids of the students enrolled, as seen by this student (for chat membership checks).
+    roster_ids: Mapped[list | None] = mapped_column(JSON)
     # Hash of the course's text content; the search index is rebuilt only when it changes.
     content_signature: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -179,6 +191,7 @@ class AssignmentGroup(db.Model):
     position: Mapped[int | None] = mapped_column(Integer)
     drop_lowest: Mapped[int] = mapped_column(Integer, default=0)
     drop_highest: Mapped[int] = mapped_column(Integer, default=0)
+    never_drop: Mapped[list | None] = mapped_column(JSON)  # Canvas assignment ids exempt from drops
 
     __table_args__ = (UniqueConstraint("course_id", "canvas_id"),)
 
@@ -196,6 +209,7 @@ class Assignment(db.Model):
     grading_type: Mapped[str | None] = mapped_column(String(40))
     submission_types: Mapped[list | None] = mapped_column(JSON)
     is_quiz: Mapped[bool] = mapped_column(Boolean, default=False)
+    omit_from_final_grade: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     html_url: Mapped[str | None] = mapped_column(String(500))
     description_html: Mapped[str | None] = mapped_column(Text)
     # Status as computed by the sync (graded/submitted/missing/past_due/upcoming/...).
@@ -291,7 +305,7 @@ class CanvasFile(db.Model):
     name: Mapped[str] = mapped_column(String(500))
     path: Mapped[str | None] = mapped_column(String(800))
     content_type: Mapped[str | None] = mapped_column(String(200))
-    size: Mapped[int | None] = mapped_column(Integer)
+    size: Mapped[int | None] = mapped_column(BigInteger)
     canvas_updated_at: Mapped[str | None] = mapped_column(String(64))
     # Version the extension announced vs. the version we actually hold.
     wanted_version: Mapped[str | None] = mapped_column(String(32))
@@ -299,7 +313,8 @@ class CanvasFile(db.Model):
     storage_key: Mapped[str | None] = mapped_column(String(500))
     sha256: Mapped[str | None] = mapped_column(String(64))
     stored_at: Mapped[datetime | None] = mapped_column(DateTime)
-    text: Mapped[str | None] = mapped_column(Text)
+    # Deferred: extracted text can be hundreds of KB and most queries never need it.
+    text: Mapped[str | None] = mapped_column(Text, deferred=True)
     text_status: Mapped[str | None] = mapped_column(String(40))
 
     __table_args__ = (UniqueConstraint("account_id", "canvas_id"),)

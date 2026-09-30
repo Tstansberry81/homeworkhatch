@@ -12,7 +12,7 @@ import math
 import re
 from collections import Counter
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from ..extensions import db
 from ..models import CanvasFile, ContentChunk, Course
@@ -98,8 +98,13 @@ def rebuild_file_chunks(f: CanvasFile) -> None:
 
 
 def search(user_id: int, query: str, course_ids: list[int] | None = None, k: int = 8,
-           max_candidates: int = 20000) -> list[ContentChunk]:
-    """BM25 over the student's chunks (optionally limited to some courses)."""
+           max_candidates: int = 20000, per_source: int = 3) -> list[ContentChunk]:
+    """BM25 over the student's chunks (optionally limited to some courses).
+
+    Candidates are prefiltered in SQL to chunks containing at least one query term, so the
+    cap never silently drops relevant material; at most `per_source` chunks per file/page are
+    returned so one long document can't crowd out everything else.
+    """
     q_terms = tokenize(query)
     if not q_terms:
         return []
@@ -108,6 +113,9 @@ def search(user_id: int, query: str, course_ids: list[int] | None = None, k: int
         if not course_ids:
             return []
         stmt = stmt.where(ContentChunk.course_id.in_(course_ids))
+    distinct_terms = sorted(set(q_terms), key=len, reverse=True)[:12]
+    stmt = stmt.where(or_(*[ContentChunk.text.ilike(f"%{t}%") for t in distinct_terms],
+                          *[ContentChunk.title.ilike(f"%{t}%") for t in distinct_terms]))
     chunks = db.session.scalars(stmt.limit(max_candidates)).all()
     if not chunks:
         return []
@@ -132,4 +140,13 @@ def search(user_id: int, query: str, course_ids: list[int] | None = None, k: int
         if score > 0:
             scored.append((score, chunk))
     scored.sort(key=lambda x: -x[0])
-    return [c for _s, c in scored[:k]]
+    picked, per = [], Counter()
+    for _score, chunk in scored:
+        key = (chunk.source_type, chunk.source_id)
+        if per[key] >= per_source:
+            continue
+        per[key] += 1
+        picked.append(chunk)
+        if len(picked) == k:
+            break
+    return picked

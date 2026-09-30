@@ -22,8 +22,8 @@ login, so no school password or API key is ever involved.
 | **AI tutor** | Streaming chat per class or across all classes, grounded in synced materials with `[S1]` citations. Built to teach rather than do the work. |
 | **Study sets** | AI-generated flashcards and practice quizzes from a file, page, topic or pasted notes. SM-2 spaced repetition, cram mode, a manual editor. |
 | **Live quiz** | Kahoot-style: the host shows questions, classmates join with a code (no account needed), and faster correct answers score more. |
-| **Summaries** | AI study summaries of any synced file or page. |
-| **Class chat** | A room per Canvas course, shared by enrolled classmates. Profanity masking, slur and threat blocking, reports, and auto-hide after 3 reports. |
+| **Summaries** | AI study summaries of any synced file or page. Scanned PDFs (no text layer) can be read by Claude so the tutor and generators can use them too. |
+| **Class chat** | A room per Canvas course. Classmates confirm each other through the class rosters their extensions sync, so a made-up account can't get into a real class's room. Profanity masking, slur and threat blocking, reports, and auto-hide after 3 reports. |
 | **Buddy Coins** | Original rules: assignment 10, quiz 20, test 30, plus a grade bonus; late work earns half. Also pays for studying and live-quiz wins. Achievements and leaderboards (opt-in). |
 | **Probability Lab** | 18+, off by default (`FEATURE_SIMULATIONS=1`). Dice odds with the exact probability and expected value shown. Virtual coins only, as in the original terms of service. |
 | **College odds** | College Scorecard search (or manual entry), out-of-state rates, and a transparent reach/target/safety estimate. |
@@ -43,8 +43,8 @@ export FLASK_APP=wsgi.py
 .venv/bin/flask run --debug
 ```
 
-The first account you register becomes the admin. You can also create one with
-`flask create-admin`.
+Locally, the first account you register becomes the admin. In production nobody becomes an
+admin automatically: set `ADMIN_EMAIL`, or run `flask create-admin`.
 
 ### Connect a real Canvas
 

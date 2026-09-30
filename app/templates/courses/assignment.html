@@ -26,7 +26,7 @@
           <tr><td><strong>{{ r.description }}</strong>{% if r.long_description %}<div class="small muted">{{ r.long_description }}</div>{% endif %}
             {% if r.ratings %}<div class="small muted">{% for x in r.ratings %}{{ x.description }} ({{ '%g' % x.points }}){{ ' · ' if not loop.last }}{% endfor %}</div>{% endif %}</td>
             <td class="right">{{ '%g' % r.points if r.points is not none else '' }}</td>
-            {% if a.rubric_assessment %}<td class="right">{{ (a.rubric_assessment.get(r.id) or {}).get('points', '—') }}</td>{% endif %}</tr>
+            {% if a.rubric_assessment %}{% set pts = (a.rubric_assessment.get(r.id) or {}).get('points') %}<td class="right">{{ '%g' % pts if pts is not none else '—' }}</td>{% endif %}</tr>
         {% endfor %}</tbody>
       </table>
     </div>
@@ -35,7 +35,7 @@
   <div>
     <div class="card">
       <h2>Your submission</h2>
-      {% if a.score is not none %}<div class="stat"><div class="value">{{ '%g' % a.score }}{% if a.points_possible %}<span class="muted" style="font-size:1rem"> / {{ '%g' % a.points_possible }}</span>{% endif %}</div><div class="label">{{ a.percent }}%</div></div>{% endif %}
+      {% if a.score is not none %}<div class="stat"><div class="value">{{ '%g' % a.score }}{% if a.points_possible %}<span class="muted" style="font-size:1rem"> / {{ '%g' % a.points_possible }}</span>{% endif %}</div>{% if a.percent is not none %}<div class="label">{{ a.percent }}%</div>{% endif %}</div>{% endif %}
       <p class="small">{% if a.submitted_at %}Submitted {{ a.submitted_at|dt('long') }}{% if a.late %} (late){% endif %}.{% elif a.effective_status == 'no_submission' %}Nothing to turn in online.{% else %}Not submitted yet.{% endif %}</p>
       {% if a.attachments %}<h3>Files you turned in</h3><ul class="small">{% for f in a.attachments %}<li>{{ f.name }}</li>{% endfor %}</ul>{% endif %}
     </div>

@@ -11,16 +11,17 @@
     <p class="small">Pick a target. You win if the two dice add up to at least the target. Payouts are fair odds minus a {{ (edge * 100)|round|int }}% edge, so the expected value of every bet is slightly negative. That's the lesson.</p>
     <div class="form-row">
       <div><label for="target">Target (sum ≥)</label><select id="target">{% for row in table %}<option value="{{ row.target }}" {{ 'selected' if row.target == 7 }}>{{ row.target }}</option>{% endfor %}</select></div>
-      <div><label for="wager">Wager (1–{{ max_wager }})</label><input id="wager" type="number" min="1" max="{{ max_wager }}" value="5"></div>
+      <div><label for="wager">Wager ({{ min_wager }}–{{ max_wager }})</label><input id="wager" type="number" min="{{ min_wager }}" max="{{ max_wager }}" value="{{ min_wager }}"></div>
     </div>
+    <p class="small muted" id="preview"></p>
     <button class="btn btn-block mt" id="roll">Roll</button>
     <div class="center mt"><div class="dice" id="dice">🎲🎲</div><p id="out"></p></div>
   </div>
   <div class="card">
     <h2>The math</h2>
     <table class="table small"><thead><tr><th>≥ Target</th><th>P(win)</th><th>Pays</th><th>EV per coin</th></tr></thead>
-      <tbody>{% for row in table %}<tr><td>{{ row.target }}</td><td>{{ '%.1f' % (row.p * 100) }}%</td><td>{{ row.payout }}×</td><td>{{ '%+.2f' % (row.p * row.payout - 1) }}</td></tr>{% endfor %}</tbody></table>
-    <p class="small muted">EV = P(win) × payout − 1. Every row is negative. Over many rolls, the house wins. Daily limit applies.</p>
+      <tbody>{% for row in table %}<tr><td>{{ row.target }}</td><td>{{ '%.1f' % (row.p * 100) }}%</td><td>{{ '%.2f' % row.payout }}×</td><td>{{ '%+.3f' % (row.p * row.payout - 1) }}</td></tr>{% endfor %}</tbody></table>
+    <p class="small muted">EV = P(win) × payout − 1. Every row is negative. Payouts round to whole coins; the preview on the left shows the exact payout and expected value for your wager. Daily limit applies.</p>
   </div>
 </div>
 {% endblock %}
@@ -28,6 +29,18 @@
 <script>
 (() => {
   const faces = ["", "⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+  const odds = {{ table|tojson }}, edge = {{ edge }};
+  const preview = () => {
+    const w = Number(document.getElementById("wager").value), t = Number(document.getElementById("target").value);
+    const row = odds.find((r) => r.target === t);
+    if (!row || !w) return;
+    const pay = Math.round(w * (1 - edge) / row.p);
+    document.getElementById("preview").textContent =
+      `Win: get back ${pay} coins (${(row.p * 100).toFixed(1)}% chance). Expected value: ${(row.p * pay - w).toFixed(2)} coins.`;
+  };
+  document.getElementById("wager").addEventListener("input", preview);
+  document.getElementById("target").addEventListener("change", preview);
+  preview();
   document.getElementById("roll").addEventListener("click", async () => {
     const out = document.getElementById("out");
     try {

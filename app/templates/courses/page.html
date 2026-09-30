@@ -13,7 +13,7 @@
   </div>
 </div>
 <div class="grid grid-main">
-  <div class="card prose" data-math>{{ page.body_html|canvas_html(base_url)|safe if page.body_html else '<p class="muted">This page is empty.</p>'|safe }}</div>
+  <div class="card prose">{{ page.body_html|canvas_html(base_url)|safe if page.body_html else '<p class="muted">This page is empty.</p>'|safe }}</div>
   <div class="card">
     <h2>AI summary</h2>
     {% if summary %}<div class="prose small" data-math>{{ render_markdown(summary.content)|safe }}</div>{% endif %}

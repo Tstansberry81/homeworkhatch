@@ -130,7 +130,7 @@ def test_database_urls_from_supabase_and_render():
     transaction = engine_options(normalize_database_url(pooler.replace(":5432/", ":6543/")))
     assert transaction["connect_args"] == {"prepare_threshold": None}, "Supavisor transaction mode can't prepare"
     assert transaction["poolclass"].__name__ == "NullPool"
-    assert engine_options("sqlite://") == {}
+    assert engine_options("sqlite://") == {} and engine_options("sqlite:///x.db")["connect_args"]["timeout"] == 20
 
 
 def test_supabase_storage_endpoint_and_production_checks(monkeypatch):

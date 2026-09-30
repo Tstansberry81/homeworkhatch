@@ -25,6 +25,9 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
     app.config.update(load_config(env_name))
     if overrides:
         app.config.update(overrides)
+    # Hard cap on any request body (also enforced for chunked uploads with no Content-Length).
+    app.config.setdefault("MAX_CONTENT_LENGTH",
+                          (max(app.config["MAX_FILE_MB"], app.config["MAX_SNAPSHOT_MB"]) + 1) * 1024 * 1024)
     if env_name == "production":
         problems = validate_production(app.config)
         if problems and os.environ.get("HH_ALLOW_UNSAFE_CONFIG") != "1":
@@ -62,7 +65,14 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
 
 @login_manager.user_loader
 def load_user(user_id: str):
-    return db.session.get(User, int(user_id))
+    # "<id>:<session version>"; a password change bumps the version and ends old sessions.
+    ident, _, version = str(user_id).partition(":")
+    if not ident.isdigit():
+        return None
+    user = db.session.get(User, int(ident))
+    if user is None or str(user.session_version or 0) != (version or "0"):
+        return None
+    return user
 
 
 def _register_template_helpers(app: Flask) -> None:

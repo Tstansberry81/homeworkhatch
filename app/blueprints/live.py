@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
 from ..models import LiveAnswer, LivePlayer, LiveSession, PracticeQuiz, utcnow
-from ..services import coins
+from ..services import coins, moderation
 
 bp = Blueprint("live", __name__, url_prefix="/live")
 
@@ -61,8 +61,11 @@ def _leaderboard(s: LiveSession, limit: int = 10) -> list[dict]:
 def _finish(s: LiveSession) -> None:
     s.state = "finished"
     if not s.rewarded:
-        ranked = [p for p in sorted(s.players, key=lambda p: (-p.score, p.joined_at))
-                  if p.user_id and p.user_id != s.host_id and p.score > 0]
+        ranked, seen = [], set()
+        for p in sorted(s.players, key=lambda p: (-p.score, p.joined_at)):
+            if p.user_id and p.user_id != s.host_id and p.score > 0 and p.user_id not in seen:
+                seen.add(p.user_id)
+                ranked.append(p)
         # Prizes only when at least two signed-in players competed.
         if len(ranked) >= 2:
             for place, (p, prize) in enumerate(zip(ranked, PRIZES), start=1):
@@ -107,6 +110,8 @@ def control(code: str):
         abort(403)
     action = (request.get_json(silent=True) or {}).get("action")
     total = len(s.quiz.questions)
+    if s.state == "finished":
+        return jsonify({"ok": True})  # a finished game can't be restarted
     if action in ("start", "next"):
         if s.question_index + 1 >= total:
             _finish(s)
@@ -138,7 +143,16 @@ def join():
         if not nickname:
             flash("Pick a nickname.", "error")
             return render_template("live/join.html", code=code), 400
+        try:
+            nickname = moderation.clean_name(nickname)
+        except moderation.Rejected as exc:
+            flash(str(exc), "error")
+            return render_template("live/join.html", code=code), 400
         existing = _player(s)
+        if existing is None and current_user.is_authenticated:
+            # One seat per account: rejoining (another tab/device) reuses the same player.
+            existing = db.session.scalar(select(LivePlayer).where(LivePlayer.session_id == s.id,
+                                                                  LivePlayer.user_id == current_user.id))
         if existing is None:
             p = LivePlayer(session_id=s.id, nickname=nickname,
                            user_id=current_user.id if current_user.is_authenticated else None)

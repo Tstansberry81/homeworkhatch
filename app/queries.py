@@ -39,16 +39,23 @@ def upcoming(user_id: int, days: int = 14, back_days: int = 7) -> list[Assignmen
         .where(Assignment.course_id.in_(course_ids), Assignment.due_at.is_not(None),
                Assignment.due_at <= now + timedelta(days=days), Assignment.due_at >= now - timedelta(days=back_days))
         .order_by(Assignment.due_at)).all()
-    out = []
-    for a in rows:
-        status = a.effective_status
-        if status == "no_submission":
-            # In-class items (exams, checkpoints) show while upcoming and worth points.
-            if a.due_at >= now and (a.points_possible or 0) > 0:
-                out.append(a)
-        elif status in UPCOMING_STATUSES:
-            out.append(a)
-    return out
+    return [a for a in rows if _still_to_do(a, now)]
+
+
+def _still_to_do(a: Assignment, now) -> bool:
+    status = a.effective_status
+    if status == "no_submission":
+        # In-class items (exams, checkpoints) show while upcoming and worth points.
+        return a.due_at >= now and (a.points_possible or 0) > 0
+    return status in UPCOMING_STATUSES
+
+
+def upcoming_for_course(course: Course, days: int = 14, back_days: int = 7) -> list[Assignment]:
+    """Same window as upcoming(), for one course, whether or not it's hidden."""
+    now = utcnow()
+    return [a for a in course.assignments
+            if a.due_at and now - timedelta(days=back_days) <= a.due_at <= now + timedelta(days=days)
+            and _still_to_do(a, now)]
 
 
 def missing(user_id: int) -> list[Assignment]:

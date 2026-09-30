@@ -61,7 +61,13 @@ def privacy():
 def onboarding():
     if request.method == "POST":
         f = request.form
-        current_user.display_name = (f.get("display_name") or current_user.username).strip()[:80]
+        from ..services import moderation
+
+        try:
+            current_user.display_name = moderation.clean_name(f.get("display_name") or current_user.username)[:80]
+        except moderation.Rejected as exc:
+            flash(str(exc), "error")
+            return render_template("onboarding.html"), 400
         current_user.grade_level = (f.get("grade_level") or "").strip()[:40] or None
         current_user.timezone = valid_timezone(f.get("timezone"))
         year = f.get("birth_year", "").strip()
@@ -117,6 +123,8 @@ def calendar_view():
     try:
         year = int(request.args.get("y", today.year))
         month = int(request.args.get("m", today.month))
+        if not 1970 <= year <= 2100:
+            raise ValueError("year out of range")
         first = date(year, month, 1)
     except ValueError:
         first = today.replace(day=1)

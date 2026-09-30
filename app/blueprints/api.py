@@ -56,7 +56,12 @@ def authenticate():
     user = db.session.get(User, row.user_id)
     if user is None or not user.active or not user.is_approved:
         return _error(403, "account disabled")
-    row.last_used_at = utcnow()
+    # Record use at most once a minute, in its own short transaction: holding that row write
+    # for a whole file upload would serialize (and on SQLite, lock) parallel uploads.
+    now = utcnow()
+    if row.last_used_at is None or (now - row.last_used_at).total_seconds() > 60:
+        row.last_used_at = now
+        db.session.commit()
     g.api_user = user
     return None
 
@@ -85,7 +90,7 @@ def post_snapshot():
         run, needed = ingest.ingest_snapshot(g.api_user, body.get("snapshot"), body.get("files") or [])
     except ingest.IngestError as exc:
         db.session.rollback()
-        return _error(400, str(exc))
+        return _error(exc.status, str(exc))
     return jsonify({"snapshot_id": run.id, "files_needed": needed})
 
 
@@ -113,6 +118,7 @@ def put_file(file_id: str):
         return _error(400, str(exc))
     except TooLarge as exc:
         db.session.rollback()
+        ingest.mark_too_large(run, file_id, request.args.get("updated_at"))
         return _error(413, str(exc))
     except StorageError as exc:
         db.session.rollback()

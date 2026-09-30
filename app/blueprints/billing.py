@@ -32,6 +32,9 @@ def plans():
 def checkout(plan: str):
     if not billing.enabled() or plan not in billing.PLANS or plan == "free":
         abort(404)
+    if billing.has_active_subscription(current_user) and current_user.stripe_customer_id:
+        # Changing plans happens in Stripe's portal; a second checkout would add a second subscription.
+        return redirect(url_for("billing.portal"))
     try:
         url = billing.checkout_url(current_user, plan, _external("billing.plans", status="success"),
                                    _external("billing.plans", status="cancel"))

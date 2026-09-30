@@ -276,3 +276,44 @@ def test_supabase_lockdown_enables_rls_and_revokes_api_roles(app):
     # The app (table owner) still reads and writes normally.
     make_user("owner")
     assert db.session.scalar(select(User.username).where(User.username == "owner")) == "owner"
+
+
+def test_stripe_ignores_other_subscriptions_and_blocks_double_checkout(app, client):
+    app.config.update(STRIPE_WEBHOOK_SECRET="whsec_test", STRIPE_SECRET_KEY="sk_test_x", STRIPE_PRICE_PRO="price_pro")
+    user = make_user()
+    user.plan, user.plan_status, user.stripe_customer_id, user.stripe_subscription_id = "pro", "active", "cus_1", "sub_live"
+    db.session.commit()
+    body, sig = _signed({"id": "evt_3", "object": "event", "type": "customer.subscription.deleted",
+                         "data": {"object": {"id": "sub_old", "customer": "cus_1", "status": "canceled",
+                                             "items": {"data": []}}}}, "whsec_test")
+    client.post("/billing/webhook", data=body, headers={"Stripe-Signature": sig, "Content-Type": "application/json"})
+    db.session.refresh(user)
+    assert user.plan == "pro", "an old subscription's cancellation doesn't downgrade the paying user"
+    login(client, user)
+    r = client.post("/billing/checkout/pro")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/billing/portal"), "no second subscription"
+
+
+def test_login_lockout_and_password_change_ends_sessions(app):
+    user = make_user("locky")
+    c = app.test_client()
+    for _ in range(10):
+        c.post("/login", data={"identifier": "locky", "password": "wrong"})
+    r = c.post("/login", data={"identifier": "locky", "password": "password123"})
+    assert r.status_code == 429, "locked after 10 failures, even with the right password"
+
+    other = make_user("sess")
+    a, b = app.test_client(), app.test_client()
+    login(a, other), login(b, other)
+    assert a.post("/settings/", data={"action": "password", "current": "password123", "new": "newpassword1"}).status_code == 302
+    assert b.get("/dashboard").status_code == 302, "the other session was signed out by the password change"
+
+
+def test_no_automatic_admin_in_production(app):
+    app.config["ENV_NAME"] = "production"
+    c = app.test_client()
+    c.post("/register", data={"email": "first@example.com", "username": "firstone", "password": "longenough", "terms": "on"})
+    assert db.session.scalar(select(User).where(User.username == "firstone")).is_admin is False
+    app.config["ADMIN_EMAIL"] = "boss@example.com"
+    app.test_client().post("/register", data={"email": "boss@example.com", "username": "bossy", "password": "longenough", "terms": "on"})
+    assert db.session.scalar(select(User).where(User.username == "bossy")).is_admin is True

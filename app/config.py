@@ -65,7 +65,8 @@ def is_transaction_pooler(url: str) -> bool:
 
 def engine_options(url: str) -> dict:
     if url.startswith("sqlite"):
-        return {}
+        # Local development: wait for a busy database instead of failing immediately.
+        return {"connect_args": {"timeout": 20}} if url != "sqlite://" else {}
     options: dict = {
         # Render resets long-lived outbound TCP connections on network changes; ping and
         # recycle so a dead connection is replaced instead of failing a request.
@@ -136,6 +137,9 @@ def load_config(env_name: str) -> dict:
         # College acceptance calculator: free key from https://api.data.gov/signup/
         "COLLEGE_SCORECARD_API_KEY": os.environ.get("COLLEGE_SCORECARD_API_KEY", ""),
 
+        # The account registered with this email becomes an admin (production has no
+        # "first user is admin" shortcut). `flask create-admin` works too.
+        "ADMIN_EMAIL": os.environ.get("ADMIN_EMAIL", ""),
         # New accounts wait for an admin to approve them.
         "REQUIRE_APPROVAL": env_bool("REQUIRE_APPROVAL", False),
         # Probability Lab with virtual coins: 18+ only, off unless enabled.

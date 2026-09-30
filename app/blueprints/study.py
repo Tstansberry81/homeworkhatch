@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import timezone
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -40,6 +41,23 @@ def _course_id(value) -> int | None:
     return cid
 
 
+def _preset_course(preset: dict) -> int | None:
+    """The class that owns the preselected file/page, so it shows even when hidden."""
+    from ..models import CanvasFile, Page
+
+    try:
+        ref = int(preset.get("ref") or 0)
+    except ValueError:
+        return None
+    if preset.get("kind") == "file":
+        f = db.session.get(CanvasFile, ref)
+        return f.course_id if f and f.user_id == current_user.id else None
+    if preset.get("kind") == "page":
+        p = db.session.get(Page, ref)
+        return p.course_id if p else None
+    return None
+
+
 # ---------------------------------------------------------------- hub
 
 
@@ -63,9 +81,9 @@ def index():
 @bp.route("/generate", methods=["GET", "POST"])
 @login_required
 def generate():
-    options = study.material_options(current_user)
     preset = {"kind": request.args.get("kind", "file"), "ref": request.args.get("ref", ""),
               "output": request.args.get("output", "deck")}
+    options = study.material_options(current_user, _preset_course(preset))
     if request.method == "GET":
         return render_template("study/generate.html", options=options, preset=preset,
                                remaining=ai.remaining(current_user))
@@ -186,13 +204,18 @@ def delete_deck(deck_id: int):
 def review(deck_id: int):
     d = _deck(deck_id)
     if request.method == "POST":
-        card = db.session.get(Card, int(request.form.get("card_id", 0)))
+        card = db.session.get(Card, int(request.form.get("card_id", 0) or 0))
         rating = request.form.get("rating")
-        if card and card.deck_id == d.id and rating in srs.RATINGS:
+        # A double-click or key repeat submits the same card twice: only the first counts.
+        fresh = card is None or card.last_reviewed_at is None or (utcnow() - card.last_reviewed_at).total_seconds() > 3
+        if card and card.deck_id == d.id and rating in srs.RATINGS and fresh:
             srs.review(card, rating)
-            today = local_now(current_user).date().isoformat()
+            local = local_now(current_user)
+            today = local.date().isoformat()
+            local_midnight_utc = (local.replace(hour=0, minute=0, second=0, microsecond=0)
+                                  .astimezone(timezone.utc).replace(tzinfo=None))
             reviewed_today = db.session.scalar(select(func.count(Card.id)).join(Deck).where(
-                Deck.user_id == current_user.id, Card.last_reviewed_at >= utcnow().replace(hour=0, minute=0, second=0)))
+                Deck.user_id == current_user.id, Card.last_reviewed_at >= local_midnight_utc))
             if reviewed_today and reviewed_today >= 10:
                 coins.award(current_user.id, 3, "Reviewed 10 flashcards", f"cards:{today}")
             db.session.commit()
@@ -215,19 +238,31 @@ _E = re.compile(r"^\s*E\s*[:.)]\s*(.+)$", re.I)
 
 
 def parse_quiz_text(text: str) -> list[dict]:
-    """Q: question / "- wrong" / "* right" / E: explanation (blank line between questions optional)."""
-    questions, current = [], None
+    """Q: question / "- wrong" / "* right" / E: explanation. Any other non-blank line continues
+    whatever came before it, so multi-line questions, choices and explanations survive editing."""
+    questions, current, field = [], None, None
     for line in (text or "").splitlines():
+        stripped = line.strip()
         if m := _Q.match(line):
             if current:
                 questions.append(current)
             current = {"question": m.group(1).strip(), "choices": [], "answer": -1, "explanation": ""}
-        elif current and line.strip().startswith(("-", "*")):
-            if line.strip().startswith("*"):
+            field = "question"
+        elif current and stripped.startswith(("- ", "* ", "-\t", "*\t")) or (current and stripped in ("-", "*")):
+            if stripped.startswith("*"):
                 current["answer"] = len(current["choices"])
-            current["choices"].append(line.strip()[1:].strip())
+            current["choices"].append(stripped[1:].strip())
+            field = "choice"
         elif current and (m := _E.match(line)):
             current["explanation"] = m.group(1).strip()
+            field = "explanation"
+        elif current and stripped:
+            if field == "question":
+                current["question"] += "\n" + stripped
+            elif field == "choice":
+                current["choices"][-1] += "\n" + stripped
+            elif field == "explanation":
+                current["explanation"] += "\n" + stripped
     if current:
         questions.append(current)
     return study.valid_questions(questions)
@@ -236,10 +271,12 @@ def parse_quiz_text(text: str) -> list[dict]:
 def quiz_to_text(quiz: PracticeQuiz) -> str:
     blocks = []
     for q in quiz.questions:
-        lines = [f"Q: {q['question']}"]
-        lines += [f"{'*' if i == q['answer'] else '-'} {c}" for i, c in enumerate(q["choices"])]
+        # Continuation lines are indented so they can't be mistaken for new choices or questions.
+        cont = lambda text: text.replace("\n", "\n  ")  # noqa: E731
+        lines = [f"Q: {cont(q['question'])}"]
+        lines += [f"{'*' if i == q['answer'] else '-'} {cont(c)}" for i, c in enumerate(q["choices"])]
         if q.get("explanation"):
-            lines.append(f"E: {q['explanation']}")
+            lines.append(f"E: {cont(q['explanation'])}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -308,7 +345,8 @@ def take_quiz(quiz_id: int):
         attempt = QuizAttempt(quiz_id=quiz.id, user_id=current_user.id, answers=answers, score=score,
                               total=len(quiz.questions))
         db.session.add(attempt)
-        if quiz.questions and score / len(quiz.questions) >= 0.8:
+        # Coins need a real quiz (5+ questions), so one-question quizzes can't mint coins.
+        if len(quiz.questions) >= 5 and score / len(quiz.questions) >= 0.8:
             today = local_now(current_user).date().isoformat()
             if coins.award(current_user.id, 5, f"Scored {score}/{len(quiz.questions)} on {quiz.title}"[:200],
                            f"quiz:{quiz.id}:{today}"):

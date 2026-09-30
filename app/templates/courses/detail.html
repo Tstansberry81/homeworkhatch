@@ -70,7 +70,11 @@
     <div class="card stat">
       <div class="label">Calculated from synced scores</div>
       <div class="value" id="calc">{{ '%.2f' % grade.percent ~ '%' if grade.percent is not none else '—' }}</div>
+      {% if course.current_score is none and grade.percent is not none %}
+      <div class="small" style="color:var(--warn)">Your instructor hides the course total in Canvas. This is an estimate from raw points{% if not grade.weighted %} (no group weights are set){% endif %} and may not match how the class is actually graded.</div>
+      {% else %}
       <div class="small muted">Canvas says {{ grade_text(course) }}. {% if grade.weighted %}Weighted by group.{% else %}Total points.{% endif %}</div>
+      {% endif %}
     </div>
     <div class="card">
       <h3>Groups</h3>
@@ -126,7 +130,7 @@
   <ul class="list">
     {% for f in course.files %}
     <li><div class="grow"><a class="title" href="{{ url_for('courses.file_detail', file_id=f.id) }}">{{ f.name }}</a>
-      <div class="small muted">{% if f.size %}{{ (f.size / 1024)|round(0)|int }} KB{% endif %}{% if f.text_status == 'ok' %} · readable by AI{% endif %}</div></div>
+      <div class="small muted">{% if f.size %}{{ (f.size / 1024)|round(0)|int }} KB{% endif %}{% if f.text_status in ('ok', 'ai') %} · readable by AI{% elif f.text_status in ('empty', 'error') and (f.name|lower).endswith('.pdf') %} · scanned{% endif %}</div></div>
       {% if f.storage_key %}<a class="btn btn-ghost btn-sm" href="{{ url_for('courses.download', file_id=f.id) }}">Download</a>{% else %}<span class="badge">not uploaded yet</span>{% endif %}</li>
     {% endfor %}
   </ul>

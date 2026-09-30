@@ -64,9 +64,13 @@ test("full sync against mock Canvas", async () => {
   assert.equal(cs.pages[0].title, "Week 1 notes");
   assert.match(cs.pages[0].body_html, /answers/, "page body fetched even though Pages list is hidden");
   assert.equal(cs.assignments[0].rubric[0].description, "Correctness");
-  assert.deepEqual(cs.quizzes, []);
+  assert.equal(cs.quizzes, null, "a hidden tab is 'unknown' (null), never an empty list the server would treat as deletions");
+  assert.equal(calc.discussions, null, "logged in but not authorized (401 unauthorized) is not treated as logged out");
+  assert.deepEqual(calc.roster_ids, ["7", "8"]);
+  assert.equal(cs.pages_partial, true, "Pages list hidden: only module pages were sent");
   assert.deepEqual(snap.restricted.map((r) => `${r.status} ${r.endpoint}`).sort(),
-    ["403 /courses/102/files", "403 /files/79", "404 /courses/102/pages", "404 /courses/102/quizzes"]);
+    ["401 /courses/101/discussion_topics", "403 /courses/102/files", "403 /files/79", "404 /courses/102/pages",
+     "404 /courses/102/quizzes"]);
   assert.deepEqual(snap.errors, []);
 
   assert.equal(snap.missing[0].name, "PS2");

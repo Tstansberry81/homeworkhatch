@@ -90,7 +90,7 @@
   }
 
   document.getElementById("composer").addEventListener("submit", (e) => { e.preventDefault(); ask(input.value); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(input.value); } });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(input.value); } });
   document.querySelectorAll("[data-suggest]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.suggest)));
 })();
 </script>

@@ -12,6 +12,7 @@ from datetime import timedelta
 from flask import Blueprint, abort, jsonify, render_template, request
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from .. import queries
 from ..extensions import db
@@ -22,15 +23,37 @@ from ..utils import fmt_dt
 bp = Blueprint("chat", __name__, url_prefix="/chat")
 
 
-def _members(room_key: str) -> list[User]:
-    return list(db.session.scalars(select(User).join(Course, Course.user_id == User.id).where(
-        Course.room_key == room_key, Course.active.is_(True), User.active.is_(True)).distinct()))
+def _room_members(room_key: str) -> list[tuple[User, Course]]:
+    return list(db.session.execute(
+        select(User, Course).join(Course, Course.user_id == User.id).options(selectinload(Course.account))
+        .where(Course.room_key == room_key, Course.active.is_(True), User.active.is_(True))).tuples())
+
+
+def verification(room_key: str) -> tuple[dict[int, bool], bool]:
+    """Who in a room is a confirmed classmate.
+
+    The server can't ask Canvas itself, so it uses the class rosters each student's extension
+    uploads: two members confirm each other when each appears on the other's roster. Anyone
+    can upload a made-up snapshot, but a made-up identity isn't on real classmates' rosters.
+    Returns ({user_id: verified}, whether anyone in the room is verified).
+    """
+    members = [(u.id, c.account.canvas_user_id if c.account else None, set(c.roster_ids or []))
+               for u, c in _room_members(room_key)]
+    verified = {}
+    for uid, cid, roster in members:
+        verified[uid] = any(other_uid != uid and cid in other_roster and other_cid in roster
+                            for other_uid, other_cid, other_roster in members)
+    return verified, any(verified.values())
 
 
 def _room(course_id: int) -> Course:
     course = queries.owned_course(current_user.id, course_id)
     if not course.active:
         abort(404)
+    verified, any_verified = verification(course.room_key)
+    # Once real classmates have confirmed each other, unconfirmed accounts can't read or post.
+    if any_verified and not verified.get(current_user.id):
+        abort(403)
     return course
 
 
@@ -59,7 +82,9 @@ def index():
 @login_required
 def room(course_id: int):
     course = _room(course_id)
-    return render_template("chat/room.html", course=course, members=_members(course.room_key))
+    verified, any_verified = verification(course.room_key)
+    members = [(u, verified.get(u.id, False)) for u, _c in _room_members(course.room_key)]
+    return render_template("chat/room.html", course=course, members=members, any_verified=any_verified)
 
 
 @bp.route("/course/<int:course_id>/messages")
@@ -72,7 +97,11 @@ def messages(course_id: int):
         rows = db.session.scalars(stmt.where(ChatMessage.id > after).order_by(ChatMessage.id).limit(200)).all()
     else:
         rows = list(reversed(db.session.scalars(stmt.order_by(ChatMessage.id.desc()).limit(100)).all()))
-    return jsonify({"messages": [_payload(m) for m in rows]})
+    # Messages deleted or hidden since the client loaded them, so open windows can drop them.
+    deleted = db.session.scalars(select(ChatMessage.id).where(
+        ChatMessage.room_key == course.room_key, ChatMessage.deleted.is_(True),
+        ChatMessage.created_at >= utcnow() - timedelta(days=7))).all()
+    return jsonify({"messages": [_payload(m) for m in rows], "deleted": deleted})
 
 
 @bp.route("/course/<int:course_id>/messages", methods=["POST"])
@@ -96,8 +125,12 @@ def _message_in_my_rooms(message_id: int) -> ChatMessage:
         abort(404)
     mine = db.session.scalar(select(Course.id).where(Course.user_id == current_user.id,
                                                      Course.room_key == m.room_key).limit(1))
-    if not mine and not current_user.is_admin:
-        abort(404)
+    if not current_user.is_admin:
+        if not mine:
+            abort(404)
+        verified, any_verified = verification(m.room_key)
+        if any_verified and not verified.get(current_user.id):
+            abort(404)
     return m
 
 
@@ -112,10 +145,12 @@ def report(message_id: int):
     if not exists:
         reason = ((request.get_json(silent=True) or {}).get("reason") or "")[:300] or None
         db.session.add(ChatReport(message_id=m.id, reporter_id=current_user.id, reason=reason))
-        # Three independent reports within a day hide a message until an admin looks.
+        db.session.flush()
+        # Three open reports within a day hide a message until an admin looks.
         recent = db.session.scalar(select(func.count(ChatReport.id)).where(
-            ChatReport.message_id == m.id, ChatReport.created_at >= utcnow() - timedelta(days=1))) or 0
-        if recent + 1 >= 3:
+            ChatReport.message_id == m.id, ChatReport.resolved.is_(False),
+            ChatReport.created_at >= utcnow() - timedelta(days=1))) or 0
+        if recent >= 3:
             m.deleted = True
         db.session.commit()
     return jsonify({"ok": True})

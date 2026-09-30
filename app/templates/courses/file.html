@@ -31,7 +31,15 @@
     <h2>AI summary</h2>
     {% if summary %}<div class="prose small" data-math>{{ render_markdown(summary.content)|safe }}</div>{% endif %}
     {% if not f.text %}
+      {% if f.text_status in ('empty', 'error') and f.storage_key and (f.name|lower).endswith('.pdf') and ai_available %}
+      <p class="small">This looks like a scanned PDF (no text layer). The AI can read the scan so the tutor, summaries and study sets can use it.</p>
+      <form method="post" action="{{ url_for('courses.transcribe', file_id=f.id) }}" data-busy="Reading the scan… this can take a minute or two.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-block">📖 Read this scan with AI (1 AI action)</button>
+      </form>
+      {% else %}
       <p class="small muted">{% if f.text_status == 'empty' %}No text layer in this file (a scan or image), so AI tools can't read it.{% elif f.text_status == 'unsupported' %}AI tools can read PDF, Word, PowerPoint and text files.{% elif f.text_status == 'too_large' %}This file is too large to read.{% else %}Text will be available after upload.{% endif %}</p>
+      {% endif %}
     {% elif ai_available %}
     <form method="post" action="{{ url_for('courses.summarize', kind='file', ident=f.id) }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

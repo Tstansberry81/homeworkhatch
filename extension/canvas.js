@@ -60,7 +60,15 @@ export function createClient({ baseUrl, get, maxRetries = 4 }) {
   async function request(url, label) {
     for (let attempt = 0; ; attempt++) {
       const res = await get(url);
-      if (res.status === 401) throw new NotLoggedInError();
+      if (res.status === 401) {
+        // Canvas answers 401 both when logged out ("unauthenticated") and when logged in but
+        // not allowed to see one resource ("unauthorized"). Only the first ends the sync.
+        let body = {};
+        try { body = parseCanvasJson(res.text || "{}"); } catch { /* not JSON */ }
+        if (body.status !== "unauthorized") throw new NotLoggedInError();
+        restricted.push({ endpoint: label, status: 401 });
+        return { data: null, link: null };
+      }
       const throttled =
         res.status === 429 || (res.status === 403 && /rate limit exceeded/i.test(res.text || ""));
       if (throttled && attempt < maxRetries) {
@@ -165,10 +173,10 @@ async function resolveFiles(courses, client, safe) {
     for (const id of c.__moduleFileIds) wanted.set(id, "module");
     const html = [
       c.syllabus_html,
-      ...c.assignments.map((a) => a.description_html),
+      ...(c.assignments || []).map((a) => a.description_html),
       ...c.pages.map((p) => p.body_html),
       ...c.announcements.map((a) => a.message_html),
-      ...c.discussions.map((d) => d.message_html),
+      ...(c.discussions || []).map((d) => d.message_html),
     ];
     for (const h of html) for (const id of fileIdsInHtml(h)) if (!wanted.has(id)) wanted.set(id, "embedded");
     delete c.__moduleFileIds;
@@ -198,6 +206,7 @@ function normAssignment(a, now, detail) {
     grading_type: a.grading_type,
     submission_types: a.submission_types || [],
     is_quiz: Boolean(a.is_quiz_assignment || a.quiz_id),
+    omit_from_final_grade: Boolean(a.omit_from_final_grade),
     html_url: a.html_url,
     description_html: a.description || null,
     status: assignmentStatus(a, sub, now),
@@ -242,6 +251,7 @@ function normCourse(c) {
       final_score: enr.computed_final_score ?? null,
       final_grade: enr.computed_final_grade ?? null,
     },
+    group_weighting: typeof c.apply_assignment_group_weights === "boolean" ? c.apply_assignment_group_weights : null,
     html_url: new URL(`/courses/${c.id}`, c.__baseUrl).toString(),
     syllabus_html: c.syllabus_body || null,
   };
@@ -252,6 +262,9 @@ function normCourse(c) {
 export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency = 4, onProgress = () => {} }) {
   const client = createClient({ baseUrl, get });
   const errors = [];
+  // A list that couldn't be fetched (error or hidden tab) is sent as null, never [], so the
+  // server keeps what it already has instead of deleting it.
+  const list = (items, fn) => (Array.isArray(items) ? items.map(fn) : null);
   const safe = async (label, fn) => {
     try {
       return await fn();
@@ -279,7 +292,7 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
   const courses = await pool(visible, concurrency, async (c, idx) => {
     onProgress({ step: "course", index: idx + 1, total: visible.length, name: c.name });
     const id = c.id;
-    const [assignments, groups, modules, pages, files, discussions, quizzes, submissions] = await Promise.all([
+    const [assignments, groups, modules, pages, files, discussions, quizzes, roster, submissions] = await Promise.all([
       safe(`assignments:${id}`, () =>
         client.all(`/courses/${id}/assignments`, { "include[]": ["submission"], order_by: "due_at" })),
       safe(`assignment_groups:${id}`, () => client.all(`/courses/${id}/assignment_groups`)),
@@ -290,6 +303,7 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
       safe(`quizzes:${id}`, () => client.all(`/courses/${id}/quizzes`)),
       // Teacher comments, rubric scores and your own uploaded attachments.
       // With no student_ids, Canvas returns the calling student's own submissions.
+      safe(`roster:${id}`, () => client.all(`/courses/${id}/users`, { "enrollment_type[]": "student" })),
       safe(`submissions:${id}`, () => client.all(`/courses/${id}/students/submissions`, {
         "include[]": ["submission_comments", "rubric_assessment"],
       })),
@@ -307,12 +321,13 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
     const subsByAssignment = new Map((submissions || []).map((s) => [String(s.assignment_id), s]));
     return {
       ...normCourse({ ...c, __baseUrl: baseUrl }),
-      assignment_groups: (groups || []).map((g) => ({
+      assignment_groups: list(groups, (g) => ({
         id: String(g.id), name: g.name, weight: g.group_weight, position: g.position,
         drop_lowest: g.rules?.drop_lowest ?? 0, drop_highest: g.rules?.drop_highest ?? 0,
+        never_drop: (g.rules?.never_drop || []).map(String),
       })),
-      assignments: (assignments || []).map((a) => normAssignment(a, now, subsByAssignment.get(String(a.id)))),
-      modules: (modules || []).map((m) => ({
+      assignments: list(assignments, (a) => normAssignment(a, now, subsByAssignment.get(String(a.id)))),
+      modules: list(modules, (m) => ({
         id: String(m.id), name: m.name, position: m.position, unlock_at: m.unlock_at, state: m.state ?? null,
         items: (m.items || []).map((it) => ({
           id: String(it.id), title: it.title, type: it.type,
@@ -332,14 +347,17 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
       // Filled in by resolveFiles() once every HTML source (incl. announcements) is known.
       files: files === null ? null : files.map((f) => normFile(f)),
       files_tab_hidden: files === null,
-      discussions: (discussions || []).map((d) => ({
+      discussions: list(discussions, (d) => ({
         id: String(d.id), title: d.title, posted_at: d.posted_at, due_at: d.assignment?.due_at ?? null,
         html_url: d.html_url, message_html: d.message,
       })),
-      quizzes: (quizzes || []).map((q) => ({
+      quizzes: list(quizzes, (q) => ({
         id: String(q.id), title: q.title, due_at: q.due_at, time_limit: q.time_limit,
         question_count: q.question_count, points_possible: q.points_possible, html_url: q.html_url,
       })),
+      // The Pages list was unavailable, so `pages` only holds module-linked pages: not a full list.
+      pages_partial: !Array.isArray(pages),
+      roster_ids: Array.isArray(roster) ? roster.map((u) => String(u.id)) : null,
       announcements: [],
       __moduleFileIds: (modules || []).flatMap((m) => (m.items || []).filter((it) => it.type === "File").map((it) => String(it.content_id))),
     };
@@ -411,7 +429,7 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
 export function upcoming(snapshot, days = 14, now = Date.now(), overrides = {}) {
   return snapshot.courses
     .filter((c) => isVisible(c, overrides))
-    .flatMap((c) => c.assignments.map((a) => ({ ...a, course: c.name })))
+    .flatMap((c) => (c.assignments || []).map((a) => ({ ...a, course: c.name })))
     .filter((a) => {
       if (!a.due_at) return false;
       const due = Date.parse(a.due_at);

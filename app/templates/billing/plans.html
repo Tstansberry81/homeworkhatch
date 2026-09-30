@@ -14,6 +14,8 @@
     <p class="small"><strong>{{ '{:,}'.format(p.ai_monthly) }}</strong> AI actions a month</p>
     <p class="small muted">{{ p.blurb }}</p>
     {% if p.key == current.key %}<span class="badge accent">Your plan</span>
+    {% elif p.key != 'free' and enabled and p.stripe_price and current_user.stripe_subscription_id and current.key != 'free' %}
+      <a class="btn btn-ghost btn-block" href="{{ url_for('billing.portal') }}">Switch in billing portal</a>
     {% elif p.key != 'free' and enabled and p.stripe_price %}
       <form method="post" action="{{ url_for('billing.checkout', plan=p.key) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-block">Choose {{ p.name }}</button></form>
     {% endif %}
