@@ -48,6 +48,9 @@ const assignments = {
   ],
 };
 
+// Files added by a test while the mock runs, per course id (see addFile below).
+const addedFiles = {};
+
 const routes = {
   "/api/v1/users/self": () => ({ id: 7, name: "Traveler Test", short_name: "Trav" }),
   "/api/v1/courses": () => courses,
@@ -104,7 +107,8 @@ function courseRoute(path) {
     pages: [{ url: "syllabus", title: "Syllabus", updated_at: d(-30) }],
     files: [{ id: 1, display_name: "notes.pdf", "content-type": "application/pdf", size: 1234, folder_id: 5, url: "https://x/files/1/download" },
             { id: 2, display_name: "hw.pdf", "content-type": "application/pdf", size: 99, folder_id: 5, url: "https://x/files/2/download" },
-            { id: 3, display_name: "exam.pdf", "content-type": "application/pdf", size: 77, folder_id: 5, url: "https://x/files/3/download" }],
+            { id: 3, display_name: "exam.pdf", "content-type": "application/pdf", size: 77, folder_id: 5, url: "https://x/files/3/download" },
+            ...(addedFiles[id] || [])],
     discussion_topics: [],
     users: [{ id: 7, name: "Traveler Test" }, { id: 8, name: "Classmate" }],
     quizzes: [{ id: 1, title: "Quiz 1", due_at: d(5), question_count: 10 }],
@@ -113,6 +117,7 @@ function courseRoute(path) {
 }
 
 export function startMockCanvas({ port = 0 } = {}) {
+  for (const k of Object.keys(addedFiles)) delete addedFiles[k];
   const hits = [];
   let rateLimited = false;
   const server = http.createServer((req, res) => {
@@ -164,6 +169,9 @@ export function startMockCanvas({ port = 0 } = {}) {
     send(200, slice.slice((page - 1) * per, page * per), headers);
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => {
-    resolve({ url: `http://127.0.0.1:${server.address().port}`, hits, close: () => server.close(), NOW });
+    resolve({
+      url: `http://127.0.0.1:${server.address().port}`, hits, close: () => server.close(), NOW,
+      addFile: (courseId, file) => (addedFiles[courseId] ??= []).push(file),
+    });
   }));
 }

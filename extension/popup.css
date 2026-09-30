@@ -12,9 +12,11 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: v
 .pill.error, .pill.logged_out { color: var(--err); border-color: var(--err); }
 .muted { color: var(--muted); }
 .error { color: var(--err); }
-.row { display: flex; gap: 6px; margin: 8px 0; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.small { font-size: 12px; margin-top: -6px; }
 button { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
 button.secondary { background: transparent; color: var(--fg); border-color: var(--line); }
+button.link { background: none; border-color: transparent; color: var(--accent); padding: 5px 2px; text-decoration: underline; }
 button:disabled { opacity: .5; cursor: default; }
 ul { list-style: none; padding: 0; margin: 0; max-height: 220px; overflow-y: auto; }
 li { padding: 5px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 8px; }

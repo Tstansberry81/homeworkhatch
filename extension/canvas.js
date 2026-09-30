@@ -445,9 +445,18 @@ const safeName = (s) => String(s).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").re
 // Every file the student can reach (Files tab, modules, embedded links) laid out as
 // "<course>/<file>" zip paths. Merged sections share a folder, each file appears once,
 // and clashing names get " (2)", " (3)"… so nothing is silently overwritten.
-export function zipPlan(snapshot, overrides = {}) {
+// A file's identity before downloading it: name, type and size (the server uses the same
+// rule). Name and type alone aren't enough: courses reuse names like "solution.py".
+export function fileKey(f) {
+  return `${String(f.name || "").trim().toLowerCase()}|${String(f.content_type || "").toLowerCase()}|${f.size ?? "?"}`;
+}
+
+// `skipKeys` (a Set of fileKey values) leaves out files already downloaded, and copies of
+// the same file posted under different IDs are zipped once.
+export function zipPlan(snapshot, overrides = {}, { skipKeys = null, dedupe = false } = {}) {
   const jobs = [];
   const seenFiles = new Set();
+  const seenContent = new Set();
   const usedPaths = new Set();
   const folders = new Map();
   for (const c of snapshot.courses.filter((c) => isVisible(c, overrides))) {
@@ -456,6 +465,11 @@ export function zipPlan(snapshot, overrides = {}) {
     for (const f of c.files || []) {
       if (f.locked || !f.download_url || seenFiles.has(f.id)) continue;
       seenFiles.add(f.id);
+      if (dedupe || skipKeys) {
+        const key = fileKey(f);
+        if (skipKeys?.has(key) || (dedupe && seenContent.has(key))) continue;
+        seenContent.add(key);
+      }
       const name = safeName(f.name);
       const dot = name.lastIndexOf(".");
       const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ""];

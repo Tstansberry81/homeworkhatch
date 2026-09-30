@@ -1,8 +1,9 @@
 import { upcoming, isVisible, zipPlan } from "./canvas.js";
+import { HATCH_URL } from "./upload.js";
 
 const $ = (id) => document.getElementById(id);
 const FIELDS = ["baseUrl", "intervalMinutes", "endpointUrl", "endpointToken"];
-const DEFAULTS = { baseUrl: "", intervalMinutes: 60, endpointUrl: "", endpointToken: "", courseVisibility: {} };
+const DEFAULTS = { baseUrl: "", intervalMinutes: 60, endpointUrl: HATCH_URL, endpointToken: "", courseVisibility: {} };
 const STATE_LABEL = {
   ok: "Synced", syncing: "Syncing…", error: "Error", logged_out: "Logged out", not_connected: "Not connected",
 };
@@ -21,6 +22,8 @@ function el(tag, props = {}, ...kids) {
 
 let settings = { ...DEFAULTS };
 let snapshot = null;
+let savedKeys = new Set();  // files already in an earlier zip
+let nextSyncAt = null;
 
 async function saveSettings(patch) {
   settings = { ...settings, ...patch };
@@ -121,13 +124,20 @@ function renderStatus(status = {}) {
   const p = status.progress;
   $("summary").textContent =
     status.state === "syncing" && p?.step === "course" ? `Course ${p.index}/${p.total}: ${p.name}`
-    : status.state === "syncing" && p?.step === "upload" ? `Uploading files ${p.index}/${p.total}…`
+    : status.state === "syncing" && p?.step === "upload"
+      ? `Uploading new files ${p.index}/${p.total}${p.skipped ? ` · ${p.skipped} already on Homework Hatch` : ""}…`
     : status.state === "syncing" ? `Fetching ${p?.step || "…"}`
-    : status.lastSync ? `${status.user} · last sync ${ago(status.lastSync)}${pushSummary(status.lastPush)}`
+    : status.lastSync ? `${status.user} · synced ${ago(status.lastSync)}${pushSummary(status.lastPush)}`
     : "Not synced yet.";
+  $("auto").textContent = `Syncs automatically every ${settings.intervalMinutes} min while Chrome is open` +
+    (nextSyncAt && status.state !== "syncing" ? ` · next at ${new Date(nextSyncAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "") + ".";
   const dl = status.downloading;
-  $("download").disabled = Boolean(dl) || !snapshot;
-  $("download").textContent = dl ? `Zipping ${dl.done}/${dl.total}…` : downloadLabel();
+  const fresh = snapshot ? zipPlan(snapshot, settings.courseVisibility, { dedupe: true, skipKeys: savedKeys }) : [];
+  const all = snapshot ? zipPlan(snapshot, settings.courseVisibility, { dedupe: true }) : [];
+  $("download").disabled = Boolean(dl) || !fresh.length;
+  $("download").textContent = dl ? `Zipping ${dl.done}/${dl.total}…` : downloadLabel(fresh, all);
+  $("downloadAll").hidden = Boolean(dl) || !all.length || fresh.length === all.length;
+  $("downloadAll").textContent = `Download all ${all.length}`;
   if (!dl && status.lastDownload && status.state !== "syncing") {
     const { done, failed, filename } = status.lastDownload;
     $("summary").textContent += ` · ${done} files zipped to ${filename}${failed ? ` (${failed} couldn't be included)` : ""}`;
@@ -140,17 +150,22 @@ function renderStatus(status = {}) {
 
 function pushSummary(push) {
   if (!push) return "";
-  const n = push.uploaded;
-  return ` · sent to Homework Hatch${n ? ` (${n} new file${n === 1 ? "" : "s"})` : ""}`;
+  const n = push.uploaded, old = push.skipped || 0;
+  const s = (k) => (k === 1 ? "" : "s");
+  if (!n) return old ? ` · no new files (all ${old} already on Homework Hatch)` : " · sent to Homework Hatch";
+  return ` · ${n} new file${s(n)} uploaded${old ? `, ${old} already on Homework Hatch` : ""}`;
 }
 
-const mb = (bytes) => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+const mb = (bytes) => bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : bytes >= 1e6 ? `${Math.round(bytes / 1e6)} MB`
+  : `${Math.max(1, Math.round(bytes / 1e3))} KB`;
 
-function downloadLabel() {
+function downloadLabel(fresh, all) {
   if (!snapshot) return "Download files";
-  const jobs = zipPlan(snapshot, settings.courseVisibility);
-  if (!jobs.length) return "No files to download";
-  return `Download ${jobs.length} files (.zip, ~${mb(jobs.reduce((s, j) => s + (j.file.size || 0), 0))})`;
+  if (!all.length) return "No files to download";
+  if (!fresh.length) return "No new files to download";
+  const size = mb(fresh.reduce((s, j) => s + (j.file.size || 0), 0));
+  const n = fresh.length, files = `file${n === 1 ? "" : "s"}`;
+  return n === all.length ? `Download ${n} ${files} (.zip, ~${size})` : `Download ${n} new ${files} (.zip, ~${size})`;
 }
 
 const pct = (g) => g.current_score == null ? "—" : `${g.current_score}%${g.current_grade ? ` (${g.current_grade})` : ""}`;
@@ -181,7 +196,7 @@ function renderSnapshot() {
     box.onchange = async () => {
       await saveSettings({ courseVisibility: { ...settings.courseVisibility, [c.id]: box.checked } });
       renderSnapshot();
-      if (!$("download").disabled) $("download").textContent = downloadLabel();
+      renderStatus((await chrome.storage.local.get("status")).status);
     };
     return el("label", { className: "check" }, box, ` ${c.name}`, el("span", { className: "muted", textContent: c.term?.name ? ` · ${c.term.name}` : "" }));
   }));
@@ -198,9 +213,11 @@ function renderSnapshot() {
 }
 
 async function render() {
-  const stored = await chrome.storage.local.get(["status", "snapshot", "settings"]);
+  const stored = await chrome.storage.local.get(["status", "snapshot", "settings", "downloadedKeys"]);
   settings = { ...DEFAULTS, ...stored.settings };
   snapshot = stored.snapshot || null;
+  savedKeys = new Set(stored.downloadedKeys || []);
+  nextSyncAt = (await chrome.alarms.get("sync"))?.scheduledTime || null;
   if (!settings.baseUrl) return renderSetup();
   $("setup").hidden = true;
   $("main").hidden = false;
@@ -210,7 +227,8 @@ async function render() {
 }
 
 $("sync").onclick = () => chrome.runtime.sendMessage({ type: "sync" });
-$("download").onclick = () => chrome.runtime.sendMessage({ type: "download" });
+$("download").onclick = () => chrome.runtime.sendMessage({ type: "download", mode: "new" });
+$("downloadAll").onclick = () => chrome.runtime.sendMessage({ type: "download", mode: "all" });
 $("open").onclick = () => chrome.tabs.create({ url: settings.baseUrl });
 
 $("export").onclick = () => {
@@ -252,7 +270,10 @@ $("save").onclick = () => {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type !== "status" || !settings.baseUrl) return;
   (async () => {
-    if (msg.status.state === "ok") snapshot = (await chrome.storage.local.get("snapshot")).snapshot;
+    const fresh = await chrome.storage.local.get(["snapshot", "downloadedKeys"]);
+    if (msg.status.state === "ok") snapshot = fresh.snapshot;
+    savedKeys = new Set(fresh.downloadedKeys || []);
+    nextSyncAt = (await chrome.alarms.get("sync"))?.scheduledTime || null;
     renderStatus(msg.status);
     if (msg.status.state === "ok") renderSnapshot();
   })();

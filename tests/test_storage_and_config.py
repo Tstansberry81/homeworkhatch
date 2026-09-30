@@ -91,7 +91,7 @@ def test_sync_upload_and_download_through_object_storage(s3_app, snapshot, manif
 
     # A newer version replaces the old object.
     old_key = f.storage_key
-    manifest[1]["updated_at"] = "2030-01-01T00:00:00Z"
+    manifest[1]["updated_at"], manifest[1]["size"] = "2030-01-01T00:00:00Z", 2
     sync(client, api_token(user, raw="hh_second_token_" + "y" * 20), snapshot, manifest, {"9002": b"v2"})
     db.session.refresh(f)
     assert f.storage_key != old_key
@@ -153,6 +153,8 @@ def test_direct_upload_to_storage_then_confirm(s3_app, snapshot, manifest):
     assert r.status_code == 413
     big = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9001"))
     assert big.text_status == "too_large" and big.storage_key is None
+    again = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
+    assert "9001" not in again["files_needed"], "a rejected file isn't requested every sync"
 
 
 def test_local_storage_has_no_upload_urls(client, snapshot, manifest):

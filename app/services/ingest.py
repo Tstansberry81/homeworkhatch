@@ -22,7 +22,7 @@ import tempfile
 from urllib.parse import urlparse
 
 from flask import current_app
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, or_, select
 
 from ..extensions import db
 from ..models import (Announcement, Assignment, AssignmentGroup, CalendarEvent, CanvasAccount, CanvasFile, Course,
@@ -53,6 +53,25 @@ def version_key(updated_at) -> str:
     if not updated_at:
         return "v0"
     return hashlib.sha1(str(updated_at).encode()).hexdigest()[:16]
+
+
+def content_fingerprint(name, content_type, size) -> str | None:
+    """A file's identity before we download it: name, type and size. Name and type alone
+    aren't enough; courses reuse names like "solution.py" for different files."""
+    if not name or not isinstance(size, int):
+        return None
+    ident = f"{str(name).strip().lower()}\0{(content_type or '').strip().lower()}\0{size}"
+    return hashlib.sha1(ident.encode()).hexdigest()
+
+
+def share_stored(row: CanvasFile, twin: CanvasFile) -> None:
+    """Mark `row` as held using `twin`'s stored object (twin may be row itself)."""
+    if twin is not row:
+        row.storage_key, row.size, row.sha256 = twin.storage_key, twin.size, twin.sha256
+        row.text, row.text_status, row.text_started_at = twin.text, twin.text_status, None
+        row.stored_at = utcnow()
+    row.stored_version = row.wanted_version
+    row.stored_fingerprint = row.wanted_fingerprint
 
 
 def _str(v) -> str | None:
@@ -290,6 +309,7 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
                 row.course_id = course.id
     needed: list[str] = []
     max_bytes = current_app.config["MAX_FILE_MB"] * 1024 * 1024
+    announced = []
     for fid, m in manifest_by_id.items():
         row = files.get(fid)
         if row is None:  # in the manifest but not in any course listing: accept its metadata
@@ -300,18 +320,52 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
             files[fid] = row
         row.path = (m.get("path") or "")[:800] or None
         row.wanted_version = version_key(m.get("updated_at"))
-        too_big = isinstance(m.get("size"), int) and m["size"] > max_bytes
-        if too_big and row.stored_version != row.wanted_version:
+        row.wanted_fingerprint = content_fingerprint(m.get("name") or row.name, m.get("content_type") or row.content_type,
+                                                     m.get("size"))
+        if row.storage_key and row.stored_fingerprint is None and row.stored_version == row.wanted_version:
+            row.stored_fingerprint = row.wanted_fingerprint  # stored before fingerprints existed
+        announced.append((fid, row, isinstance(m.get("size"), int) and m["size"] > max_bytes))
+
+    # Only files we don't already hold get downloaded. "Hold" means an object with the same name,
+    # type and size, whatever its Canvas ID or updated_at: Canvas bumps updated_at for settings
+    # changes, and instructors post the same file in several places.
+    held = {r.stored_fingerprint: r for r in files.values() if r.storage_key and r.stored_fingerprint}
+    requested: set[str] = set()
+    shared: list[CanvasFile] = []
+    already_held = duplicates = 0
+    for fid, row, too_big in announced:
+        if row.stored_version == row.wanted_version and row.stored_fingerprint == row.wanted_fingerprint:
+            already_held += 1
+            continue
+        fp = row.wanted_fingerprint
+        twin = held.get(fp) if fp else None
+        if twin is not None:
+            share_stored(row, twin)
+            if twin is row:
+                already_held += 1
+            else:
+                duplicates += 1
+                shared.append(row)
+            continue
+        if too_big:
             # Over the storage limit: don't ask for it (it would be rejected every hour forever).
-            row.stored_version, row.text_status = row.wanted_version, "too_large"
-        if row.stored_version != row.wanted_version:
-            needed.append(fid)
+            row.stored_version, row.stored_fingerprint = row.wanted_version, row.wanted_fingerprint
+            row.text_status = "too_large"
+            continue
+        if fp in requested:  # the same file twice in this sync: upload one copy, the other links to it
+            duplicates += 1
+            continue
+        if fp:
+            requested.add(fp)
+        needed.append(fid)
 
     events = snapshot.get("calendar_events") or []
     _sync_rows(CalendarEvent, {"account_id": account.id, "user_id": user.id}, events, "canvas_id",
                lambda e: _str(e.get("id")), lambda row, e: _apply_event(row, e, courses_by_canvas_id))
 
     db.session.flush()
+    for row in shared:
+        retrieval.rebuild_file_chunks(row)
     paid = 0
     already = coins.paid_refs(user.id, f"%:{host}:%")
     for course in courses_by_canvas_id.values():
@@ -323,7 +377,8 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
 
     run = SyncRun(id=f"{utcnow():%Y%m%dT%H%M%S}-{secrets.token_hex(4)}", user_id=user.id, account_id=account.id,
                   synced_at=parse_ts(snapshot.get("synced_at")), files_needed=len(needed),
-                  stats={"courses": len(courses_by_canvas_id), "coins": paid,
+                  stats={"courses": len(courses_by_canvas_id), "coins": paid, "files_already": already_held,
+                         "files_duplicate": duplicates,
                          "errors": len(snapshot.get("errors") or []), "restricted": len(snapshot.get("restricted") or [])})
     db.session.add(run)
     account.last_snapshot_id = run.id
@@ -409,6 +464,7 @@ def _record_stored(row: CanvasFile, run: SyncRun, key: str, version: str, size: 
     old_key = row.storage_key
     row.storage_key = key
     row.stored_version = version
+    row.stored_fingerprint = row.wanted_fingerprint if version == row.wanted_version else None
     row.size = size
     row.sha256 = digest  # filled in by the text reader for direct uploads
     row.stored_at = utcnow()
@@ -416,12 +472,22 @@ def _record_stored(row: CanvasFile, run: SyncRun, key: str, version: str, size: 
     row.text_status, row.text_started_at = "pending", None
     # Incremented in SQL: parallel uploads each loaded the same count, so += lost updates.
     run.files_uploaded = func.coalesce(SyncRun.files_uploaded, 0) + 1
+    # Copies of this file announced in the same sync were not requested; they share this upload.
+    if row.stored_fingerprint:
+        waiting = db.session.scalars(select(CanvasFile).where(
+            CanvasFile.account_id == row.account_id, CanvasFile.id != row.id,
+            CanvasFile.wanted_fingerprint == row.stored_fingerprint,
+            or_(CanvasFile.stored_version.is_(None), CanvasFile.stored_version != CanvasFile.wanted_version)))
+        for twin in waiting:
+            share_stored(twin, row)
     db.session.commit()
-    if old_key and old_key != key:  # an older version of this file is no longer needed
-        try:
-            get_storage().delete_prefix(old_key)
-        except Exception as exc:
-            current_app.logger.warning("could not delete old file version %s: %s", old_key, exc)
+    if old_key and old_key != key:  # an older version of this file is no longer needed...
+        in_use = db.session.scalar(select(exists().where(CanvasFile.storage_key == old_key)))
+        if not in_use:  # ...unless a copy elsewhere still points at it
+            try:
+                get_storage().delete_prefix(old_key)
+            except Exception as exc:
+                current_app.logger.warning("could not delete old file version %s: %s", old_key, exc)
     textjobs.kick()
 
 
@@ -465,6 +531,7 @@ def mark_too_large(run: SyncRun, canvas_file_id: str, updated_at: str | None) ->
                                                      CanvasFile.canvas_id == canvas_file_id))
     if row is not None and row.user_id == run.user_id:
         row.stored_version = version_key(updated_at)
+        row.stored_fingerprint = row.wanted_fingerprint
         row.text_status = "too_large"
         db.session.commit()
 

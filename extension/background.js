@@ -1,6 +1,6 @@
-import { syncCanvas, NotLoggedInError, zipPlan, pool } from "./canvas.js";
+import { syncCanvas, NotLoggedInError, zipPlan, fileKey, pool } from "./canvas.js";
 import { buildZip } from "./zip.js";
-import { uploadSnapshot } from "./upload.js";
+import { uploadSnapshot, HATCH_URL } from "./upload.js";
 
 const DEFAULTS = {
   // Empty until the student connects their school's Canvas from the popup.
@@ -8,7 +8,7 @@ const DEFAULTS = {
   intervalMinutes: 60,
   // { [courseId]: true|false } — overrides the Canvas dashboard default.
   courseVisibility: {},
-  endpointUrl: "",
+  endpointUrl: HATCH_URL,
   endpointToken: "",
 };
 
@@ -114,11 +114,16 @@ async function syncOnce(trigger) {
     await chrome.storage.local.set({ snapshot });
     let lastPush = null;
     let pushError = null;
-    try {
-      lastPush = await push(snapshot, s, onProgress);
-      if (lastPush?.failed.length) pushError = `${lastPush.failed.length} files couldn't be uploaded; they'll be retried next sync.`;
-    } catch (e) {
-      pushError = `Upload failed: ${e.message || e}`;
+    if (s.endpointUrl && !s.endpointToken) {
+      pushError = `Not linked to Homework Hatch yet: create a token at ${s.endpointUrl}/settings/sync and paste it under Settings.`;
+    } else {
+      try {
+        lastPush = await push(snapshot, s, onProgress);
+        const n = lastPush?.failed.length || 0;
+        if (n) pushError = `${n} file${n === 1 ? "" : "s"} couldn't be uploaded; ${n === 1 ? "it" : "they"} will be retried at the next sync.`;
+      } catch (e) {
+        pushError = `Upload failed: ${e.message || e}`;
+      }
     }
     await setStatus({
       state: "ok", progress: null, lastSync: snapshot.synced_at, downloadError: null,
@@ -241,16 +246,25 @@ chrome.downloads.onChanged.addListener((d) => {
 
 let downloadRunning = null;
 
-function downloadFiles() {
-  downloadRunning ??= downloadFilesOnce().finally(() => { downloadRunning = null; });
+function downloadFiles(mode) {
+  downloadRunning ??= downloadFilesOnce(mode).finally(() => { downloadRunning = null; });
   return downloadRunning;
 }
 
-async function downloadFilesOnce() {
+// Files already saved in an earlier zip, by name + type + size (canvas.js fileKey).
+async function downloadedKeys() {
+  const { downloadedKeys: keys = [] } = await chrome.storage.local.get("downloadedKeys");
+  return new Set(keys);
+}
+
+// mode "new": only files not in an earlier zip; "all": everything. Copies of one file are
+// zipped once either way.
+async function downloadFilesOnce(mode = "new") {
   const { snapshot } = await chrome.storage.local.get("snapshot");
   if (!snapshot) return;
   const s = await settings();
-  const jobs = zipPlan(snapshot, s.courseVisibility);
+  const saved = await downloadedKeys();
+  const jobs = zipPlan(snapshot, s.courseVisibility, { dedupe: true, skipKeys: mode === "all" ? null : saved });
   const tab = await findCanvasTab(s.baseUrl);
   let done = 0;
   const failed = [];
@@ -260,7 +274,7 @@ async function downloadFilesOnce() {
       const data = await fetchFileBytes(file.download_url, tab, file.content_type);
       if (!data) failed.push(path);
       await setStatus({ downloading: { done: ++done, total: jobs.length } });
-      return data && { path, data, date: file.updated_at ? new Date(file.updated_at) : new Date() };
+      return data && { path, data, key: fileKey(file), date: file.updated_at ? new Date(file.updated_at) : new Date() };
     });
     const entries = results.filter(Boolean);
     if (failed.length) {
@@ -272,9 +286,11 @@ async function downloadFilesOnce() {
     const filename = `Canvas files ${new Date().toISOString().slice(0, 10)}.zip`;
     const url = await zipDownloadUrl(blob);
     zipDownloadId = await chrome.downloads.download({ url, filename, saveAs: false, conflictAction: "uniquify" });
+    for (const e of entries) if (e.key) saved.add(e.key);
+    await chrome.storage.local.set({ downloadedKeys: [...saved] });
     await setStatus({
       downloading: null,
-      lastDownload: { done: entries.length - (failed.length ? 1 : 0), failed: failed.length, bytes: blob.size, filename, at: new Date().toISOString() },
+      lastDownload: { done: entries.length - (failed.length ? 1 : 0), failed: failed.length, bytes: blob.size, filename, mode, at: new Date().toISOString() },
     });
   } catch (e) {
     await cleanupZip();
@@ -306,9 +322,11 @@ async function schedule(keep = false) {
   chrome.alarms.create("sync", { periodInMinutes: period });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(({ reason }) => {
   schedule();
   runSync("install");
+  // First install: open the page that hands out the sync token.
+  if (reason === "install") chrome.tabs.create({ url: `${HATCH_URL}/settings/sync` });
 });
 chrome.runtime.onStartup.addListener(async () => {
   await schedule(true);
@@ -349,7 +367,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     return true;
   }
   if (msg.type === "download") {
-    downloadFiles().then(() => reply({ ok: true }));
+    downloadFiles(msg.mode).then(() => reply({ ok: true }));
     return true;
   }
   if (msg.type === "reschedule") {

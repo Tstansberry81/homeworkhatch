@@ -137,6 +137,8 @@ action is metered against the plan's monthly quota.
 .venv/bin/python -m pytest          # ingest, storage (S3 emulator), grades, AI features, live quiz, chat, billing, pages...
 (cd extension && npm test)          # extension sync engine + zip writer
 TEST_DATABASE_URL=postgresql+psycopg://... .venv/bin/python -m pytest   # same suite on Postgres
+# The shipped extension in real Chrome, clicking its popup (needs Chrome for Testing and `npm install` in extension/):
+CHROME_PATH=".../Google Chrome for Testing" .venv/bin/python -m pytest tests/test_extension_chrome.py
 ```
 
 ## Not carried over from the old app

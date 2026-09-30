@@ -175,6 +175,18 @@ class Course(db.Model):
     discussions: Mapped[list[Discussion]] = relationship(cascade="all, delete-orphan")
     files: Mapped[list[CanvasFile]] = relationship(cascade="all, delete-orphan", order_by="CanvasFile.name")
 
+    @property
+    def listed_files(self) -> list[CanvasFile]:
+        """Files to show: a file posted twice under different Canvas IDs (same name, type and
+        size) is listed once."""
+        seen, out = set(), []
+        for f in self.files:
+            key = f.stored_fingerprint or f.wanted_fingerprint or f"id:{f.id}"
+            if key not in seen:
+                seen.add(key)
+                out.append(f)
+        return out
+
     __table_args__ = (UniqueConstraint("account_id", "canvas_id"),)
 
     @property
@@ -310,6 +322,10 @@ class CanvasFile(db.Model):
     # Version the extension announced vs. the version we actually hold.
     wanted_version: Mapped[str | None] = mapped_column(String(32))
     stored_version: Mapped[str | None] = mapped_column(String(32))
+    # Name + type + size, the file's identity before downloading it (ingest.content_fingerprint).
+    # A file whose fingerprint we already hold is never downloaded again, whatever its Canvas ID.
+    wanted_fingerprint: Mapped[str | None] = mapped_column(String(40))
+    stored_fingerprint: Mapped[str | None] = mapped_column(String(40))
     storage_key: Mapped[str | None] = mapped_column(String(500))
     sha256: Mapped[str | None] = mapped_column(String(64))
     stored_at: Mapped[datetime | None] = mapped_column(DateTime)

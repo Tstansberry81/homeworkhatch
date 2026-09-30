@@ -126,9 +126,10 @@
 {% elif tab == "files" %}
 <div class="card">
   {% if course.files %}
-  <p class="small muted">{{ course.files|selectattr('storage_key')|list|length }} of {{ course.files|length }} files stored.{% if course.files_tab_hidden %} This class hides its Files tab; these were found through modules and links.{% endif %}</p>
+  {% set listed = course.listed_files %}
+  <p class="small muted">{{ listed|selectattr('storage_key')|list|length }} of {{ listed|length }} files stored.{% if course.files_tab_hidden %} This class hides its Files tab; these were found through modules and links.{% endif %}</p>
   <ul class="list">
-    {% for f in course.files %}
+    {% for f in listed %}
     <li><div class="grow"><a class="title" href="{{ url_for('courses.file_detail', file_id=f.id) }}">{{ f.name }}</a>
       <div class="small muted">{% if f.size %}{{ (f.size / 1024)|round(0)|int }} KB{% endif %}{% if f.text_status in ('ok', 'ai') %} · readable by AI{% elif f.text_status in ('pending', 'extracting') %} · reading text…{% elif f.text_status in ('empty', 'error') and (f.name|lower).endswith('.pdf') %} · scanned{% endif %}</div></div>
       {% if f.storage_key %}<a class="btn btn-ghost btn-sm" href="{{ url_for('courses.download', file_id=f.id) }}">Download</a>{% else %}<span class="badge">not uploaded yet</span>{% endif %}</li>

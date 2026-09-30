@@ -43,7 +43,11 @@ def test_resync_is_idempotent_and_skips_unchanged_files(app, client, snapshot, m
     assert {a.canvas_id: a.id for a in db.session.scalars(select(Assignment))} == first_ids, "row ids stay stable"
     assert coins.balance(user.id) == balance, "coins are never paid twice"
 
-    manifest[1]["updated_at"] = iso(0)  # instructor replaced notes.txt
+    manifest[1]["updated_at"] = iso(0)  # only the date moved (Canvas does this for settings edits)
+    body, uploaded = sync(client, token, snapshot, manifest)
+    assert body["files_needed"] == []
+
+    manifest[1]["size"] = 121  # instructor replaced notes.txt
     body, uploaded = sync(client, token, snapshot, manifest)
     assert body["files_needed"] == ["9002"]
 
@@ -217,3 +221,86 @@ def test_chat_rooms_lock_out_unconfirmed_accounts(app, client, snapshot, manifes
     assert cm.post(f"/chat/course/{m_id}/messages", json={"body": "hi"}).status_code == 403
     page = cb.get(f"/chat/course/{b_id}").get_data(as_text=True)
     assert "unconfirmed" in page
+
+
+# ---------------------------------------------------------------- duplicate files
+
+
+def _add_file(snapshot, manifest, fid, name, ctype, size, updated_at=None):
+    updated_at = updated_at or iso(-3)
+    snapshot["courses"][0]["files"].append({"id": fid, "name": name, "content_type": ctype, "size": size, "updated_at": updated_at,
+                                           "download_url": f"https://school.instructure.com/files/{fid}/download",
+                                           "locked": False, "sources": ["files_tab"]})
+    manifest.append({"id": fid, "updated_at": updated_at, "size": size, "name": name, "content_type": ctype,
+                     "course_id": "101", "path": f"Calculus I/{name}"})
+
+
+def _file(canvas_id):
+    return db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == canvas_id))
+
+
+def test_same_file_under_two_canvas_ids_is_uploaded_once(app, client, snapshot, manifest):
+    """Same name, type and size = the same file: one download, both entries point at it."""
+    _add_file(snapshot, manifest, "9003", "notes.txt", "text/plain", 120)  # 9002's twin
+    token = api_token(make_user())
+    body, uploaded = sync(client, token, snapshot, manifest, {"9002": b"x" * 120, "9003": b"x" * 120})
+    assert sorted(uploaded) == ["9001", "9002"], "the second copy is not requested"
+    a, b = _file("9002"), _file("9003")
+    assert a.storage_key and a.storage_key == b.storage_key and b.is_stored
+    assert b.text == a.text and b.text_status == "ok"
+    course = db.session.get(Course, a.course_id)
+    assert [f.name for f in course.listed_files].count("notes.txt") == 1, "listed once"
+
+    # Next sync: nothing to download.
+    body, uploaded = sync(client, token, snapshot, manifest)
+    assert uploaded == [] and body["files_needed"] == []
+
+
+def test_same_name_and_type_but_different_size_is_a_different_file(app, client, snapshot, manifest):
+    _add_file(snapshot, manifest, "9003", "notes.txt", "text/plain", 999)
+    _, uploaded = sync(client, api_token(make_user()), snapshot, manifest)
+    assert sorted(uploaded) == ["9001", "9002", "9003"]
+
+
+def test_settings_only_change_is_not_downloaded_again(app, client, snapshot, manifest):
+    """Canvas bumps updated_at when a file is renamed back, re-published, moved... Same name,
+    type and size means we still hold it."""
+    token = api_token(make_user())
+    sync(client, token, snapshot, manifest)
+    key = _file("9002").storage_key
+    snapshot["courses"][0]["files"][1]["updated_at"] = manifest[1]["updated_at"] = iso(-1)
+    body, uploaded = sync(client, token, snapshot, manifest)
+    assert uploaded == []
+    f = _file("9002")
+    assert f.is_stored and f.storage_key == key
+
+    # A real edit changes the size: that one is downloaded.
+    snapshot["courses"][0]["files"][1]["size"] = manifest[1]["size"] = 150
+    snapshot["courses"][0]["files"][1]["updated_at"] = manifest[1]["updated_at"] = iso(0)
+    _, uploaded = sync(client, token, snapshot, manifest, {"9002": b"y" * 150})
+    assert uploaded == ["9002"] and _file("9002").storage_key != key
+
+
+def test_shared_object_survives_when_one_copy_changes(app, client, snapshot, manifest):
+    from app.services.storage import get_storage
+
+    _add_file(snapshot, manifest, "9003", "notes.txt", "text/plain", 120)
+    token = api_token(make_user())
+    sync(client, token, snapshot, manifest, {"9002": b"x" * 120})
+    shared_key = _file("9003").storage_key
+    # 9002 gets a new version of its own; 9003 still uses the old object.
+    snapshot["courses"][0]["files"][1]["size"] = manifest[1]["size"] = 130
+    snapshot["courses"][0]["files"][1]["updated_at"] = manifest[1]["updated_at"] = iso(0)
+    sync(client, token, snapshot, manifest, {"9002": b"z" * 130})
+    assert _file("9002").storage_key != shared_key == _file("9003").storage_key
+    assert get_storage().read(shared_key) == b"x" * 120, "not deleted while a copy uses it"
+
+
+def test_files_stored_before_fingerprints_are_not_downloaded_again(app, client, snapshot, manifest):
+    token = api_token(make_user())
+    sync(client, token, snapshot, manifest)
+    for f in db.session.scalars(select(CanvasFile)):
+        f.stored_fingerprint = f.wanted_fingerprint = None  # as deployed before this change
+    db.session.commit()
+    body, uploaded = sync(client, token, snapshot, manifest)
+    assert uploaded == [] and all(f.stored_fingerprint for f in db.session.scalars(select(CanvasFile)) if f.storage_key)

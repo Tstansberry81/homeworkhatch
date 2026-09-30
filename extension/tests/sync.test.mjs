@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startMockCanvas } from "./mock-canvas.mjs";
-import { syncCanvas, upcoming, NotLoggedInError, parseCanvasJson, nextLink, fileIdsInHtml, zipPlan, classKey, isVisible } from "../canvas.js";
+import { syncCanvas, upcoming, NotLoggedInError, parseCanvasJson, nextLink, fileIdsInHtml, zipPlan, fileKey, classKey, isVisible } from "../canvas.js";
 import { buildZip, crc32 } from "../zip.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -166,4 +166,38 @@ test("uploads straight to storage when the server hands out upload URLs, else th
   assert.ok(seen("PUT", "https://hatch.test/v1/files/2?") && !seen("POST", "https://hatch.test/v1/files/2/uploaded"));
   assert.ok(seen("PUT", "https://hatch.test/v1/files/3?"));
   assert.equal(Math.max(...progress), 3);
+});
+
+test("zip plan skips files already downloaded and zips copies of one file once", () => {
+  const f = (id, name, size, content_type = "application/pdf") => ({ id, name, size, content_type, download_url: `https://x/${id}` });
+  const snapshot = { courses: [
+    { id: "1", name: "Programming", class_key: "p", on_dashboard: true,
+      files: [f("1", "lab02.py", 2116, "text/x-python"), f("2", "lab02.py", 2116, "text/x-python"), f("3", "solution.py", 10, "text/x-python")] },
+    { id: "2", name: "Programming lab", class_key: "p2", on_dashboard: true,
+      files: [f("4", "solution.py", 99, "text/x-python"), f("5", "Syllabus.pdf", 500)] },
+  ] };
+  const all = zipPlan(snapshot, {}, { dedupe: true });
+  assert.deepEqual(all.map((j) => j.file.id), ["1", "3", "4", "5"], "same name+type+size zipped once; same name, other size kept");
+  const skip = new Set(all.slice(0, 3).map((j) => fileKey(j.file)));
+  assert.deepEqual(zipPlan(snapshot, {}, { dedupe: true, skipKeys: skip }).map((j) => j.file.id), ["5"], "only the new file");
+  assert.equal(zipPlan(snapshot).length, 5, "uploads still announce every Canvas file; the server dedupes");
+});
+
+test("a 502 from the server is retried instead of waiting for the next sync", async () => {
+  const { uploadSnapshot } = await import("../upload.js");
+  let putTries = 0;
+  const fakeFetch = async (url, init = {}) => {
+    const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+    if (url.endsWith("/v1/snapshots")) return json({ snapshot_id: "s", files_needed: ["1"] });
+    if (init.method === "PUT") return ++putTries < 2 ? json({}, 502) : json({ ok: true });
+    return json({ ok: true });
+  };
+  const plan = [{ file: { id: "1", updated_at: null, name: "a.py", content_type: "text/x-python" }, path: "a.py" },
+                { file: { id: "2", updated_at: null, name: "b.py", content_type: "text/x-python" }, path: "b.py" }];
+  const progress = [];
+  const r = await uploadSnapshot({ serverUrl: "https://h.test", token: "t", snapshot: {}, plan, fetchImpl: fakeFetch,
+    fetchBytes: async () => new Uint8Array([1]), retryDelayMs: 0, onProgress: (p) => progress.push(p) });
+  assert.equal(putTries, 2);
+  assert.deepEqual([r.uploaded, r.skipped, r.failed.length], [1, 1, 0]);
+  assert.ok(progress.every((p) => p.skipped === 1), "progress says how many were already there");
 });
