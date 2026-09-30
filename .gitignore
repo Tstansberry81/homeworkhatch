@@ -7,3 +7,4 @@ instance/
 node_modules/
 .chrome/
 .DS_Store
+dist/

@@ -208,7 +208,7 @@ def extension_zip():
         for path in sorted(root.rglob("*")):
             rel = path.relative_to(root)
             if path.is_file() and not any(p in {"node_modules", "tests", ".chrome"} for p in rel.parts) \
-                    and rel.name not in {"package.json", "package-lock.json"}:
+                    and rel.name not in {"package.json", "package-lock.json"} and rel.suffix != ".md":
                 z.write(path, f"homework-hatch-extension/{rel}")
     buf.seek(0)
     current_app.logger.info("extension download by user %s", current_user.id)
