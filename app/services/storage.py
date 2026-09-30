@@ -96,6 +96,10 @@ class LocalStorage:
         return None  # served by the app with send_file
 
 
+def _xml_content_type(request, **kwargs):
+    request.headers["Content-Type"] = "application/xml"
+
+
 class S3Storage:
     def __init__(self, bucket: str, endpoint_url: str | None, region: str | None, access_key: str | None,
                  secret_key: str | None, path_style: bool):
@@ -117,6 +121,9 @@ class S3Storage:
         )
         self.s3 = boto3.client("s3", endpoint_url=endpoint_url, region_name=region, aws_access_key_id=access_key,
                                aws_secret_access_key=secret_key, config=cfg)
+        # boto3 sends DeleteObjects without a Content-Type; Supabase then ignores the XML body
+        # and rejects the request ("must have required property 'Body'").
+        self.s3.meta.events.register("before-sign.s3.DeleteObjects", _xml_content_type)
         self.transfer = TransferConfig(multipart_threshold=8 * 1024 * 1024, multipart_chunksize=8 * 1024 * 1024,
                                        max_concurrency=4)
 

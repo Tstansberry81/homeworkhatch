@@ -6,6 +6,7 @@ services:
   - type: web
     name: homeworkhatch
     runtime: python
+    region: ohio
     plan: free  # free sleeps after 15 min idle; a paid plan can move migrations to preDeployCommand
     # Deploy only after the GitHub Actions CI checks on the commit pass.
     autoDeployTrigger: checksPass
@@ -22,6 +23,8 @@ services:
         generateValue: true
       - key: ADMIN_EMAIL
         sync: false  # the account registered with this email becomes admin
+      - key: REQUIRE_APPROVAL
+        value: "1"  # new sign-ups wait for an admin; set 0 to open registration
       # Supabase -> Connect -> Session pooler (IPv4; Render can't reach Supabase's IPv6-only
       # direct host). Looks like:
       # postgresql://postgres.<ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres
