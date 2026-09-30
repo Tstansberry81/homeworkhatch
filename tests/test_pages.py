@@ -35,7 +35,7 @@ def test_every_student_page_renders(app, synced_user, client):
     db.session.commit()
     paths = ["/dashboard", "/welcome", "/courses/", "/calendar", "/calendar?y=2026&m=2", "/planner", "/study/",
              "/study/generate", "/study/decks/new", f"/study/decks/{deck.id}", f"/study/decks/{deck.id}/review",
-             f"/study/decks/{deck.id}/cram", "/study/quizzes/new", f"/study/quizzes/{quiz.id}",
+             "/study/quizzes/new", f"/study/quizzes/{quiz.id}",
              f"/study/quizzes/{quiz.id}/edit", "/tutor/", "/chat/", f"/chat/course/{course.id}", "/coins", "/tools/citations", "/billing/",
              "/settings/", "/settings/sync", "/settings/data", f"/courses/assignments/{a.id}", f"/courses/pages/{page.id}",
              f"/courses/files/{f.id}", "/live/join"]

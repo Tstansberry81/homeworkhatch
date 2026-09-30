@@ -1,42 +1,62 @@
 {% extends "base.html" %}
-{% block title %}Review · {{ deck.title }}{% endblock %}
+{% block title %}Study · {{ deck.title }}{% endblock %}
 {% block head %}{% include "_katex.html" %}{% endblock %}
 {% block content %}
-<div class="page-head"><div><div class="small muted"><a href="{{ url_for('study.deck', deck_id=deck.id) }}">{{ deck.title }}</a></div><h1>Review</h1></div>
-  <span class="badge accent">{{ remaining }} left</span></div>
-{% if card %}
-<div class="flashcard" id="card" tabindex="0" aria-label="Flashcard. Press space to flip.">
-  <div class="inner">
-    <div class="face front" data-math>{{ card.front }}</div>
-    <div class="face back" data-math>{{ card.back }}</div>
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('study.deck', deck_id=deck.id) }}">{{ deck.title }}</a></div><h1>Study</h1></div></div>
+{% if cards %}
+<div class="viewer">
+  <button type="button" class="nav-arrow" id="prev" aria-label="Previous card">‹</button>
+  <div class="flashcard" id="card" tabindex="0" aria-label="Flashcard. Press space to flip.">
+    <div class="inner"><div class="face front prose" id="front"></div><div class="face back prose" id="back"></div></div>
   </div>
+  <button type="button" class="nav-arrow" id="next" aria-label="Next card">›</button>
 </div>
-<p class="center small muted" id="hint">Click the card or press <kbd>Space</kbd> to see the answer.</p>
-<form method="post" class="ratings hidden" id="ratings" data-busy="Saving…">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="card_id" value="{{ card.id }}">
-  <button class="btn btn-danger" name="rating" value="again" title="1">Again</button>
-  <button class="btn btn-ghost" name="rating" value="hard" title="2">Hard</button>
-  <button class="btn" name="rating" value="good" title="3">Good</button>
-  <button class="btn btn-ghost" name="rating" value="easy" title="4">Easy</button>
-</form>
-<p class="center small muted mt">Keys: <kbd>1</kbd> again · <kbd>2</kbd> hard · <kbd>3</kbd> good · <kbd>4</kbd> easy</p>
+<p class="center viewer-pos" id="pos" aria-live="polite"></p>
+<div class="btn-row" style="justify-content:center"><button type="button" class="btn" id="flip">Flip card</button></div>
+<p class="center small muted mt">Keys: <kbd>Space</kbd> flip · <kbd>←</kbd> <kbd>→</kbd> previous / next</p>
 {% else %}
-<div class="card empty"><div class="big">🎉</div><p>No cards due in this deck. Come back later — spaced repetition works best a little at a time.</p>
-  <div class="btn-row" style="justify-content:center"><a class="btn" href="{{ url_for('study.index') }}">Back to decks</a><a class="btn btn-ghost" href="{{ url_for('study.cram', deck_id=deck.id) }}">Cram anyway</a></div></div>
+<div class="card empty"><div class="big">🃏</div><p>This deck has no cards yet.</p>
+  <div class="btn-row" style="justify-content:center"><a class="btn" href="{{ url_for('study.deck', deck_id=deck.id) }}">Add cards</a></div></div>
 {% endif %}
 {% endblock %}
 {% block scripts %}
-{% if card %}
+{% if cards %}
 <script>
 (() => {
-  const card = document.getElementById("card"), ratings = document.getElementById("ratings");
-  const flip = () => { card.classList.toggle("flipped"); ratings.classList.remove("hidden"); document.getElementById("hint").hidden = true; };
+  // Card text is sanitized HTML (study.render_markdown), so code and math are formatted.
+  const cards = {{ cards|tojson }}, card = document.getElementById("card");
+  let i = 0, reachedEnd = false;
+  const show = () => {
+    card.classList.remove("flipped");
+    document.getElementById("front").innerHTML = cards[i].front;
+    document.getElementById("back").innerHTML = cards[i].back;
+    document.getElementById("pos").textContent = `${i + 1} / ${cards.length}`;
+    hh.renderMath(card);
+    if (i === cards.length - 1 && !reachedEnd) {  // got through the deck: today's study coins
+      reachedEnd = true;
+      hh.post("{{ url_for('study.studied', deck_id=deck.id) }}").catch(() => {});
+    }
+  };
+  const flip = () => card.classList.toggle("flipped");
+  const go = (step) => { i = (i + step + cards.length) % cards.length; show(); };
   card.addEventListener("click", flip);
+  document.getElementById("flip").addEventListener("click", flip);
+  document.getElementById("prev").addEventListener("click", () => go(-1));
+  document.getElementById("next").addEventListener("click", () => go(1));
   document.addEventListener("keydown", (e) => {
+    if (e.target.closest("input, textarea")) return;
     if (e.key === " ") { e.preventDefault(); flip(); }
-    const map = { "1": "again", "2": "hard", "3": "good", "4": "easy" };
-    if (map[e.key] && !ratings.classList.contains("hidden")) ratings.querySelector(`[value=${map[e.key]}]`).click();
+    if (e.key === "ArrowRight") go(1);
+    if (e.key === "ArrowLeft") go(-1);
   });
+  let startX = null;  // swipe on phones
+  card.addEventListener("touchstart", (e) => { startX = e.touches[0].clientX; }, { passive: true });
+  card.addEventListener("touchend", (e) => {
+    const dx = e.changedTouches[0].clientX - (startX ?? e.changedTouches[0].clientX);
+    if (Math.abs(dx) > 50) { e.preventDefault(); go(dx < 0 ? 1 : -1); }
+  });
+  window.addEventListener("load", () => hh.renderMath(card));
+  show();
 })();
 </script>
 {% endif %}

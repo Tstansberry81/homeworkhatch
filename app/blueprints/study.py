@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from datetime import timezone
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
@@ -9,8 +8,8 @@ from sqlalchemy import func, select
 
 from .. import queries
 from ..extensions import db
-from ..models import Card, Deck, PracticeQuiz, QuizAttempt, utcnow
-from ..services import ai, coins, sources, srs, study
+from ..models import Card, Deck, PracticeQuiz, QuizAttempt
+from ..services import ai, coins, sources, study
 from ..utils import local_now
 
 bp = Blueprint("study", __name__, url_prefix="/study")
@@ -61,14 +60,12 @@ def _preset(args) -> dict:
 @login_required
 def index():
     decks = db.session.scalars(select(Deck).where(Deck.user_id == current_user.id).order_by(Deck.created_at.desc())).all()
-    now = utcnow()
-    due = {d.id: sum(1 for c in d.cards if c.due_at <= now) for d in decks}
     quizzes = db.session.scalars(select(PracticeQuiz).where(PracticeQuiz.user_id == current_user.id)
                                  .order_by(PracticeQuiz.created_at.desc())).all()
     best = dict(db.session.execute(select(QuizAttempt.quiz_id, func.max(QuizAttempt.score * 100 / QuizAttempt.total))
                                    .where(QuizAttempt.user_id == current_user.id, QuizAttempt.total > 0)
                                    .group_by(QuizAttempt.quiz_id)).all())
-    return render_template("study/index.html", decks=decks, due=due, quizzes=quizzes, best=best)
+    return render_template("study/index.html", decks=decks, quizzes=quizzes, best=best)
 
 
 # ---------------------------------------------------------------- AI generation
@@ -191,14 +188,9 @@ def deck(deck_id: int):
                 db.session.delete(card)
         elif action == "rename":
             d.title = request.form.get("title", d.title).strip()[:200] or d.title
-        elif action == "reset":
-            for c in d.cards:
-                c.ease, c.interval_days, c.repetitions, c.lapses, c.due_at = 2.5, 0, 0, 0, utcnow()
-            flash("Progress reset: every card is due again.", "info")
         db.session.commit()
         return redirect(url_for("study.deck", deck_id=d.id))
-    now = utcnow()
-    return render_template("study/deck.html", deck=d, due=sum(1 for c in d.cards if c.due_at <= now))
+    return render_template("study/deck.html", deck=d)
 
 
 @bp.route("/decks/<int:deck_id>/delete", methods=["POST"])
@@ -210,36 +202,31 @@ def delete_deck(deck_id: int):
     return redirect(url_for("study.index"))
 
 
-@bp.route("/decks/<int:deck_id>/review", methods=["GET", "POST"])
+@bp.route("/decks/<int:deck_id>/review")
 @login_required
 def review(deck_id: int):
+    """Flip through a deck: one card at a time, arrows to move, x / n underneath."""
     d = _deck(deck_id)
-    if request.method == "POST":
-        card = db.session.get(Card, int(request.form.get("card_id", 0) or 0))
-        rating = request.form.get("rating")
-        # A double-click or key repeat submits the same card twice: only the first counts.
-        fresh = card is None or card.last_reviewed_at is None or (utcnow() - card.last_reviewed_at).total_seconds() > 3
-        if card and card.deck_id == d.id and rating in srs.RATINGS and fresh:
-            srs.review(card, rating)
-            local = local_now(current_user)
-            today = local.date().isoformat()
-            local_midnight_utc = (local.replace(hour=0, minute=0, second=0, microsecond=0)
-                                  .astimezone(timezone.utc).replace(tzinfo=None))
-            reviewed_today = db.session.scalar(select(func.count(Card.id)).join(Deck).where(
-                Deck.user_id == current_user.id, Card.last_reviewed_at >= local_midnight_utc))
-            if reviewed_today and reviewed_today >= 10:
-                coins.award(current_user.id, 3, "Reviewed 10 flashcards", f"cards:{today}")
-            db.session.commit()
-        return redirect(url_for("study.review", deck_id=d.id))
-    queue = srs.due_cards(d.cards)
-    return render_template("study/review.html", deck=d, card=queue[0] if queue else None, remaining=len(queue))
+    cards = [{"front": study.render_markdown(c.front), "back": study.render_markdown(c.back)} for c in d.cards]
+    return render_template("study/review.html", deck=d, cards=cards)
 
 
 @bp.route("/decks/<int:deck_id>/cram")
 @login_required
 def cram(deck_id: int):
+    return redirect(url_for("study.review", deck_id=_deck(deck_id).id))  # old links
+
+
+@bp.route("/decks/<int:deck_id>/studied", methods=["POST"])
+@login_required
+def studied(deck_id: int):
+    """Sent when the student reaches the last card: a few coins, once a day."""
     d = _deck(deck_id)
-    return render_template("study/cram.html", deck=d, cards=[{"front": c.front, "back": c.back} for c in d.cards])
+    if len(d.cards) >= 5:
+        today = local_now(current_user).date().isoformat()
+        coins.award(current_user.id, 3, "Studied a flashcard deck", f"cards:{today}")
+        db.session.commit()
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------- quizzes

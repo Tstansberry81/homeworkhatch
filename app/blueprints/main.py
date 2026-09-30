@@ -100,7 +100,7 @@ def dashboard():
         classes=queries.class_rows(courses),
         announcements=queries.recent_announcements(current_user.id),
         accounts=queries.accounts(current_user.id),
-        due_cards=queries.due_card_count(current_user.id),
+        decks=queries.deck_count(current_user.id),
         now=utcnow(),
     )
 

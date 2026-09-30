@@ -24,7 +24,7 @@
 <div class="grid grid-4 mb">
   <div class="card stat"><div class="value">{{ upcoming|length }}</div><div class="label">due in the next 2 weeks</div></div>
   <div class="card stat"><div class="value" style="{{ 'color:var(--err)' if missing }}">{{ missing|length }}</div><div class="label">missing</div></div>
-  <div class="card stat"><div class="value">{{ due_cards }}</div><div class="label"><a href="{{ url_for('study.index') }}">flashcards due</a></div></div>
+  <div class="card stat"><div class="value">{{ decks }}</div><div class="label"><a href="{{ url_for('study.index') }}">flashcard decks</a></div></div>
   <div class="card stat"><div class="value">🔥 {{ current_user.streak_days or 0 }}</div><div class="label">day streak</div></div>
 </div>
 

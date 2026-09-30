@@ -124,14 +124,24 @@ def test_ai_errors_are_shown_not_crashed(synced_user, client, fake_ai):
 # ---------------------------------------------------------------- flashcards
 
 
-def test_manual_deck_and_spaced_review(synced_user, client):
+def test_manual_deck_and_flip_through_study(synced_user, client):
+    from app.models import CoinTransaction
+
     r = client.post("/study/decks/new", data={"title": "Vocab", "cards": "hola :: hello\nadios\tgoodbye\nbroken line"})
     deck = db.session.scalar(select(Deck).where(Deck.title == "Vocab"))
     assert len(deck.cards) == 2
-    card = deck.cards[0]
-    client.post(f"/study/decks/{deck.id}/review", data={"card_id": card.id, "rating": "good"})
-    db.session.refresh(card)
-    assert card.interval_days == 1 and card.review_count == 1
+    page = client.get(f"/study/decks/{deck.id}/review").get_data(as_text=True)
+    assert "hola" in page and "goodbye" in page and 'id="next"' in page and 'id="flip"' in page, "every card, arrows and flip"
+    assert client.get(f"/study/decks/{deck.id}/cram").status_code == 302, "old cram links land on the viewer"
+
+    # Reaching the last card of a real deck pays today's study coins, once.
+    before = db.session.query(CoinTransaction).count()
+    client.post(f"/study/decks/{deck.id}/studied")
+    assert db.session.query(CoinTransaction).count() == before, "decks under 5 cards don't pay"
+    client.post(f"/study/decks/{deck.id}", data={"action": "add", "cards": "a :: 1\nb :: 2\nc :: 3"})
+    client.post(f"/study/decks/{deck.id}/studied")
+    client.post(f"/study/decks/{deck.id}/studied")
+    assert db.session.query(CoinTransaction).count() == before + 1
 
 
 # ---------------------------------------------------------------- live quiz

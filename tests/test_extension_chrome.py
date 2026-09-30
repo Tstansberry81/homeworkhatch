@@ -22,7 +22,7 @@ from werkzeug.serving import make_server
 
 from app import create_app
 from app.extensions import db
-from app.models import CanvasFile
+from app.models import Card, CanvasFile, Deck
 
 from .conftest import FakeAI, make_user
 
@@ -63,12 +63,16 @@ def test_extension_in_chrome(tmp_path):
         for p in {str(ext_dir), os.path.realpath(ext_dir)}]
     with app.app_context():
         db.create_all()
-        make_user("chrome")
+        user = make_user("chrome")
+        deck = Deck(user_id=user.id, title="Review check", cards=[Card(front=f"q{i}", back=f"a{i}", position=i) for i in range(3)])
+        db.session.add(deck)
+        db.session.commit()
+        deck_id = deck.id
     server = make_server("127.0.0.1", 0, app, threaded=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         run = subprocess.run(["node", str(ROOT / "tests/js/extension_chrome.mjs"), f"http://127.0.0.1:{server.server_port}",
-                              "chrome", "password123", CHROME, str(ext_dir)], capture_output=True, text=True, timeout=240)
+                              "chrome", "password123", CHROME, str(ext_dir), str(deck_id)], capture_output=True, text=True, timeout=240)
         assert run.returncode == 0, run.stderr[-3000:]
         r = json.loads(run.stdout.strip().splitlines()[-1])
     finally:
@@ -97,6 +101,10 @@ def test_extension_in_chrome(tmp_path):
     assert r["new_download_label"].startswith("Download 1 new file (.zip, ~"), r["new_download_label"]
     assert [p.rsplit("/", 1)[-1] for p in r["zip2"]] == ["week2.pdf"]
     assert len(r["zip_all"]) == 6
+
+    # Flashcards: flip, next and previous (wrapping around), and the x / n counter.
+    assert r["study"] == {"start": "1 / 3", "flipped": True, "after_next": "2 / 3", "flipped_after_next": False,
+                          "wrapped": "3 / 3", "back_text": "a2"}, r["study"]
 
     # Bytes went straight to storage: the app only confirmed them.
     assert hits["POST /v1/files/<file_id>/uploaded"] == 6 and hits["PUT /v1/files/<file_id>"] == 0, hits

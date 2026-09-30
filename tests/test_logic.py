@@ -1,4 +1,4 @@
-"""Pure-logic tests: grades, spaced repetition, planner, citations, moderation, iCal."""
+"""Pure-logic tests: grades, planner, citations, moderation, iCal."""
 
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models import Assignment, AssignmentGroup, Card, utcnow
-from app.services import citations, grades, ics, moderation, planner, srs
+from app.services import citations, grades, ics, moderation, planner
 
 
 def A(id, score, possible, group="g", status="graded", **kw):
@@ -54,24 +54,6 @@ def test_what_if_and_needed():
     need = grades.needed_on(groups, items, 2, 85)
     assert need == pytest.approx(81.67, abs=0.05)
     assert grades.needed_on(groups, items, 2, 200) is None
-
-
-# ---------------------------------------------------------------- spaced repetition
-
-def test_sm2_intervals_grow_and_lapses_reset():
-    now = datetime(2026, 9, 1, 12)
-    c = Card(front="f", back="b", ease=2.5, interval_days=0, repetitions=0, lapses=0, review_count=0, due_at=now)
-    srs.review(c, "good", now)
-    assert c.interval_days == 1
-    srs.review(c, "good", now)
-    assert c.interval_days == 6
-    srs.review(c, "good", now)
-    assert c.interval_days >= 14
-    srs.review(c, "again", now)
-    assert c.repetitions == 0 and c.lapses == 1 and c.due_at == now + timedelta(minutes=10)
-    assert c.ease >= 1.3 and c.review_count == 4
-    with pytest.raises(ValueError):
-        srs.review(c, "meh", now)
 
 
 # ---------------------------------------------------------------- planner

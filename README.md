@@ -20,7 +20,7 @@ login, so no school password or API key is ever involved.
 | **Calendar** | Month view, a private iCal feed for any calendar app, and a Google Calendar toggle that adds every upcoming due date and keeps it updated (through Composio). |
 | **Study plan** | Spreads the next two weeks of work across daily study time and flags what won't fit. |
 | **AI tutor** | Streaming chat per class or across all classes, grounded in synced materials with `[S1]` citations. Attach files (Canvas, uploads, Google Drive) to a chat and it answers from them. Built to teach rather than do the work. |
-| **Study sets** | AI-generated flashcards and practice quizzes from any files and pages you tick in a class (plus your own uploads), a topic, or pasted notes. SM-2 spaced repetition, cram mode, a manual editor. |
+| **Study sets** | AI-generated flashcards and practice quizzes from any files and pages you tick in a class (plus your own uploads), a topic, or pasted notes. Flip through a deck card by card (arrows, x / n), and edit cards by hand. |
 | **My files** | Upload notes and readings from your computer or pick them from Google Drive (through Composio); file them under a class and study from them like Canvas files. |
 | **Live quiz** | Kahoot-style: the host shows questions, classmates join with a code (no account needed), and faster correct answers score more. |
 | **Summaries** | AI study summaries of any synced file or page. Scanned PDFs (no text layer) can be read by Claude so the tutor and generators can use them too. |
@@ -109,7 +109,7 @@ app/
   blueprints/         auth, main (dashboard/calendar/planner), courses, api (ingest), study, live,
                       tutor, chat, coins (wallet/lab), tools, billing, settings, admin
   services/           ingest, retrieval (BM25), ai (Claude + quotas), study (generators), grades,
-                      planner, srs, coins, citations, moderation, billing, storage
+                      planner, coins, citations, moderation, billing, storage
                       (local / Supabase / S3), dbsecurity (Supabase RLS lockdown), ics
   models.py           SQLAlchemy models (Supabase Postgres in production, SQLite locally)
 migrations/           Alembic

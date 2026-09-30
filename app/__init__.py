@@ -85,6 +85,8 @@ def _register_template_helpers(app: Flask) -> None:
     app.jinja_env.filters["ago"] = relative
     app.jinja_env.filters["local"] = to_local
     app.jinja_env.filters["canvas_html"] = safe_canvas_html
+    from .services.study import render_markdown
+    app.jinja_env.filters["md"] = render_markdown  # AI text: `code`, **bold**, lists; math stays for KaTeX
     app.jinja_env.globals["now_utc"] = utcnow
 
     @app.context_processor

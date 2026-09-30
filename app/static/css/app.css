@@ -236,12 +236,11 @@ a.cite { display: inline-block; font-size: .72rem; font-weight: 700; padding: 0 
 .flashcard .inner { position: relative; min-height: 260px; transition: transform .45s; transform-style: preserve-3d; }
 .flashcard.flipped .inner { transform: rotateY(180deg); }
 .flashcard .face {
-  position: absolute; inset: 0; backface-visibility: hidden; display: flex; align-items: center; justify-content: center;
+  position: absolute; inset: 0; -webkit-backface-visibility: hidden; backface-visibility: hidden; display: flex; align-items: center; justify-content: center;
   text-align: center; padding: 28px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border);
   box-shadow: var(--shadow); font-size: 1.2rem; overflow-y: auto;
 }
 .flashcard .back { transform: rotateY(180deg); background: var(--accent-soft); }
-.ratings { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 640px; margin: 0 auto; }
 .choice { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 6px 0; cursor: pointer; font-weight: 400; }
 .choice:hover { background: var(--surface-2); }
 .choice input { margin-top: 4px; width: auto; }
@@ -294,3 +293,15 @@ a.cite { display: inline-block; font-size: .72rem; font-weight: 700; padding: 0 
 .dropzone.over, .dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
 .pick-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
   position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.flashcard .face.prose p { margin: 0 0 .4em; }
+.flashcard .face.prose p:last-child { margin-bottom: 0; }
+.flashcard .face code { font-size: .95em; }
+
+/* Flashcard viewer: arrows either side of the card, x / n underneath */
+.viewer { display: grid; grid-template-columns: auto minmax(0, 640px) auto; gap: 12px; align-items: center; justify-content: center; }
+.viewer .flashcard { margin: 8px 0; width: 100%; }
+.nav-arrow { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font-size: 1.8rem; line-height: 1; cursor: pointer; box-shadow: var(--shadow); }
+.nav-arrow:hover { border-color: var(--accent); color: var(--accent); }
+.viewer-pos { font-weight: 600; font-variant-numeric: tabular-nums; margin: 4px 0 12px; }
+@media (max-width: 640px) { .viewer { gap: 6px; } .nav-arrow { width: 36px; height: 36px; font-size: 1.4rem; } }

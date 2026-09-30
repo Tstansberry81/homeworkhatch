@@ -1,7 +1,7 @@
 // The real extension in a real Chrome (Chrome for Testing), clicking its real popup, against a
 // mock Canvas and a live Homework Hatch server. Prints one JSON line of observations.
 //
-//   node extension_chrome.mjs <serverUrl> <username> <password> <chromePath> <extensionDir>
+//   node extension_chrome.mjs <serverUrl> <username> <password> <chromePath> <extensionDir> [deckId]
 //
 // Chrome's permission prompt can't be automated, so the copy under test has 127.0.0.1
 // pre-granted in host_permissions (the mock Canvas, the server and the storage emulator all
@@ -14,7 +14,7 @@ import { execFileSync } from "node:child_process";
 import puppeteer from "../../extension/node_modules/puppeteer-core/lib/esm/puppeteer/puppeteer-core.js";
 import { startMockCanvas } from "../../extension/tests/mock-canvas.mjs";
 
-const [serverUrl, username, password, chromePath, ext] = process.argv.slice(2);
+const [serverUrl, username, password, chromePath, ext, deckId] = process.argv.slice(2);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hatch-chrome-"));
 const downloads = path.join(tmp, "downloads");
 fs.mkdirSync(downloads);
@@ -133,6 +133,25 @@ try {
   out.zip2 = await zipAfterClick("#download");
   await popup.reload();
   out.zip_all = await zipAfterClick("#downloadAll");
+
+  // Flashcard study on the site: flip, arrows either side, x / n underneath.
+  if (deckId) {
+    await site.bringToFront();
+    await site.goto(`${serverUrl}/study/decks/${deckId}/review`);
+    const pos = () => site.$eval("#pos", (p) => p.textContent.trim());
+    const flipped = () => site.$eval("#card", (c) => c.classList.contains("flipped"));
+    const study = { start: await pos() };
+    await site.click("#flip");
+    study.flipped = await flipped();
+    await site.click("#next");
+    study.after_next = await pos();
+    study.flipped_after_next = await flipped();
+    await site.click("#prev");
+    await site.click("#prev");
+    study.wrapped = await pos();
+    study.back_text = await site.$eval("#back", (b) => b.textContent.trim());
+    out.study = study;
+  }
 } finally {
   await browser.close();
   canvas.close();

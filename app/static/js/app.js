@@ -69,6 +69,13 @@
     if (msg && !window.confirm(msg)) { e.preventDefault(); return; }
     const busy = e.target.dataset.busy;
     if (busy) {
+      // A disabled button is left out of the submitted form, so keep the clicked button's
+      // value (e.g. a flashcard rating) in a hidden field before disabling everything.
+      const s = e.submitter;
+      if (s && s.name) {
+        const keep = Object.assign(document.createElement("input"), { type: "hidden", name: s.name, value: s.value });
+        e.target.appendChild(keep);
+      }
       e.target.querySelectorAll("button").forEach((b) => { b.disabled = true; });
       const note = document.createElement("p");
       note.className = "help center";

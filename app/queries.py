@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import timedelta
 
 from flask import abort
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from .extensions import db
-from .models import Announcement, Assignment, CanvasAccount, Card, Course, Deck, utcnow
+from .models import Announcement, Assignment, CanvasAccount, Course, Deck, utcnow
 
 UPCOMING_STATUSES = {"upcoming", "past_due", "missing"}
 
@@ -92,6 +92,5 @@ def accounts(user_id: int) -> list[CanvasAccount]:
                                    .order_by(CanvasAccount.last_sync_at.desc())))
 
 
-def due_card_count(user_id: int) -> int:
-    return len(db.session.scalars(select(Card.id).join(Deck).where(Deck.user_id == user_id,
-                                                                    Card.due_at <= utcnow())).all())
+def deck_count(user_id: int) -> int:
+    return db.session.scalar(select(func.count(Deck.id)).where(Deck.user_id == user_id)) or 0
