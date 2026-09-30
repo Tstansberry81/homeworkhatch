@@ -31,7 +31,7 @@
             {% for y in range(now_utc().year, now_utc().year - 100, -1) %}<option {{ 'selected' if form.get('birth_year') == y|string }}>{{ y }}</option>{% endfor %}
           </select>
         </div>
-        <label class="check mt"><input type="checkbox" name="terms" required> I agree to the <a href="{{ url_for('main.terms') }}" target="_blank">Terms</a> and <a href="{{ url_for('main.privacy') }}" target="_blank">Privacy Policy</a>. If I'm under 18, a parent or guardian has agreed too.</label>
+        <label class="check mt"><input type="checkbox" name="terms" required> <span>I agree to the <a href="{{ url_for('main.terms') }}" target="_blank">Terms</a> and <a href="{{ url_for('main.privacy') }}" target="_blank">Privacy Policy</a>. If I'm under 18, a parent or guardian has agreed too.</span></label>
         <button class="btn btn-block mt" type="submit">Create account</button>
       </form>
       <p class="small muted mt">Already have an account? <a href="{{ url_for('auth.login') }}">Sign in</a></p>

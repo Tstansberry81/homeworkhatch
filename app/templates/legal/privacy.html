@@ -9,11 +9,23 @@
 
   <h2>What we collect</h2>
   <ul>
-    <li><strong>Your account:</strong> email, username, display name, a hash of your password (never the password itself), time zone, birth year, and an optional grade or year. At sign-up we also ask your birth month to check your age; we don't store the month.</li>
-    <li><strong>From your Canvas, through the extension:</strong> while you're signed in to Canvas in Chrome, the extension reads the classes shown in its course list and sends us your Canvas name and user ID; class names and terms; assignments (descriptions, due dates, points, your submission status, scores, grades, rubrics, and your instructors' comments and rubric feedback on your work); assignment groups and weights; modules; pages and the syllabus; announcements; discussion topics; calendar events; and your missing-work list. This content can include other people's names and words, such as an instructor's name on an announcement or a classmate's name in a discussion topic. We don't collect class rosters.</li>
-    <li><strong>Course files, only for classes you choose:</strong> for each class you tick under "Which classes' files should we keep?", the extension uploads that class's files (slides, readings, handouts) so you can open and study from them here. We extract their text so search, the tutor and study-set tools can use it. Untick a class and we delete the copies we stored.</li>
+    <li><strong>Your account:</strong> email, username, display name, a hash of your password (never the password itself), time zone, birth year, and an optional grade or year. We also ask your birth month to check your age; we don't store it.</li>
+    <li><strong>From your Canvas, through the extension:</strong> while you're signed in to Canvas in Chrome, the extension reads every class you're actively enrolled in and sends us:
+      <ul>
+        <li>your Canvas name and user ID;</li>
+        <li>class names and terms;</li>
+        <li>assignments: descriptions, due dates, points, your submission status, scores and grades, rubrics, comments on your work (with the commenter's name) and rubric feedback, and the names of files you turned in;</li>
+        <li>assignment groups and weights;</li>
+        <li>modules, pages and the syllabus;</li>
+        <li>announcements, with the poster's name;</li>
+        <li>the titles and dates of discussion topics and quizzes;</li>
+        <li>calendar events, your Canvas to-do list and your missing-work list;</li>
+        <li>the list of each class's files (names, types and sizes).</li>
+      </ul>
+      This content can include other people's names and words, like an instructor's comment or announcement. We don't collect class rosters, the text of discussion posts, or the signed download links Canvas uses for files.</li>
+    <li><strong>Course files, only for classes you choose:</strong> for each class you tick under "Which classes' files should we keep?" (or every class, if you choose that), the extension uploads that class's files (slides, readings, handouts) so you can open and study from them here. We skip audio and video. We extract the files' text so search, the tutor and study-set tools can use it. Untick a class, including a past one, and we delete the copies we stored.</li>
     <li><strong>What you make and add:</strong> flashcards, quizzes, summaries, tutor conversations and the files you attach to them, files you upload or pick from Google Drive, class chat messages, and live-quiz nicknames, answers and scores.</li>
-    <li><strong>Google, if you connect it:</strong> we connect through Composio, which holds the Google sign-in for us. For Google Calendar we create, update and delete the due-date events we add. For Google Drive we search your Drive when you look for a file, and download only the files you pick.</li>
+    <li><strong>Google, if you connect it:</strong> we connect through Composio, which holds your Google sign-in for us. Composio passes the calendar events and Drive files involved between Google and us. For Google Calendar, we create, update and delete the due-date events we add. For Google Drive, we search your Drive when you look for a file and download only the files you pick. You can also remove access at myaccount.google.com/permissions.</li>
     <li><strong>Payments, when paid plans are offered:</strong> Stripe collects your card details; we never see them. We keep your plan, its dates, and Stripe's customer and subscription IDs, and share your email with Stripe for receipts.</li>
     <li><strong>Usage and technical data:</strong> sync history, sign-in events (failed sign-ins record the IP address, to stop password guessing), how many AI actions you use and what they cost, and the standard request logs kept by our host (which include IP addresses). We use cookies only to keep you signed in, protect forms, and remember your seat in a live quiz. No advertising or cross-site tracking cookies.</li>
   </ul>
@@ -27,9 +39,18 @@
     <li><strong>Your synced data, files and study materials are private to your account.</strong> Nothing you generate from your course files is shown to other users.</li>
     <li><strong>Class chat (opt-in):</strong> if you join a class's chat, other Homework Hatch users who joined that class's chat see your display name and messages. We can't confirm who is really enrolled, so don't share personal information there.</li>
     <li><strong>Leaderboard (opt-in):</strong> shows your display name and coins only if you turn it on in your profile.</li>
-    <li><strong>Live quizzes you host:</strong> signed-in players who join with your code see the quiz. Quizzes made from course files can't be hosted.</li>
-    <li><strong>Your calendar feed link:</strong> anyone who has it can see your class and assignment names, due dates and statuses. Keep it private; you can reset it on the Calendar page.</li>
-    <li><strong>Our service providers,</strong> only to run the service: Render (hosting and logs), Supabase (database and file storage), Anthropic (AI), Composio and Google (only if you connect Google), Stripe (payments, when offered), and Google Fonts and Cloudflare's cdnjs (fonts and math-rendering scripts, which receive your IP address when pages load). All are in the United States.</li>
+    <li><strong>Live quizzes:</strong> signed-in players who join with your code see the quiz you host. Players in a game see each other's nicknames and scores. Quizzes our AI made from your course files or uploads can't be hosted, and the <a href="{{ url_for('main.terms') }}">Terms</a> forbid hosting course materials.</li>
+    <li><strong>Your calendar feed link:</strong> anyone who has it can see your class and assignment names, due dates and statuses, and your Canvas calendar events (titles, times and locations). Keep it private; you can reset it on the Calendar page.</li>
+    <li><strong>Our service providers,</strong> only to run the service:
+      <ul>
+        <li>Render: hosting and logs;</li>
+        <li>Supabase: database and file storage;</li>
+        <li>Anthropic: AI;</li>
+        <li>Composio and Google: only if you connect Google;</li>
+        <li>Stripe: payments, when offered;</li>
+        <li>Google Fonts and Cloudflare's cdnjs: fonts and math-rendering scripts, which receive your IP address when pages load.</li>
+      </ul>
+      These companies are based in the United States; some may process data in other countries.</li>
     <li><strong>Us:</strong> we can technically access stored data. We only do so to operate the service, fix a problem you report, keep it secure, or when the law requires it.</li>
     <li><strong>The law:</strong> we disclose data if legally required, for example by a valid subpoena.</li>
   </ul>
@@ -39,8 +60,8 @@
 
   <h2>Your choices</h2>
   <ul>
-    <li><strong>Export:</strong> Settings → Your data downloads your profile, classes and assignments, study sets, quizzes, tutor chats, chat messages and coin history. You can download your stored files from each class's Files page.</li>
-    <li><strong>Delete your account:</strong> Settings → Your data deletes your account and everything we store for it: synced data, stored files, study materials, tutor and chat messages, and live-quiz entries. It also disconnects Google. Two things stay: Stripe's own payment records, and events already added to your Google Calendar. To remove the calendar events, turn off Calendar sync before deleting.</li>
+    <li><strong>Export:</strong> Settings → Your data downloads your profile, classes (including past ones) and assignments, study sets, quizzes, tutor chats, chat messages and coin history. You can download your stored files from each class's Files page, or all at once with the extension's "Download files" button.</li>
+    <li><strong>Delete your account:</strong> Settings → Your data deletes your account and everything we store for it: synced data, stored files, study materials, tutor and chat messages, and live-quiz entries. It also disconnects Google. Two things stay: Stripe's own payment records, and events already added to your Google Calendar. To remove upcoming events, turn off Calendar sync before deleting; events for past due dates stay in your calendar.</li>
     <li><strong>Stop syncing:</strong> revoke the extension's token on the Connect Canvas page, or remove the extension.</li>
     <li><strong>Anything else:</strong> ask us at {{ contact() }} to see, correct or delete your data.</li>
   </ul>

@@ -90,7 +90,8 @@ The extension never sends Canvas data or the token back to the page.
   topics, which can include other people's names)
 - Website content (the user's course content, grades and chosen course files from Canvas)
 
-The extension shows this disclosure and an "Agree and connect" button before it reads anything. It no
+The extension shows this disclosure and an "Agree and connect" button before it syncs anything (the
+only thing it does before that is check whether the current tab is a Canvas site). It no
 longer collects class rosters (removed in 1.4.1), and Canvas's signed file links never leave the browser.
 
 Then certify all three statements: data isn't sold to third parties, isn't used or transferred for

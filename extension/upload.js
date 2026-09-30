@@ -42,13 +42,16 @@ async function call(fetchImpl, url, init, what, retryDelayMs = 1000) {
   }
 }
 
-// Canvas's signed file links work like passwords for the student's files; they're only needed
-// here in the browser, so they never leave it.
-export function withoutDownloadLinks(snapshot) {
+// What the server gets: no signed file links (they work like passwords for the student's files
+// and are only needed here in the browser), and no text of discussion posts (often a classmate's
+// words; only the browser uses it, to find linked files).
+export function scrubForUpload(snapshot) {
   return {
     ...snapshot,
     courses: (snapshot.courses || []).map((c) => ({
-      ...c, files: (c.files || []).map(({ download_url: _drop, ...f }) => f),
+      ...c,
+      files: c.files && c.files.map(({ download_url: _link, ...f }) => f),
+      discussions: c.discussions && c.discussions.map(({ message_html: _text, ...d }) => d),
     })),
   };
 }
@@ -66,7 +69,7 @@ export async function uploadSnapshot({
   const { snapshot_id, files_needed = [], upload_urls: targets = {} } = await call(fetchImpl, `${base}/v1/snapshots`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...auth },
-    body: JSON.stringify({ snapshot: withoutDownloadLinks(snapshot), files: manifest }),
+    body: JSON.stringify({ snapshot: scrubForUpload(snapshot), files: manifest }),
   }, "snapshot", retryDelayMs);
 
   const byId = new Map(plan.map((j) => [j.file.id, j]));

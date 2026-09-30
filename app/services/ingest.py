@@ -83,23 +83,20 @@ def share_stored(row: CanvasFile, twin: CanvasFile) -> None:
 
 
 def forget_course_files(course: Course) -> int:
-    """Delete the stored copies of a class's files (the student stopped keeping them). Objects another
-    kept row still points at stay; so do the file names, so turning the class back on re-requests them."""
+    """Delete the stored copies of a class's files (the student stopped keeping them). Objects a kept
+    row in another class still points at stay; so do the file names, so turning the class back on
+    re-requests them. Storage goes first: if it fails, nothing changes and the caller can say so."""
     rows = db.session.scalars(select(CanvasFile).where(CanvasFile.course_id == course.id,
                                                        CanvasFile.storage_key.is_not(None))).all()
     keys = {r.storage_key for r in rows}
+    used_elsewhere = set(db.session.scalars(select(CanvasFile.storage_key).where(
+        CanvasFile.storage_key.in_(keys), CanvasFile.course_id != course.id))) if keys else set()
+    for key in keys - used_elsewhere:
+        get_storage().delete_prefix(key)
     for r in rows:
         r.storage_key = r.sha256 = r.stored_version = r.stored_fingerprint = r.stored_at = None
         r.text, r.text_status, r.text_started_at = None, None, None
         retrieval.rebuild_file_chunks(r)
-    db.session.flush()
-    still_used = set(db.session.scalars(select(CanvasFile.storage_key).where(CanvasFile.storage_key.in_(keys)))) if keys else set()
-    db.session.commit()
-    for key in keys - still_used:
-        try:
-            get_storage().delete_prefix(key)
-        except Exception as exc:
-            current_app.logger.warning("could not delete %s: %s", key, exc)
     return len(rows)
 
 
@@ -176,7 +173,9 @@ def _apply_assignment(row: Assignment, a: dict):
     row.workflow_state = _clip(sub.get("workflow_state"), 40)
     row.rubric = a.get("rubric") or None
     row.comments = sub.get("comments") or None
-    row.attachments = sub.get("attachments") or None
+    # Only what the page shows: Canvas's signed download links work like passwords, so they're not kept.
+    row.attachments = [{k: f.get(k) for k in ("id", "name", "content_type", "size")}
+                       for f in sub.get("attachments") or [] if isinstance(f, dict)] or None
     row.rubric_assessment = sub.get("rubric_assessment") or None
 
 
@@ -207,7 +206,7 @@ def _apply_announcement(row: Announcement, a: dict):
 
 def _apply_discussion(row: Discussion, d: dict):
     row.title = (d.get("title") or "Discussion")[:500]
-    row.message_html = d.get("message_html")
+    row.message_html = None  # the text is often a classmate's post, and nothing here uses it
     row.posted_at = parse_ts(d.get("posted_at"))
     row.due_at = parse_ts(d.get("due_at"))
     row.html_url = _clip(d.get("html_url"), 500)
@@ -216,9 +215,45 @@ def _apply_discussion(row: Discussion, d: dict):
 # ---------------------------------------------------------------- snapshot
 
 
+def scrub_snapshot(snapshot: dict) -> dict:
+    """A copy without what we don't keep, whatever the extension version sent: class rosters
+    (older extensions), Canvas's signed file links, and discussion posts' text."""
+    clean = json.loads(json.dumps(snapshot, default=str))
+    for c in clean.get("courses") or []:
+        if not isinstance(c, dict):
+            continue
+        c.pop("roster_ids", None)
+        for f in c.get("files") or []:
+            if isinstance(f, dict):
+                f.pop("download_url", None)
+        for a in c.get("assignments") or []:
+            sub = a.get("submission") if isinstance(a, dict) else None
+            for f in (sub or {}).get("attachments") or []:
+                if isinstance(f, dict):
+                    f.pop("download_url", None)
+                    f.pop("url", None)
+        for d in c.get("discussions") or []:
+            if isinstance(d, dict):
+                d.pop("message_html", None)
+    return clean
+
+
+MEDIA_EXTENSIONS = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mp3", ".m4a", ".wav", ".aac", ".ogg", ".flac")
+
+
+def is_media(name: str | None, content_type: str | None) -> bool:
+    """Audio and video (often lecture recordings, which UVA policy protects more strictly) aren't copied."""
+    return (content_type or "").startswith(("audio/", "video/")) or (name or "").lower().endswith(MEDIA_EXTENSIONS)
+
+
+def _kept_courses(account_id: int):
+    return select(Course.id).where(Course.account_id == account_id, Course.sync_files.is_(True))
+
+
 def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[SyncRun, list[str]]:
     if not isinstance(snapshot, dict) or snapshot.get("schema_version") != 1:
         raise IngestError("unsupported snapshot schema")
+    snapshot = scrub_snapshot(snapshot)
     base_url = snapshot.get("base_url") or ""
     parsed = urlparse(base_url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
@@ -367,8 +402,8 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     already_held = duplicates = 0
     keeping = {c.id for c in courses_by_canvas_id.values() if c.sync_files}
     for fid, row, too_big in announced:
-        if row.course_id not in keeping:  # the student hasn't chosen to keep this class's files
-            continue
+        if row.course_id not in keeping or is_media(row.name, row.content_type):
+            continue  # not a class the student chose to keep, or a recording
         if row.stored_version == row.wanted_version and row.stored_fingerprint == row.wanted_fingerprint:
             already_held += 1
             continue
@@ -420,16 +455,10 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     account.last_snapshot_hash = digest
     log_activity(user.id, "sync", f"{len(courses_by_canvas_id)} courses from {host}, {len(needed)} files needed")
 
-    # Keep the latest raw snapshot for debugging and re-processing, minus Canvas's signed download
-    # links (they work as bearer credentials for the student's files).
+    # Keep the latest snapshot (already scrubbed of links, rosters and posts) for re-processing.
     try:
-        archived = json.loads(json.dumps(snapshot, default=str))
-        for c in archived.get("courses") or []:
-            for f in c.get("files") or []:
-                if isinstance(f, dict):
-                    f.pop("download_url", None)
         get_storage().put_bytes(f"u/{user.id}/snapshots/{account.id}-latest.json",
-                                json.dumps({"snapshot": archived, "files": manifest}).encode())
+                                json.dumps({"snapshot": snapshot, "files": manifest}).encode())
     except Exception as exc:  # storage trouble must not lose the sync itself
         current_app.logger.warning("could not store raw snapshot: %s", exc)
 
@@ -445,7 +474,8 @@ def _unchanged_run(user: User, account: CanvasAccount, snapshot: dict, manifest:
     keeping = set(db.session.scalars(select(Course.id).where(Course.account_id == account.id,
                                                              Course.sync_files.is_(True))))
     rows = [r for r in db.session.scalars(select(CanvasFile).where(CanvasFile.account_id == account.id)
-                                          .order_by(CanvasFile.id)) if r.canvas_id in announced and r.course_id in keeping]
+                                          .order_by(CanvasFile.id))
+            if r.canvas_id in announced and r.course_id in keeping and not is_media(r.name, r.content_type)]
     held = {r.stored_fingerprint: r for r in rows if r.storage_key and r.stored_fingerprint}
     needed, requested = [], set()
     for row in rows:
@@ -528,11 +558,19 @@ def upload_targets(run: SyncRun, needed: list[str]) -> dict[str, dict]:
     return targets
 
 
+class NotKept(IngestError):
+    def __init__(self, row: CanvasFile):
+        super().__init__("this class's files aren't being kept")
+        self.row = row
+
+
 def _file_row(user: User, run: SyncRun, canvas_file_id: str) -> CanvasFile:
     row = db.session.scalar(select(CanvasFile).where(CanvasFile.account_id == run.account_id,
                                                      CanvasFile.canvas_id == canvas_file_id))
     if row is None or row.user_id != user.id or row.wanted_version is None:
         raise IngestError("file is not part of this sync")
+    if row.course_id not in set(db.session.scalars(_kept_courses(row.account_id))) or is_media(row.name, row.content_type):
+        raise NotKept(row)  # e.g. the student unticked the class while an upload was on its way
     return row
 
 
@@ -552,6 +590,7 @@ def _record_stored(row: CanvasFile, run: SyncRun, key: str, version: str, size: 
     if row.stored_fingerprint:
         waiting = db.session.scalars(select(CanvasFile).where(
             CanvasFile.account_id == row.account_id, CanvasFile.id != row.id,
+            CanvasFile.course_id.in_(_kept_courses(row.account_id)),
             CanvasFile.wanted_fingerprint == row.stored_fingerprint,
             or_(CanvasFile.stored_version.is_(None), CanvasFile.stored_version != CanvasFile.wanted_version)))
         for twin in waiting:
@@ -586,8 +625,12 @@ def store_file(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | 
 
 def confirm_upload(user: User, run: SyncRun, canvas_file_id: str, updated_at: str | None) -> CanvasFile:
     """The extension PUT the file straight to storage with a URL from upload_targets()."""
-    row = _file_row(user, run, canvas_file_id)
     version = version_key(updated_at)
+    try:
+        row = _file_row(user, run, canvas_file_id)
+    except NotKept as exc:
+        get_storage().delete_prefix(file_key(exc.row, version))  # the bytes already landed; don't keep them
+        raise
     key = file_key(row, version)
     storage = get_storage()
     size = storage.size(key)

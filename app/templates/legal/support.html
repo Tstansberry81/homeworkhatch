@@ -3,10 +3,11 @@
 {% macro body() %}
 <div class="card prose" style="max-width:820px;margin:0 auto">
   <h1>Support</h1>
-  <p>Questions, bugs or a class that won't sync:
-    {% if config.SUPPORT_EMAIL %}email <a href="mailto:{{ config.SUPPORT_EMAIL }}">{{ config.SUPPORT_EMAIL }}</a>.
-    {% else %}<a href="https://github.com/Tstansberry81/homeworkhatch/issues" target="_blank" rel="noopener">report it here</a>.{% endif %}
-    Include your school's Canvas address and what the extension's popup says.</p>
+  {% if config.SUPPORT_EMAIL %}
+  <p>Questions, bugs, a class that won't sync, or a privacy or copyright request: email <a href="mailto:{{ config.SUPPORT_EMAIL }}">{{ config.SUPPORT_EMAIL }}</a>. For sync problems, include your school's Canvas address and what the extension's popup says.</p>
+  {% else %}
+  <p>Our support email is being set up and will be listed here. Until then, you can export or delete your data yourself from Settings → Your data. For bugs only (never personal information), <a href="https://github.com/Tstansberry81/homeworkhatch/issues" target="_blank" rel="noopener">open a public issue</a>.</p>
+  {% endif %}
 
   <h2>Setting up</h2>
   <ol>
@@ -22,7 +23,7 @@
     <li><strong>"Logged out":</strong> log in to Canvas in any tab; the next sync picks up from there. Keeping a Canvas tab open helps at schools with strict sign-in.</li>
     <li><strong>"Not linked to Homework Hatch yet":</strong> open <a href="{{ url_for('settings.sync') }}">Connect Canvas</a> while signed in.</li>
     <li><strong>"A file couldn't be uploaded":</strong> it's retried automatically at the next sync.</li>
-    <li><strong>A class is missing:</strong> the popup's <em>Courses shown</em> list controls which classes sync; it starts with your Canvas dashboard.</li>
+    <li><strong>A class is missing:</strong> every class you're actively enrolled in syncs. If you hid it on Homework Hatch, show it again from Classes. The popup's <em>Courses shown</em> list controls which classes the extension shows and handles files for; due dates and grades sync for every class either way.</li>
     <li><strong>"Hidden by instructors":</strong> normal. Some classes turn off tabs like Files or Pages; the extension still reads what your instructor links for you in modules and pages, the same things you can open in Canvas.</li>
     <li><strong>A class's files are missing:</strong> tick the class under "Which classes' files should we keep?" on <a href="{{ url_for('settings.sync') }}">Connect Canvas</a>.</li>
   </ul>

@@ -93,6 +93,7 @@ def client(app):
 
 def make_user(username="sam", email=None, password="password123", **fields) -> User:
     fields.setdefault("keep_all_files", True)  # a student who chose to keep every class's files
+    fields.setdefault("birth_year", 2004)
     user = User(email=email or f"{username}@example.com", username=username, display_name=username.title(),
                 accepted_terms_at=utcnow(), onboarded=True, timezone="America/New_York", **fields)
     user.set_password(password)

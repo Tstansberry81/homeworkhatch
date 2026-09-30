@@ -11,7 +11,7 @@ from sqlalchemy import delete, func, select
 
 from .. import queries
 from ..extensions import db
-from ..models import (ApiToken, ChatMessage, CoinTransaction, Deck, LivePlayer, PracticeQuiz, SyncRun,
+from ..models import (ApiToken, ChatMessage, CoinTransaction, Course, Deck, LivePlayer, PracticeQuiz, SyncRun,
                       TutorConversation, User, utcnow)
 from ..services import gcal, integrations
 from ..services.storage import get_storage
@@ -81,7 +81,17 @@ def sync():
                               .order_by(SyncRun.received_at.desc()).limit(10)).all()
     return render_template("settings/sync.html", tokens=tokens, runs=runs, accounts=queries.accounts(current_user.id),
                            server_url=server_url(), new_token=request.args.get("new_token_shown"),
-                           courses=queries.visible_courses(current_user.id, include_hidden=True))
+                           courses=queries.visible_courses(current_user.id, include_hidden=True),
+                           past_courses=_past_courses())
+
+
+def _all_courses() -> list[Course]:
+    return list(db.session.scalars(select(Course).where(Course.user_id == current_user.id).order_by(Course.name)))
+
+
+def _past_courses() -> list[Course]:
+    """Classes no longer active in Canvas (ended or dropped) that still hold stored files."""
+    return [c for c in _all_courses() if not c.active and c.sync_files]
 
 
 @bp.route("/files", methods=["POST"])
@@ -94,10 +104,18 @@ def files():
     keep = {int(x) for x in request.form.getlist("keep") if x.isdigit()}
     current_user.keep_all_files = keep_all
     removed = 0
-    for course in queries.visible_courses(current_user.id, include_hidden=True):
-        wanted = keep_all or course.id in keep
+    for course in _all_courses():
+        # Past classes aren't offered for keeping; they're only listed so they can be unticked.
+        wanted = course.id in keep or (keep_all and course.active)
         if course.sync_files and not wanted:
-            removed += ingest.forget_course_files(course)
+            try:
+                removed += ingest.forget_course_files(course)
+            except Exception as exc:
+                db.session.rollback()
+                current_app.logger.error("could not delete files of course %s: %s", course.id, exc)
+                flash("We couldn't delete some stored files just now, so nothing was changed. Try again in a few minutes.",
+                      "error")
+                return redirect(url_for("settings.sync") + "#files")
         course.sync_files = wanted
     db.session.commit()
     msg = "Saved. New files arrive with the next sync (use Sync now to start it)."
@@ -159,7 +177,7 @@ def data():
 @login_required
 def export():
     u = current_user
-    courses = queries.visible_courses(u.id, include_hidden=True)
+    courses = _all_courses()  # past classes too
     payload = {
         "exported_at": utcnow().isoformat() + "Z",
         "profile": {"email": u.email, "username": u.username, "display_name": u.display_name, "plan": u.plan,
@@ -208,12 +226,10 @@ def delete_account():
         current_app.logger.error("could not cancel Stripe subscription for user %s: %s", user.id, exc)
     if integrations.available():
         for kind in integrations.LABELS:
-            row = integrations.get(user, kind)
-            if row and row.connected:
-                try:
-                    integrations.disconnect(user, kind)  # revokes the Google tokens too
-                except Exception as exc:
-                    current_app.logger.error("could not disconnect %s for user %s: %s", kind, user.id, exc)
+            try:  # whatever our own row says: Composio may still hold a live connection
+                integrations.disconnect(user, kind)  # revokes the Google tokens too
+            except Exception as exc:
+                current_app.logger.error("could not disconnect %s for user %s: %s", kind, user.id, exc)
     # Live-quiz seats in other people's games keep only a SET NULL link otherwise; remove them.
     db.session.execute(delete(LivePlayer).where(LivePlayer.user_id == user.id))
     logout_user()

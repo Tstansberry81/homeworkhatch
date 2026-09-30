@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import func, select
 
 from app.extensions import db
@@ -353,3 +355,62 @@ def test_unchanged_sync_skips_the_classes_but_still_retries_missing_files(app, c
     changed = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
     assert not db.session.get(SyncRun, changed["snapshot_id"]).stats.get("unchanged")
     assert db.session.scalar(select(Assignment).where(Assignment.name == "HW 1 (renamed)"))
+
+
+def test_file_choices_hold_across_twins_late_uploads_media_and_past_classes(app, client, snapshot, manifest, monkeypatch):
+    from app.services import ingest
+    from app.services.storage import get_storage
+
+    from .conftest import login
+
+    student = make_user("noor", keep_all_files=None)
+    token = api_token(student)
+    # A same-named copy of notes.txt in the second section, a lecture recording, and data we don't keep.
+    snapshot["courses"][1]["files"] = [dict(snapshot["courses"][0]["files"][1], id="9102")]
+    manifest.append(dict(manifest[1], id="9102", course_id="102", path="Calculus I (2)/notes.txt"))
+    _add_file(snapshot, manifest, "9900", "lecture-3.mp4", "video/mp4", 5000)
+    snapshot["courses"][0]["roster_ids"] = ["501", "502"]
+    snapshot["courses"][0]["discussions"] = [{"id": "d1", "title": "Introduce yourself", "message_html": "<p>I'm Ana</p>"}]
+    hw = snapshot["courses"][0]["assignments"][0]
+    hw.setdefault("submission", {})["attachments"] = [{"id": "77", "name": "hw3.pdf", "content_type": "application/pdf",
+                                                       "size": 10, "download_url": "https://canvas/files/77?verifier=x"}]
+    sync(client, token, snapshot, manifest)
+    c = app.test_client()
+    login(c, student)
+    calc = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
+    c.post("/settings/files", data={"mode": "pick", "keep": [str(calc.id)]})
+
+    body, uploaded = sync(client, token, snapshot, manifest)
+    assert set(uploaded) == {"9001", "9002"}, "the recording isn't copied"
+    twin = _file("9102")
+    assert twin.storage_key is None and twin.text is None, "a copy in an unchosen class isn't linked"
+    assert db.session.scalar(select(func.count(ContentChunk.id)).where(ContentChunk.source_id == twin.id)) == 0
+    stored = json.dumps([db.session.scalar(select(ingest.Assignment.attachments).where(ingest.Assignment.canvas_id == hw["id"]))])
+    assert "verifier" not in stored and "download_url" not in stored
+    assert db.session.scalar(select(ingest.Discussion.message_html)) is None
+    archive = get_storage().read(f"u/{student.id}/snapshots/{calc.account_id}-latest.json").decode()
+    assert "roster_ids" not in archive and "I'm Ana" not in archive and "verifier" not in archive
+
+    # An upload that lands after the class was unticked is refused, and its bytes aren't kept.
+    auth = {"Authorization": f"Bearer {token}"}
+    r = client.post("/v1/snapshots", json={"snapshot": dict(snapshot, synced_at=iso(0)), "files": manifest}, headers=auth)
+    c.post("/settings/files", data={"mode": "pick", "keep": []})
+    put = client.put(f"/v1/files/9001?updated_at={manifest[0]['updated_at']}", data=b"late", headers={
+        **auth, "X-Snapshot-Id": r.get_json()["snapshot_id"], "Content-Type": "application/pdf"})
+    assert put.status_code >= 400 and _file("9001").storage_key is None
+
+    # A class that dropped off Canvas can still be unticked; a storage failure changes nothing.
+    c.post("/settings/files", data={"mode": "pick", "keep": [str(calc.id)]})
+    sync(client, token, snapshot, manifest)
+    assert _file("9002").storage_key
+    snapshot["courses"] = snapshot["courses"][1:]
+    manifest[:] = [m for m in manifest if m["course_id"] != "101"]
+    sync(client, token, snapshot, manifest)
+    db.session.refresh(calc)
+    assert calc.active is False and b"Past classes" in c.get("/settings/sync").data
+    monkeypatch.setattr(type(get_storage()), "delete_prefix", lambda self, key: (_ for _ in ()).throw(OSError("down")))
+    r = c.post("/settings/files", data={"mode": "pick", "keep": []}, follow_redirects=True)
+    assert b"nothing was changed" in r.data and _file("9002").storage_key and calc.sync_files
+    monkeypatch.undo()
+    c.post("/settings/files", data={"mode": "pick", "keep": []})
+    assert _file("9002").storage_key is None and db.session.get(Course, calc.id).sync_files is False

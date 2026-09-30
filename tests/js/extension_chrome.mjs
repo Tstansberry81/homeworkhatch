@@ -56,7 +56,9 @@ try {
   const tab = await browser.newPage();
   await tab.goto(`${canvas.url}/`);
   // End state of the Connect flow in the popup: the extension knows the student's Canvas.
-  await worker.evaluate((base) => chrome.storage.local.set({ settings: { baseUrl: base } }), canvas.url);
+  await worker.evaluate((base) => chrome.storage.local.set({
+    settings: { baseUrl: base }, consent: { at: new Date().toISOString(), origin: new URL(base).origin },
+  }), canvas.url);
   const popup = await browser.newPage();
   popup.on("console", (m) => m.type() === "error" && console.error("[popup]", m.text()));
   await popup.goto(`chrome-extension://${extId}/popup.html`);

@@ -31,7 +31,7 @@
       {% for q in quizzes %}
       <li><div class="grow"><a class="title" href="{{ url_for('study.take_quiz', quiz_id=q.id) }}">{{ q.title }}</a>
         <div class="small muted">{{ q.questions|length }} questions{% if q.course %} · {{ q.course.name }}{% endif %}{% if best.get(q.id) is not none %} · best {{ best[q.id]|round|int }}%{% endif %}</div></div>
-        {% if not q.from_course_files %}<form method="post" action="{{ url_for('live.create', quiz_id=q.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost btn-sm" title="Host it live for classmates">Host live</button></form>{% endif %}</li>
+        {% if not q.from_course_files %}<form method="post" action="{{ url_for('live.create', quiz_id=q.id) }}" class="inline" data-confirm="Host this quiz live? Only host your own material: never questions copied from course files, answer keys or exams."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="own_material" value="1"><button class="btn btn-ghost btn-sm" title="Host it live for classmates">Host live</button></form>{% endif %}</li>
       {% endfor %}
     </ul>
     {% else %}{{ empty("", "No quizzes yet.") }}{% endif %}

@@ -116,6 +116,19 @@ async function renderSetup() {
   }
 }
 
+// Installs from before the disclosure existed: already connected, but syncing waits for agreement.
+function renderConsent(origin) {
+  $("setup").hidden = false;
+  $("main").hidden = true;
+  $("state").textContent = "Paused";
+  $("state").className = "pill not_connected";
+  const host = new URL(origin).host;
+  $("setupMsg").textContent = `Homework Hatch updated. Review what it syncs from ${host}, then agree to keep syncing.`;
+  detected = { origin };
+  $("connect").hidden = false;
+  $("connect").textContent = `Agree and keep syncing ${host}`;
+}
+
 // ---------- synced view ----------
 
 function renderStatus(status = {}) {
@@ -220,6 +233,7 @@ async function render() {
   savedKeys = new Set(stored.downloadedKeys || []);
   nextSyncAt = (await chrome.alarms.get("sync"))?.scheduledTime || null;
   if (!settings.baseUrl) return renderSetup();
+  if (stored.status?.state === "needs_consent") return renderConsent(new URL(settings.baseUrl).origin);
   $("setup").hidden = true;
   $("main").hidden = false;
   renderStatus(stored.status);

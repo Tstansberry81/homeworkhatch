@@ -118,6 +118,23 @@ def test_registration_turns_away_under_13s_without_a_retry(app, client):
     assert ok.status_code == 302 and db.session.scalar(select(User.birth_year).where(User.username == "kiddo")) == 2000
 
 
+def test_older_accounts_confirm_their_age_once(app):
+    adult, child = make_user("olds", birth_year=None), make_user("kidd", birth_year=None)
+    c = app.test_client()
+    login(c, adult)
+    r = c.get("/study/")
+    assert r.status_code == 302 and "/age" in r.headers["Location"]
+    assert c.get("/privacy").status_code == 200, "the legal pages stay open"
+    r = c.post("/age?next=/study/", data={"birth_month": "3", "birth_year": "2004"})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/study/")
+    assert c.get("/study/").status_code == 200
+    k = app.test_client()
+    login(k, child)
+    r = k.post("/age", data={"birth_month": "1", "birth_year": str(utcnow().year - 11)})
+    assert r.status_code == 403 and db.session.get(User, child.id).active is False
+    assert k.get("/dashboard").status_code == 302
+
+
 def test_register_first_user_is_admin_then_login(client):
     r = client.post("/register", data={"email": "first@example.com", "username": "first", "password": "longenough",
                                        "terms": "on", "timezone": "America/Chicago", **DOB})
@@ -303,7 +320,9 @@ def test_admin_area(app, client):
 
 
 def test_probability_lab_is_adult_and_flag_gated(app, synced_user, client):
-    assert client.get("/lab").status_code == 302, "no birth year -> not adult"
+    synced_user.birth_year = utcnow().year - 16
+    db.session.commit()
+    assert client.get("/lab").status_code == 302, "under 18 -> not adult"
     synced_user.birth_year = 2000
     db.session.commit()
     assert client.get("/lab").status_code == 404, "feature flag off by default"

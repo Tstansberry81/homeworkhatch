@@ -185,7 +185,8 @@ def test_live_quiz_full_game(app, synced_user, client):
         {"question": "3+3", "choices": ["6", "7"], "answer": 0, "explanation": ""}])
     db.session.add(quiz)
     db.session.commit()
-    r = client.post(f"/live/host/{quiz.id}")
+    assert client.post(f"/live/host/{quiz.id}").status_code == 400, "the host confirms it's their own material"
+    r = client.post(f"/live/host/{quiz.id}", data={"own_material": "1"})
     code = r.headers["Location"].split("/")[-2]
     session = db.session.scalar(select(LiveSession))
     assert session.code == code
@@ -241,10 +242,10 @@ def test_live_quiz_keeps_course_file_quizzes_private_and_closes_stale_games(app,
     mine = PracticeQuiz(user_id=synced_user.id, title="My own", questions=qs)
     db.session.add_all([from_files, mine])
     db.session.commit()
-    r = client.post(f"/live/host/{from_files.id}", follow_redirects=True)
+    r = client.post(f"/live/host/{from_files.id}", data={"own_material": "1"}, follow_redirects=True)
     assert b"be hosted live" in r.data and db.session.scalar(select(func.count(LiveSession.id))) == 0
     assert b"Host live" not in client.get(f"/study/quizzes/{from_files.id}").data
-    code = client.post(f"/live/host/{mine.id}").headers["Location"].split("/")[-2]
+    code = client.post(f"/live/host/{mine.id}", data={"own_material": "1"}).headers["Location"].split("/")[-2]
     s = db.session.scalar(select(LiveSession))
     s.created_at = utcnow() - timedelta(hours=7)
     db.session.commit()

@@ -222,7 +222,7 @@ function normAssignment(a, now, detail) {
       grade_posted: sub.posted_at != null || sub.score != null,
       attempt: sub.attempt,
       attachments: (detail?.attachments || sub.attachments || []).map((f) => ({
-        id: String(f.id), name: f.display_name, content_type: f["content-type"], size: f.size, download_url: f.url,
+        id: String(f.id), name: f.display_name, content_type: f["content-type"], size: f.size,
       })),
       comments: (detail?.submission_comments || []).map((cm) => ({
         author: cm.author_name, created_at: cm.created_at, comment: cm.comment,

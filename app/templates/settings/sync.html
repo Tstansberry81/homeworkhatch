@@ -23,6 +23,13 @@
     <li><label class="check grow"><input type="checkbox" name="keep" value="{{ c.id }}" {{ 'checked' if c.sync_files }}> {{ c.name }}</label>
       <span class="small muted">{{ c.files|length }} file{{ 's' if c.files|length != 1 }}{% if c.sync_files is none %} · not chosen yet{% endif %}</span></li>
   {% endfor %}</ul>
+  {% if past_courses %}
+  <p class="kicker mt">Past classes (no longer in your Canvas)</p>
+  <ul class="list">{% for c in past_courses %}
+    <li><label class="check grow"><input type="checkbox" name="keep" value="{{ c.id }}" checked> {{ c.name }}</label>
+      <span class="small muted">{{ c.files|selectattr('storage_key')|list|length }} stored · untick to delete</span></li>
+  {% endfor %}</ul>
+  {% endif %}
   <button class="btn mt">Save</button>
 </form>
 {% endif %}

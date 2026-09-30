@@ -21,7 +21,8 @@ MIN_AGE = 13  # COPPA: no accounts for children under 13
 
 
 def _age(month, year) -> int | None:
-    """Whole years from a birth month and year (the day is unknown, so assume the 1st)."""
+    """Whole years from a birth month and year. The day is unknown, so during the birth month the
+    birthday counts as not yet reached (the cautious reading for an age screen)."""
     try:
         month, year = int(month), int(year)
     except (TypeError, ValueError):
@@ -29,7 +30,7 @@ def _age(month, year) -> int | None:
     today = utcnow().date()
     if not 1 <= month <= 12 or not today.year - 120 <= year <= today.year:
         return None
-    return today.year - year - (1 if today.month < month else 0)
+    return today.year - year - (1 if today.month <= month else 0)  # in the birth month, assume not yet
 _TIMEZONES = None
 
 

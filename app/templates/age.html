@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}One quick check{% endblock %}
+{% macro body() %}
+<div style="max-width:460px;margin:40px auto;padding:0 16px">
+  <div class="card">
+    {% if blocked %}
+    <h1>Sorry</h1>
+    <p>We can't keep this account open. You've been signed out.</p>
+    {% else %}
+    <h1>One quick check</h1>
+    <p class="muted">We now ask everyone for their date of birth. It's only used to confirm who can use Homework Hatch and is never shown to anyone.</p>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Date of birth</label>
+      <div class="form-row">
+        <select name="birth_month" aria-label="Birth month" required>
+          <option value="">Month</option>
+          {% for m in ["January","February","March","April","May","June","July","August","September","October","November","December"] %}<option value="{{ loop.index }}">{{ m }}</option>{% endfor %}
+        </select>
+        <select name="birth_year" aria-label="Birth year" required>
+          <option value="">Year</option>
+          {% for y in range(now_utc().year, now_utc().year - 100, -1) %}<option>{{ y }}</option>{% endfor %}
+        </select>
+      </div>
+      <button class="btn btn-block mt">Continue</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+{% block content %}{{ body() }}{% endblock %}
+{% block public %}{{ body() }}{% endblock %}

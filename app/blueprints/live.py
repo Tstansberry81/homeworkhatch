@@ -94,6 +94,8 @@ def create(quiz_id: int):
         flash("Quizzes made from course files stay private to you, so they can't be hosted live. "
               "Host a quiz you wrote, or one made from your own pasted notes.", "info")
         return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
+    if request.form.get("own_material") != "1":  # the host confirms it's their own material
+        abort(400)
     for _ in range(10):
         code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
         if not db.session.scalar(select(LiveSession.id).where(LiveSession.code == code)):

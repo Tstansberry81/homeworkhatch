@@ -6,7 +6,7 @@ import zipfile
 from datetime import date, timedelta
 
 from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_file, url_for
-from flask_login import current_user, login_required
+from flask_login import current_user, login_required, logout_user
 from sqlalchemy import select
 
 from .. import queries
@@ -14,7 +14,7 @@ from ..config import BASE_DIR
 from ..extensions import db
 from ..models import Assignment, CalendarEvent, Course, User, utcnow
 from ..services import ics, integrations
-from ..utils import local_now, to_local
+from ..utils import local_now, log_activity, to_local
 from .auth import valid_timezone
 
 bp = Blueprint("main", __name__)
@@ -64,6 +64,32 @@ def support():
 @bp.route("/copyright")
 def copyright():
     return render_template("legal/copyright.html")
+
+
+@bp.route("/age", methods=["GET", "POST"])
+@login_required
+def age():
+    """The sign-up age check, for accounts created before sign-up asked for it."""
+    from .auth import MIN_AGE, _age
+
+    if current_user.birth_year is not None:
+        return redirect(url_for("main.dashboard"))
+    if request.method == "POST":
+        years = _age(request.form.get("birth_month"), request.form.get("birth_year"))
+        if years is None:
+            flash("Enter your birth month and year.", "error")
+            return render_template("age.html"), 400
+        if years < MIN_AGE:
+            current_user.active = False  # an admin reviews and deletes the account
+            log_activity(current_user.id, "age_blocked")
+            db.session.commit()
+            logout_user()
+            return render_template("age.html", blocked=True), 403
+        current_user.birth_year = int(request.form["birth_year"])
+        db.session.commit()
+        nxt = request.args.get("next") or ""
+        return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("main.dashboard"))
+    return render_template("age.html")
 
 
 @bp.route("/welcome", methods=["GET", "POST"])

@@ -5,7 +5,7 @@
 <div class="page-head">
   <div><div class="small muted"><a href="{{ url_for('study.index') }}">Quizzes</a>{% if quiz.course %} · {{ quiz.course.name }}{% endif %}</div><h1>{{ quiz.title }}</h1></div>
   <div class="btn-row">
-    {% if not quiz.from_course_files %}<form method="post" action="{{ url_for('live.create', quiz_id=quiz.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost">Host live</button></form>{% endif %}
+    {% if not quiz.from_course_files %}<form method="post" action="{{ url_for('live.create', quiz_id=quiz.id) }}" class="inline" data-confirm="Host this quiz live? Only host your own material: never questions copied from course files, answer keys or exams."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="own_material" value="1"><button class="btn btn-ghost">Host live</button></form>{% endif %}
     <a class="btn btn-ghost" href="{{ url_for('study.edit_quiz', quiz_id=quiz.id) }}">Edit</a>
   </div>
 </div>

@@ -30,15 +30,31 @@ def upgrade():
         batch_op.add_column(sa.Column('keep_all_files', sa.Boolean(), nullable=True))
 
     # ### end Alembic commands ###
-    # Data: classes synced before this change keep their files (their students already had them
-    # copied); AI quizzes made before it may come from course files, so they stay private; everyone's
-    # leaderboard listing becomes opt-in. Whether new classes keep files is left for each student.
-    course = sa.table("course", sa.column("sync_files", sa.Boolean()))
-    op.execute(course.update().values(sync_files=True))
+    # Data. Classes that already had files copied keep them (the student can untick them); every
+    # other class waits for the student's choice. AI quizzes made before now may come from course
+    # files, so they stay private. Leaderboards become opt-in. Signed Canvas links on turned-in files
+    # and the text of discussion posts are dropped. Chat messages from before rooms were opt-in are
+    # hidden (their audience was never asked).
+    bind = op.get_bind()
+    course = sa.table("course", sa.column("id", sa.Integer()), sa.column("sync_files", sa.Boolean()))
+    canvas_file = sa.table("canvas_file", sa.column("course_id", sa.Integer()), sa.column("storage_key", sa.String()))
+    has_files = sa.exists().where(canvas_file.c.course_id == course.c.id, canvas_file.c.storage_key.is_not(None))
+    op.execute(course.update().where(has_files).values(sync_files=True))
     quiz = sa.table("practice_quiz", sa.column("source", sa.String()), sa.column("from_course_files", sa.Boolean()))
     op.execute(quiz.update().where(quiz.c.source == "ai").values(from_course_files=True))
     user = sa.table("user", sa.column("show_on_leaderboards", sa.Boolean()))
     op.execute(user.update().values(show_on_leaderboards=False))
+    assignment = sa.table("assignment", sa.column("id", sa.Integer()), sa.column("attachments", sa.JSON()))
+    for row_id, attachments in bind.execute(sa.select(assignment.c.id, assignment.c.attachments)
+                                            .where(assignment.c.attachments.is_not(None))).all():
+        cleaned = [{k: f.get(k) for k in ("id", "name", "content_type", "size")}
+                   for f in attachments or [] if isinstance(f, dict)] or None
+        if cleaned != attachments:
+            bind.execute(assignment.update().where(assignment.c.id == row_id).values(attachments=cleaned))
+    discussion = sa.table("discussion", sa.column("message_html", sa.Text()))
+    op.execute(discussion.update().values(message_html=None))
+    chat = sa.table("chat_message", sa.column("deleted", sa.Boolean()))
+    op.execute(chat.update().values(deleted=True))
 
 
 def downgrade():
@@ -55,15 +71,15 @@ def downgrade():
         batch_op.drop_column('chat_joined')
 
     op.create_table('shared_generation',
-    sa.Column('id', sa.INTEGER(), nullable=False),
-    sa.Column('key', sa.VARCHAR(length=64), nullable=False),
-    sa.Column('kind', sa.VARCHAR(length=40), nullable=False),
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('key', sa.String(length=64), nullable=False),
+    sa.Column('kind', sa.String(length=40), nullable=False),
     sa.Column('data', sa.JSON(), nullable=False),
-    sa.Column('model', sa.VARCHAR(length=60), nullable=True),
-    sa.Column('cost_usd', sa.FLOAT(), nullable=True),
-    sa.Column('uses', sa.INTEGER(), server_default=sa.text("'0'"), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
-    sa.Column('last_used_at', sa.DATETIME(), nullable=True),
+    sa.Column('model', sa.String(length=60), nullable=True),
+    sa.Column('cost_usd', sa.Float(), nullable=True),
+    sa.Column('uses', sa.Integer(), server_default='0', nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.Column('last_used_at', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('key')
     )

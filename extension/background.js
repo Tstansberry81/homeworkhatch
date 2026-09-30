@@ -99,6 +99,15 @@ async function syncOnce(trigger) {
     chrome.action.setBadgeText({ text: "!" });
     return;
   }
+  // Nothing is read until the student has agreed to the disclosure for this Canvas site
+  // (installs from before 1.4.1 see it once in the popup).
+  const { consent } = await chrome.storage.local.get("consent");
+  if (!consent || consent.origin !== new URL(s.baseUrl).origin) {
+    await setStatus({ state: "needs_consent", progress: null, error: null });
+    chrome.action.setBadgeBackgroundColor({ color: "#b45309" });
+    chrome.action.setBadgeText({ text: "!" });
+    return;
+  }
   await setStatus({ state: "syncing", trigger, progress: null, error: null });
   const onProgress = (p) => setStatus({ progress: p });
   try {
@@ -167,6 +176,8 @@ async function fetchFileBytes(url, tab, expectedType) {
       if (r.ok && !looksLikeLoginPage(r.headers.get("content-type"), expectedType)) {
         return new Uint8Array(await r.arrayBuffer());
       }
+      // Canvas said no: respect it rather than retrying the same file from the Canvas tab.
+      if (r.status === 401 || r.status === 403) return null;
     } catch {}
   }
   if (!tab) return null;

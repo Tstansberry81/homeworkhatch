@@ -8,7 +8,7 @@ from datetime import timedelta
 
 import click
 from dotenv import load_dotenv
-from flask import Flask, render_template, request
+from flask import Flask, redirect, render_template, request, url_for
 from flask_login import current_user
 from sqlalchemy import select
 
@@ -122,6 +122,16 @@ def _register_hooks(app: Flask) -> None:
             current_user.last_active_date = today_s
             coin_service.award(current_user.id, 1, "Daily check-in", f"daily:{today_s}")
         db.session.commit()
+
+    # Accounts made before sign-up asked for a birth date confirm it once before going on.
+    AGE_EXEMPT = {"static", "main.age", "auth.logout", "main.terms", "main.privacy", "main.copyright", "main.support",
+                  "main.landing"}
+
+    @app.before_request
+    def require_age():
+        if (current_user.is_authenticated and current_user.birth_year is None
+                and request.endpoint not in AGE_EXEMPT and not (request.endpoint or "").startswith("api.")):
+            return redirect(url_for("main.age", next=request.full_path if request.method == "GET" else None))
 
     @app.after_request
     def security_headers(response):
