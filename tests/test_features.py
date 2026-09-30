@@ -86,7 +86,7 @@ def test_free_trial_runs_out_but_shared_sets_stay_free(app, synced_user, client,
     login(kim, classmate)
     r = kim.post("/study/generate", data=notes)
     assert r.status_code == 302 and len(fake_ai.calls) == 1
-    assert ai.remaining(classmate) == 149
+    assert ai.remaining(classmate) == 99
 
     # The same request from the same material is served from the saved result: no call, no action used.
     r = client.post("/study/generate", data=notes, follow_redirects=True)
@@ -99,7 +99,7 @@ def test_free_trial_runs_out_but_shared_sets_stay_free(app, synced_user, client,
 
     # Asking for a new version really generates (and costs the classmate an action).
     kim.post("/study/generate", data={**notes, "fresh": "1"})
-    assert len(fake_ai.calls) == 2 and ai.remaining(classmate) == 148
+    assert len(fake_ai.calls) == 2 and ai.remaining(classmate) == 98
     assert db.session.scalar(select(func.count(SharedGeneration.id))) == 1, "the first saved version stays"
 
     # Different material never matches.
@@ -317,7 +317,10 @@ def test_ai_cost_is_logged_with_cache_tokens_and_models_are_per_feature(app, syn
     assert opus["output_config"] == {"effort": "low"} and opus["fallbacks"] == "default"
     assert "output_config" not in haiku and "fallbacks" not in haiku, "Haiku 4.5 takes neither"
 
-    app.config["AI_MODELS"] = {"flashcards": "claude-sonnet-5-5"}
+    app.config["AI_MODELS"] = {"flashcards": "claude-sonnet-5-5", "tutor": "claude-sonnet-5-5"}
     client.post("/study/generate", data={"output": "deck", "mode": "paste", "pasted": "Notes about limits " * 5})
     client.post("/study/generate", data={"output": "quiz", "mode": "paste", "pasted": "Notes about limits " * 5})
     assert [c["model"] for c in fake_ai.calls[-2:]] == ["claude-sonnet-5-5", app.config["AI_MODEL"]]
+    conv = client.post("/tutor/new", data={}).headers["Location"].rstrip("/").split("/")[-1]
+    client.post(f"/tutor/{conv}/message", json={"text": "What is a limit?"}).get_data()
+    assert fake_ai.calls[-1]["stream"] and fake_ai.calls[-1]["model"] == "claude-sonnet-5-5", "the tutor follows AI_MODELS too"

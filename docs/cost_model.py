@@ -110,11 +110,12 @@ class Setup:
                    for a, w in SHARE_OF_ACTIONS.items())
 
 
-GEN_SONNET = {"Flashcards (15 cards)": "Sonnet 5.5", "Practice quiz (10 questions)": "Sonnet 5.5"}
+ON_SONNET = {a: "Sonnet 5.5" for a in ("Tutor answer", "Tutor, first turn with a file", "Flashcards (15 cards)",
+                                       "Practice quiz (10 questions)")}
 SETUPS = {
     "before": Setup("Before: Opus 5.5 for everything, nothing shared", {"default": "Opus 5.5"}),
-    "now": Setup("Now: Sonnet for flashcards and quizzes, Opus for tutor/summaries/PDFs", {"default": "Opus 5.5", **GEN_SONNET}),
-    "sonnet": Setup("Option: Sonnet for everything but scanned PDFs",
+    "now": Setup("Now: Sonnet for tutor, flashcards, quizzes; Opus for summaries/PDFs", {"default": "Opus 5.5", **ON_SONNET}),
+    "sonnet": Setup("Option: summaries on Sonnet too (untested)",
                     {"default": "Sonnet 5.5", "Read a scanned PDF (20 pages)": "Opus 5.5"}),
 }
 SHARED_HIT = 0.30  # ASSUME: 3 in 10 sets/summaries/PDF readings are already made by a classmate (0 with one user per class)
@@ -126,7 +127,7 @@ BEFORE_PLANS = dict(price=10.0, subscription=True, free_actions=6, paid_actions=
 PASS = dict(price=20 / 4, subscription=False, charge=20.0)   # $20 once, ~4 months of use
 PLUS = dict(price=6.0, subscription=True, charge=6.0)
 FREE_TRIAL_ACTIONS_PER_MONTH = 0.5   # ASSUME: 5 trial actions, most used in the first month, averaged over a semester
-PAID_TYPICAL, PAID_CAP = 50, 150     # ASSUME typical; the cap is what the plans promise
+PAID_TYPICAL, PAID_CAP = 50, 100     # ASSUME typical; the cap is what the plans promise
 PASS_SHARE = 0.6                     # ASSUME: 6 in 10 paying students pick the one-time pass
 PAID_SHARE = 0.04                    # ASSUME: 4% of students pay (2-5% is typical for free apps)
 

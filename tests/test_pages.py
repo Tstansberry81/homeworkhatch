@@ -199,7 +199,7 @@ def test_plan_quota_limits(app):
     user = make_user()
     assert billing.plan_for(user).key == "free" and ai.remaining(user) == 5, "a one-time free trial"
     user.plan, user.plan_status = "plus", "active"
-    assert ai.remaining(user) == 150
+    assert ai.remaining(user) == 100
     user.plan_status = "canceled"
     assert billing.plan_for(user).key == "free", "a lapsed subscription falls back to free"
     user.plan_comped = True
@@ -207,7 +207,7 @@ def test_plan_quota_limits(app):
     user.plan, user.plan_comped, user.plan_status = "premium", False, "active"
     assert billing.plan_for(user).key == "plus", "old plans map onto Plus"
     user.plan, user.plan_expires_at = "pass", utcnow() + timedelta(days=3)
-    assert billing.plan_for(user).key == "pass" and ai.remaining(user) == 150
+    assert billing.plan_for(user).key == "pass" and ai.remaining(user) == 100
     user.plan_expires_at = utcnow() - timedelta(minutes=1)
     assert billing.plan_for(user).key == "free", "an expired pass is the free plan"
 

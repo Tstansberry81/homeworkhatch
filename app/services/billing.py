@@ -42,9 +42,9 @@ class Plan:
 PLANS: dict[str, Plan] = {
     "free": Plan("free", "Free", 0, "", 5, "Canvas sync, calendar, Google Calendar, files, your own flashcards and "
                  "quizzes, and study sets a classmate already made from the same files. Plus 5 AI actions to try it."),
-    "pass": Plan("pass", "Semester Pass", 20, "once", 150, "150 AI actions a month for 120 days. One payment, "
+    "pass": Plan("pass", "Semester Pass", 20, "once", 100, "100 AI actions a month for 120 days. One payment, "
                  "nothing renews.", "STRIPE_PRICE_PASS", days=120),
-    "plus": Plan("plus", "Plus", 6, "month", 150, "150 AI actions a month. Cancel any time.", "STRIPE_PRICE_PLUS"),
+    "plus": Plan("plus", "Plus", 6, "month", 100, "100 AI actions a month. Cancel any time.", "STRIPE_PRICE_PLUS"),
 }
 LEGACY = {"normal": "plus", "premium": "plus", "pro": "plus"}  # plans from before Oct 2026
 
