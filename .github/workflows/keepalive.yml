@@ -1,6 +1,6 @@
-# Render's free plan sleeps after 15 idle minutes (the first visit then takes up to a minute,
-# and link checkers like the Chrome Web Store's give up), and Supabase's free plan pauses a
-# project after a week without activity. A ping every 10 minutes keeps both awake.
+# Backup keep-alive. Render's free plan sleeps after 15 idle minutes. The main pinger is a
+# Supabase pg_cron job ("homeworkhatch-keepalive", every 5 minutes via pg_net): GitHub runs
+# scheduled workflows hours late, so this one alone doesn't keep the site awake.
 name: Keep alive
 on:
   schedule:

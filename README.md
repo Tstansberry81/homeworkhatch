@@ -95,6 +95,20 @@ in the repo; see [SECURITY.md](SECURITY.md).
   `ENCRYPTION_KEYS`, a SQLite database, or local file storage. It also refuses an encryption
   key that doesn't match the one the data was written with.
 
+**Keeping it awake (free plan).** Render's free plan sleeps after 15 idle minutes, and
+waking takes up to a minute. A Supabase scheduled job pings the site every 5 minutes. Run this
+once in Supabase's SQL editor:
+
+```sql
+create extension if not exists pg_cron with schema pg_catalog;
+create extension if not exists pg_net with schema extensions;
+select cron.schedule('homeworkhatch-keepalive', '*/5 * * * *',
+  $$select net.http_get(url := 'https://homeworkhatch.onrender.com/health', timeout_milliseconds := 90000)$$);
+```
+
+A free workspace gets 750 instance hours a month, enough for one always-on service. On a paid
+instance, drop the job: paid instances never sleep.
+
 **4. Verify** from Render's shell (paid plans) or any machine with the same env vars:
 
 ```bash
