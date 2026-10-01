@@ -144,7 +144,7 @@ def test_rotation_moves_everything_to_the_new_key(app, client, snapshot, manifes
 
 
 def test_wake_ups_skip_work_that_is_already_done(app, monkeypatch):
-    from app import boot
+    import boot
 
     # The startup migration check knows the scripts' head without loading the app.
     from alembic.script import ScriptDirectory

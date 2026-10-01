@@ -12,7 +12,7 @@ services:
     autoDeployTrigger: checksPass
     buildCommand: pip install -r requirements.txt
     # Free instances can't run preDeployCommand, so migrations run on start (single instance, idempotent).
-    startCommand: python -m app.boot && exec gunicorn wsgi:app --bind 0.0.0.0:$PORT
+    startCommand: python boot.py && exec gunicorn wsgi:app --bind 0.0.0.0:$PORT
     healthCheckPath: /health
     envVars:
       - key: HH_ENV
