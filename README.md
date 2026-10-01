@@ -89,7 +89,7 @@ in the repo; see [SECURITY.md](SECURITY.md).
   `SUPABASE_URL`, `SUPABASE_S3_REGION`, `SUPABASE_S3_ACCESS_KEY_ID`,
   `SUPABASE_S3_SECRET_ACCESS_KEY`, `ENCRYPTION_KEYS`, `ANTHROPIC_API_KEY`, and optionally Stripe.
   `SECRET_KEY` is generated for you.
-- Migrations run on start (`flask db upgrade`). On a paid plan you can move them to
+- Migrations run on start (`python -m app.boot` runs `flask db upgrade` only when a new one exists). On a paid plan you can move them to
   `preDeployCommand`.
 - The app refuses to boot in production with an unsafe config: no `SECRET_KEY`, no
   `ENCRYPTION_KEYS`, a SQLite database, or local file storage. It also refuses an encryption

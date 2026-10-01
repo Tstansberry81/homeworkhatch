@@ -141,3 +141,21 @@ def test_rotation_moves_everything_to_the_new_key(app, client, snapshot, manifes
         assert "rotate me" in db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002")).text
     finally:
         crypto.configure(old)
+
+
+def test_wake_ups_skip_work_that_is_already_done(app, monkeypatch):
+    from app import boot
+
+    # The startup migration check knows the scripts' head without loading the app.
+    from alembic.script import ScriptDirectory
+
+    assert boot.heads() == set(ScriptDirectory.from_config(app.extensions["migrate"].migrate.get_config()).get_heads())
+    # The background encryption sweep doesn't re-scan every file once everything is encrypted with this key.
+    encryption._save_state({"done": True, "kid": crypto.keyring().active.kid})
+    monkeypatch.setattr(encryption, "migrate_all", lambda: (_ for _ in ()).throw(AssertionError("re-scanned")))
+    encryption._background(app)
+    encryption._save_state({"done": True, "kid": "old"})
+    ran = []
+    monkeypatch.setattr(encryption, "migrate_all", lambda: ran.append(1) or {"done": True})
+    encryption._background(app)
+    assert ran == [1], "a key change triggers the sweep"

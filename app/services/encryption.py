@@ -184,6 +184,7 @@ def migrate_all(rotate: bool = True) -> dict:
     previous = state() or {}
     result = {"at": utcnow().isoformat() + "Z", "fields_changed": fields, "objects": objects,
               "fields_remaining": remaining, "done": not remaining and not objects["failed"],
+              "kid": crypto.require_keyring().active.kid,
               "vacuumed": previous.get("vacuumed") if not fields else None}
     _save_state(result)
     if result["done"] and not result["vacuumed"] and db.engine.dialect.name == "postgresql":
@@ -236,6 +237,9 @@ def _background(app: Flask) -> None:
                 conn = db.engine.connect()
                 if not conn.execute(text("select pg_try_advisory_lock(:k)"), {"k": LOCK_ID}).scalar():
                     return  # another worker is on it
+            last = state() or {}
+            if last.get("done") and last.get("kid") == crypto.require_keyring().active.kid:
+                return  # everything was encrypted with this key, and new writes are encrypted as they happen
             result = migrate_all()
             log.info("encryption: %s", "all stored data is encrypted" if result["done"] else f"not done: {result}")
         except Exception:
