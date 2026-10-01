@@ -12,7 +12,8 @@ import math
 import re
 from collections import Counter
 
-from sqlalchemy import delete, or_, select
+from flask import current_app
+from sqlalchemy import delete, select
 
 from ..extensions import db
 from ..models import CanvasFile, ContentChunk, Course
@@ -108,8 +109,8 @@ def search(user_id: int, query: str, course_ids: list[int] | None = None, k: int
            max_candidates: int = 20000, per_source: int = 3) -> list[ContentChunk]:
     """BM25 over the student's chunks (optionally limited to some courses).
 
-    Candidates are prefiltered in SQL to chunks containing at least one query term, so the
-    cap never silently drops relevant material; at most `per_source` chunks per file/page are
+    Chunk text is encrypted, so matching happens here after decrypting rather than in SQL (a
+    student has hundreds to a few thousand chunks). At most `per_source` chunks per file/page are
     returned so one long document can't crowd out everything else.
     """
     q_terms = tokenize(query)
@@ -120,13 +121,16 @@ def search(user_id: int, query: str, course_ids: list[int] | None = None, k: int
         if not course_ids:
             return []
         stmt = stmt.where(ContentChunk.course_id.in_(course_ids))
-    distinct_terms = sorted(set(q_terms), key=len, reverse=True)[:12]
-    stmt = stmt.where(or_(*[ContentChunk.text.ilike(f"%{t}%") for t in distinct_terms],
-                          *[ContentChunk.title.ilike(f"%{t}%") for t in distinct_terms]))
-    chunks = db.session.scalars(stmt.limit(max_candidates)).all()
-    if not chunks:
+    chunks = db.session.scalars(stmt.order_by(ContentChunk.id.desc()).limit(max_candidates)).all()
+    if len(chunks) == max_candidates:
+        current_app.logger.warning("search for user %s hit the %s-chunk cap; oldest chunks skipped", user_id, max_candidates)
+    wanted = set(q_terms)
+    pairs = [(c, Counter(tokenize(c.text) + tokenize(c.title) * 2)) for c in chunks]
+    pairs = [(c, d) for c, d in pairs if wanted & d.keys()]
+    if not pairs:
         return []
-    docs = [Counter(tokenize(c.text) + tokenize(c.title) * 2) for c in chunks]
+    chunks = [c for c, _ in pairs]
+    docs = [d for _, d in pairs]
     n = len(docs)
     avg_len = sum(sum(d.values()) for d in docs) / n or 1.0
     df = Counter()

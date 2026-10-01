@@ -39,7 +39,13 @@ def overview():
     }
     plans = dict(db.session.execute(select(User.plan, func.count(User.id)).group_by(User.plan)).all())
     pending = db.session.scalars(select(User).where(User.is_approved.is_(False)).order_by(User.created_at)).all()
-    return render_template("admin/overview.html", stats=stats, plans=plans, pending=pending)
+    from ..services import crypto, encryption
+
+    ring = crypto.keyring()
+    enc = {"on": ring is not None, "strict": crypto.strict(), "keys": ring.checks() if ring else {},
+           "active": ring.active.kid if ring else None, "pending": encryption.field_status() if ring else {},
+           "last": encryption.state()}
+    return render_template("admin/overview.html", stats=stats, plans=plans, pending=pending, enc=enc)
 
 
 @bp.route("/ai")

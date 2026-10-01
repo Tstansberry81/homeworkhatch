@@ -114,7 +114,7 @@ def award_for_assignment(user_id: int, account_host: str, a: Assignment, already
             paid += amount
     if a.status == "graded" and a.percent is not None and f"grade:{key}" not in already:
         bonus = int(max(0.0, min(a.percent, 100.0)) / 100 * base)
-        if award(user_id, bonus, f"Grade bonus: {a.name} ({a.percent:g}%)", f"grade:{key}"):
+        if award(user_id, bonus, f"Grade bonus: {a.name}", f"grade:{key}"):
             paid += bonus
     return paid
 

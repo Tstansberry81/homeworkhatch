@@ -7,7 +7,7 @@ import requests
 from sqlalchemy import select
 
 from app import create_app
-from app.config import engine_options, load_config, normalize_database_url, validate_production
+from app.config import TEST_ENCRYPTION_KEYS, engine_options, load_config, normalize_database_url, validate_production
 from app.extensions import db
 from app.models import CanvasFile
 
@@ -56,18 +56,23 @@ def test_s3_storage_roundtrip_signed_urls_and_prefix_delete(s3_app):
 
     from app.services.storage import get_storage, safe_key_part
 
+    from app.services import crypto
+
     st = get_storage()
     st.put_file("u/1/files/a/notes.pdf", io.BytesIO(b"%PDF one"), "application/pdf")
     st.put_file("u/12/files/b/other.pdf", io.BytesIO(b"%PDF two"), "application/pdf")
     st.put_bytes("u/1/snapshots/latest.json", b"{}", "application/json")
     assert st.read("u/1/files/a/notes.pdf") == b"%PDF one"
+    assert st.signed_url("u/1/files/a/notes.pdf", "n.pdf", "application/pdf", True, 60) is None, "no links to ciphertext"
+    assert st.presign_put("u/1/x", "text/plain", 60) is None, "uploads come through the app"
 
-    url = st.signed_url("u/1/files/a/notes.pdf", "Week 1 — notes.pdf", "application/pdf", True, 60)
+    # The provider only ever holds ciphertext, bound to its path.
+    url = st.backend.signed_url("u/1/files/a/notes.pdf", "Week 1 — notes.pdf", "application/pdf", True, 60)
     q = parse_qs(urlsplit(url).query)
     assert "inline" in q["response-content-disposition"][0] and "X-Amz-Signature" in q
     r = requests.get(url, timeout=10)
-    assert r.status_code == 200 and r.content == b"%PDF one"
-    assert r.headers["Content-Type"] == "application/pdf"
+    assert r.status_code == 200 and r.content.startswith(crypto.MAGIC) and b"%PDF one" not in r.content
+    assert st.sealed_kid("u/1/files/a/notes.pdf") == "t1"
 
     st.delete_prefix("u/1/")
     with pytest.raises(Exception):
@@ -86,8 +91,11 @@ def test_sync_upload_and_download_through_object_storage(s3_app, snapshot, manif
     assert f.storage_key.endswith("/notes.txt") and f.text_status == "ok" and f.sha256
     login(client, user)
     r = client.get(f"/courses/files/{f.id}/download")
-    assert r.status_code == 302, "downloads redirect to a signed URL instead of streaming through the app"
-    assert requests.get(r.headers["Location"], timeout=10).content == b"The chain rule, stored in object storage."
+    assert r.status_code == 200 and r.data == b"The chain rule, stored in object storage.", "decrypted on the way out"
+    from app.services import crypto
+    from app.services.storage import get_storage
+
+    assert get_storage().backend.read(f.storage_key).startswith(crypto.MAGIC), "stored encrypted"
 
     # A newer version replaces the old object.
     old_key = f.storage_key
@@ -113,48 +121,25 @@ def test_oversized_upload_is_rejected_cleanly(s3_app, snapshot, manifest):
     assert r.status_code == 413
 
 
-def test_direct_upload_to_storage_then_confirm(s3_app, snapshot, manifest):
-    """The extension PUTs bytes straight to storage with a presigned URL; the app only confirms."""
-    import hashlib
-
+def test_with_encryption_uploads_come_through_the_app(s3_app, snapshot, manifest):
+    """No presigned upload URLs: the app seals every file before it reaches storage."""
+    from app.services import crypto
     from app.services.storage import get_storage
 
     client = s3_app.test_client()
     user = make_user()
     auth = {"Authorization": f"Bearer {api_token(user)}"}
     body = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
-    assert set(body["upload_urls"]) == set(body["files_needed"]) == {"9001", "9002"}
-    target = body["upload_urls"]["9002"]
-    assert target["headers"] == {"Content-Type": "text/plain"}
-    q = f"?updated_at={manifest[1]['updated_at']}"
-    hdrs = {**auth, "X-Snapshot-Id": body["snapshot_id"]}
-
-    # Confirming before the bytes arrived is refused.
-    assert client.post(f"/v1/files/9002/uploaded{q}", headers=hdrs).status_code == 400
-
-    data = b"Direct to storage: the chain rule."
-    assert requests.put(target["url"], data=data, headers=target["headers"], timeout=10).status_code == 200
-    r = client.post(f"/v1/files/9002/uploaded{q}", headers=hdrs)
-    assert r.status_code == 200, r.get_json()
+    assert body["upload_urls"] == {} and set(body["files_needed"]) == {"9001", "9002"}
+    data = b"Through the app: the chain rule."
+    r = client.put(f"/v1/files/9002?updated_at={manifest[1]['updated_at']}", data=data,
+                   headers={**auth, "X-Snapshot-Id": body["snapshot_id"], "Content-Type": "text/plain"})
+    assert r.status_code == 200
     f = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9002"))
-    assert f.is_stored and f.size == len(data)
-    assert f.text_status == "ok" and "chain rule" in f.text, "text read back from storage"
-    assert f.sha256 == hashlib.sha256(data).hexdigest()
+    assert f.text_status == "ok" and "chain rule" in f.text
+    raw = get_storage().backend.read(f.storage_key)
+    assert raw.startswith(crypto.MAGIC) and data not in raw
     assert get_storage().read(f.storage_key) == data
-    from app.models import SyncRun
-
-    assert db.session.get(SyncRun, body["snapshot_id"]).files_uploaded == 1
-
-    # Over the size limit: the object is removed and the version isn't requested again.
-    s3_app.config["MAX_FILE_MB"] = 0
-    assert requests.put(body["upload_urls"]["9001"]["url"], data=b"%PDF big", timeout=10,
-                        headers=body["upload_urls"]["9001"]["headers"]).status_code == 200
-    r = client.post(f"/v1/files/9001/uploaded?updated_at={manifest[0]['updated_at']}", headers=hdrs)
-    assert r.status_code == 413
-    big = db.session.scalar(select(CanvasFile).where(CanvasFile.canvas_id == "9001"))
-    assert big.text_status == "too_large" and big.storage_key is None
-    again = client.post("/v1/snapshots", json={"snapshot": snapshot, "files": manifest}, headers=auth).get_json()
-    assert "9001" not in again["files_needed"], "a rejected file isn't requested every sync"
 
 
 def test_local_storage_has_no_upload_urls(client, snapshot, manifest):
@@ -209,10 +194,11 @@ def test_stale_text_claims_are_retried(app, snapshot, manifest):
 def test_database_urls_from_supabase_and_render():
     pooler = "postgresql://postgres.abcd:pw@aws-1-us-east-1.pooler.supabase.com:5432/postgres"
     url = normalize_database_url(pooler)
-    assert url.startswith("postgresql+psycopg://postgres.abcd:pw@") and url.endswith("?sslmode=require")
+    assert url.startswith("postgresql+psycopg://postgres.abcd:pw@") and "sslmode=verify-full" in url
+    assert "sslrootcert=" in url and "supabase-root-2021.crt" in url, "the server must prove it's Supabase"
     assert normalize_database_url("postgres://u:p@host:5432/db") == "postgresql+psycopg://u:p@host:5432/db"
     assert "sslmode=verify-full" in normalize_database_url(pooler + "?sslmode=verify-full")
-    assert "sslmode=require" not in normalize_database_url("postgres://u:p@localhost:5432/db"), "only Supabase hosts"
+    assert "sslmode" not in normalize_database_url("postgres://u:p@localhost:5432/db"), "only Supabase hosts"
     assert normalize_database_url("").startswith("sqlite:///")
 
     session = engine_options(normalize_database_url(pooler))
@@ -225,15 +211,15 @@ def test_database_urls_from_supabase_and_render():
 
 def test_supabase_storage_endpoint_and_production_checks(monkeypatch):
     for key in ("S3_ENDPOINT_URL", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID",
-                "AWS_SECRET_ACCESS_KEY", "DATABASE_URL", "SECRET_KEY", "MAX_FILE_MB"):
+                "AWS_SECRET_ACCESS_KEY", "DATABASE_URL", "SECRET_KEY", "MAX_FILE_MB", "ENCRYPTION_KEYS"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("STORAGE_BACKEND", "supabase")
     monkeypatch.setenv("SUPABASE_URL", "https://abcdefgh.supabase.co")
     cfg = load_config("production")
     assert cfg["S3_ENDPOINT_URL"] == "https://abcdefgh.storage.supabase.co/storage/v1/s3"
-    assert cfg["MAX_FILE_MB"] == 50, "Supabase Free caps files at 50 MB"
+    assert cfg["MAX_FILE_MB"] == 49, "Supabase caps objects at 50 MB; encryption adds a little"
     problems = " ".join(validate_production(cfg))
-    for needle in ("SECRET_KEY", "DATABASE_URL", "S3_BUCKET", "S3_ACCESS_KEY_ID"):
+    for needle in ("SECRET_KEY", "DATABASE_URL", "S3_BUCKET", "S3_ACCESS_KEY_ID", "ENCRYPTION_KEYS"):
         assert needle in problems
     monkeypatch.setenv("SECRET_KEY", "x" * 40)
     monkeypatch.setenv("DATABASE_URL", "postgresql://postgres.abcd:pw@aws-1-us-east-1.pooler.supabase.com:5432/postgres")
@@ -241,6 +227,7 @@ def test_supabase_storage_endpoint_and_production_checks(monkeypatch):
     monkeypatch.setenv("SUPABASE_S3_ACCESS_KEY_ID", "id")
     monkeypatch.setenv("SUPABASE_S3_SECRET_ACCESS_KEY", "secret")
     monkeypatch.setenv("SUPABASE_S3_REGION", "us-east-1")
+    monkeypatch.setenv("ENCRYPTION_KEYS", TEST_ENCRYPTION_KEYS)
     assert validate_production(load_config("production")) == []
     with pytest.raises(RuntimeError):
         monkeypatch.setenv("SECRET_KEY", "dev-insecure-change-me")

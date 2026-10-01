@@ -32,13 +32,17 @@ def env_int(name: str, default: int) -> int:
 # ---------------------------------------------------------------- database
 
 
+SUPABASE_ROOT_CA = BASE_DIR / "app" / "certs" / "supabase-root-2021.crt"
+
+
 def normalize_database_url(url: str | None) -> str:
     """Accepts the connection strings Supabase/Render hand out and makes them SQLAlchemy-ready.
 
     - postgres:// and postgresql:// become postgresql+psycopg:// (SQLAlchemy 2 rejects the
       first, and a bare postgresql:// would pick psycopg2, which isn't installed).
-    - Supabase hosts get sslmode=require unless an sslmode is already given (Supabase does
-      not enforce TLS by default).
+    - Supabase hosts get sslmode=verify-full against Supabase's own root CA (bundled in
+      app/certs; valid to 2031) unless an sslmode is already given: the connection is encrypted
+      and the server has to prove it's really Supabase.
     """
     if not url:
         return f"sqlite:///{BASE_DIR / 'instance' / 'homeworkhatch.db'}"
@@ -50,7 +54,8 @@ def normalize_database_url(url: str | None) -> str:
         parts = urlsplit(url)
         query = dict(parse_qsl(parts.query))
         if "supabase" in (parts.hostname or "") and "sslmode" not in query:
-            query["sslmode"] = "require"
+            query["sslmode"] = "verify-full"
+            query["sslrootcert"] = str(SUPABASE_ROOT_CA)
             url = urlunsplit(parts._replace(query=urlencode(query)))
     return url
 
@@ -134,7 +139,8 @@ def load_config(env_name: str) -> dict:
 
         "MAX_SNAPSHOT_MB": env_int("MAX_SNAPSHOT_MB", 64),
         # Supabase's Free plan caps each file at 50 MB; raise this with a paid plan.
-        "MAX_FILE_MB": env_int("MAX_FILE_MB", 50 if storage_backend == "supabase" else 512),
+        # Supabase caps objects at 50 MB; encryption adds a little, so plaintext stops at 49.
+        "MAX_FILE_MB": env_int("MAX_FILE_MB", 49 if storage_backend == "supabase" else 512),
         # Text is extracted from uploaded files up to this size for the AI tutor and generators.
         "MAX_EXTRACT_MB": env_int("MAX_EXTRACT_MB", 40),
 
@@ -165,6 +171,12 @@ def load_config(env_name: str) -> dict:
         "COMPOSIO_AUTH_CONFIGS": env_pairs("COMPOSIO_AUTH_CONFIGS"),
         "COMPOSIO_TOOLKIT_VERSIONS": env_pairs("COMPOSIO_TOOLKIT_VERSIONS"),
 
+        # Application-level encryption (see SECURITY.md): "kid:base64key,..." with the active key
+        # first. Required in production; generated into instance/ for local development.
+        "ENCRYPTION_KEYS": os.environ.get("ENCRYPTION_KEYS", "").strip(),
+        # On once every existing value is encrypted: unencrypted values are then refused.
+        "ENCRYPTION_STRICT": env_bool("ENCRYPTION_STRICT", False),
+
         # Shown on /support (and used as the Chrome Web Store support contact). Without it the
         # page points to GitHub issues.
         "SUPPORT_EMAIL": os.environ.get("SUPPORT_EMAIL", "").strip(),
@@ -194,15 +206,22 @@ def load_config(env_name: str) -> dict:
     if env_name == "test":
         test_url = os.environ.get("TEST_DATABASE_URL")  # set to run the suite against Postgres
         cfg.update(TESTING=True, SECRET_KEY="test", WTF_CSRF_ENABLED=False, AI_ENABLED=True, STORAGE_BACKEND="local",
+                   ENCRYPTION_KEYS=TEST_ENCRYPTION_KEYS, ENCRYPTION_STRICT=False,
                    FEATURE_SIMULATIONS=False, REQUIRE_APPROVAL=False, EXTRACT_INLINE=True, COMPOSIO_API_KEY="",
                    SQLALCHEMY_DATABASE_URI=normalize_database_url(test_url) if test_url else "sqlite://",
                    SQLALCHEMY_ENGINE_OPTIONS=engine_options(normalize_database_url(test_url)) if test_url else {})
     return cfg
 
 
+# A fixed key for the test suite only (never used anywhere else).
+TEST_ENCRYPTION_KEYS = "t1:" + "dGVzdC1vbmx5LWtleS1kby1ub3QtdXNlLWFueXdoZXJlIQ"[:43]
+
+
 def validate_production(cfg: dict) -> list[str]:
     """Problems that would make a production deploy unsafe or broken."""
     problems = []
+    if not cfg.get("ENCRYPTION_KEYS"):
+        problems.append("ENCRYPTION_KEYS is not set (production data must be encrypted).")
     if cfg["SECRET_KEY"] == "dev-insecure-change-me":
         problems.append("SECRET_KEY is not set.")
     if cfg["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):

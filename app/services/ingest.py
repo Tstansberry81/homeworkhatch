@@ -455,13 +455,6 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
     account.last_snapshot_hash = digest
     log_activity(user.id, "sync", f"{len(courses_by_canvas_id)} courses from {host}, {len(needed)} files needed")
 
-    # Keep the latest snapshot (already scrubbed of links, rosters and posts) for re-processing.
-    try:
-        get_storage().put_bytes(f"u/{user.id}/snapshots/{account.id}-latest.json",
-                                json.dumps({"snapshot": snapshot, "files": manifest}).encode())
-    except Exception as exc:  # storage trouble must not lose the sync itself
-        current_app.logger.warning("could not store raw snapshot: %s", exc)
-
     db.session.commit()
     return run, needed
 

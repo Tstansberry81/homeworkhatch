@@ -9,6 +9,19 @@
   <div class="card stat"><div class="value">{{ '{:,.2f}'.format(stats[key] or 0) if key == 'spend_month' else '{:,}'.format(stats[key] or 0) }}</div><div class="label">{{ label }}</div></div>
   {% endfor %}
 </div>
+<div class="card mb">
+  <h2>Encryption</h2>
+  {% if not enc.on %}<p class="small" style="color:var(--err)">Off: ENCRYPTION_KEYS isn't set.</p>{% else %}
+  <p class="small">{% set last = enc.last or {} %}
+    {% if not enc.pending and last.get('done') %}<strong>Everything stored is encrypted</strong> (database and files, checked {{ last.get('at', '')[:16]|replace('T', ' ') }} UTC).
+    {% elif enc.pending %}<strong>Encrypting what was stored before…</strong> {{ enc.pending|length }} column{{ 's' if enc.pending|length != 1 }} still to go; it runs by itself after each deploy.
+    {% else %}Waiting for the first background check of stored files (runs after a deploy).{% endif %}
+    {% if last.get('objects', {}).get('failed') %}<br><span style="color:var(--err)">{{ last.objects.failed|length }} file(s) couldn't be encrypted; retried on the next restart.</span>{% endif %}</p>
+  <p class="small muted">Active key <code>{{ enc.active }}</code> · strict mode {{ 'on' if enc.strict else 'off' }} ·
+    key check values: {% for kid, check in enc['keys'].items() %}<code>{{ kid }} {{ check }}</code>{{ ', ' if not loop.last }}{% endfor %}
+    (compare these with your saved copy; they don't reveal the key).</p>
+  {% endif %}
+</div>
 <div class="grid grid-2">
   <div class="card"><h2>Plans</h2><ul class="list">{% for plan, n in plans.items() %}<li><span>{{ plan }}</span><strong>{{ n }}</strong></li>{% endfor %}</ul></div>
   <div class="card"><h2>Waiting for approval</h2>

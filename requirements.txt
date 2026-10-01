@@ -16,5 +16,6 @@ requests==2.34.2
 python-dotenv>=1.0
 gunicorn==26.2.0
 psycopg[binary]==3.3.6
+cryptography>=46
 # Only needed when STORAGE_BACKEND=s3:
 boto3>=1.35

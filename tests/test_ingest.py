@@ -74,9 +74,9 @@ def test_coins_follow_the_original_rules(app, client, snapshot, manifest):
     sync(client, api_token(user), snapshot, manifest)
     rows = {t.reason: t.amount for t in db.session.scalars(select(CoinTransaction).where(CoinTransaction.user_id == user.id))}
     assert rows["Turned in: HW 1"] == 10                     # assignment base
-    assert rows["Grade bonus: HW 1 (90%)"] == 9              # 90% of base
+    assert rows["Grade bonus: HW 1"] == 9                    # 90% of base (the grade itself isn't written out)
     assert rows["Turned in (late): HW 2"] == 5               # late work earns half
-    assert rows["Grade bonus: HW 2 (40%)"] == 4
+    assert rows["Grade bonus: HW 2"] == 4
     assert not any("Placement" in r for r in rows), "hidden courses don't pay"
     assert not any("Quiz 1" in r for r in rows), "missing work doesn't pay"
 
@@ -208,9 +208,7 @@ def test_files_are_copied_only_for_classes_the_student_chose(app, client, snapsh
     snapshot["courses"][0]["files"][0]["download_url"] = "https://canvas.test/files/9001/download?verifier=secret"
     _, uploaded = sync(client, token, snapshot, manifest)
     assert uploaded == [], "no course files until the student picks classes"
-    archived = get_storage().read(f"u/{student.id}/snapshots/"
-                                  f"{db.session.scalar(select(Course.account_id).limit(1))}-latest.json").decode()
-    assert "verifier=secret" not in archived and "download_url" not in archived, "signed links aren't kept"
+    assert not list(get_storage().list_keys(f"u/{student.id}/snapshots/")), "raw snapshots aren't kept at all"
     assert all(c.sync_files is None for c in db.session.scalars(select(Course)))
 
     c = app.test_client()
@@ -388,8 +386,7 @@ def test_file_choices_hold_across_twins_late_uploads_media_and_past_classes(app,
     stored = json.dumps([db.session.scalar(select(ingest.Assignment.attachments).where(ingest.Assignment.canvas_id == hw["id"]))])
     assert "verifier" not in stored and "download_url" not in stored
     assert db.session.scalar(select(ingest.Discussion.message_html)) is None
-    archive = get_storage().read(f"u/{student.id}/snapshots/{calc.account_id}-latest.json").decode()
-    assert "roster_ids" not in archive and "I'm Ana" not in archive and "verifier" not in archive
+    assert not list(get_storage().list_keys(f"u/{student.id}/snapshots/")), "raw snapshots aren't kept at all"
 
     # An upload that lands after the class was unticked is refused, and its bytes aren't kept.
     auth = {"Authorization": f"Bearer {token}"}

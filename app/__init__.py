@@ -19,6 +19,19 @@ from .models import User, utcnow
 load_dotenv(BASE_DIR / ".env")
 
 
+def _dev_encryption_keys(instance_path: str) -> str:
+    """Local development gets its own key, kept in instance/ (never committed, never production)."""
+    from .services import crypto
+
+    path = os.path.join(instance_path, "encryption-keys")
+    if not os.path.exists(path):
+        os.makedirs(instance_path, exist_ok=True)
+        with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as fh:
+            fh.write(crypto.new_key_spec("dev1"))
+    with open(path) as fh:
+        return fh.read().strip()
+
+
 def create_app(env_name: str | None = None, overrides: dict | None = None) -> Flask:
     env_name = env_name or os.environ.get("HH_ENV", "development")
     app = Flask(__name__, instance_path=str(BASE_DIR / "instance"))
@@ -41,8 +54,15 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
 
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    if env_name == "development" and not app.config.get("ENCRYPTION_KEYS"):
+        app.config["ENCRYPTION_KEYS"] = _dev_encryption_keys(app.instance_path)
+
     db.init_app(app)
     migrate.init_app(app, db, render_as_batch=True)  # batch mode lets SQLite handle ALTERs
+    from .services import encryption as encryption_service
+
+    encryption_service.startup(app)  # refuses to start with a key that doesn't match the data
+    encryption_service.register_cli(app)
     login_manager.init_app(app)
     csrf.init_app(app)
 
@@ -106,6 +126,12 @@ def _register_hooks(app: Flask) -> None:
     from .utils import local_now
 
     @app.before_request
+    def encrypt_leftovers():
+        from .services import encryption as encryption_service
+
+        encryption_service.kick(app)  # once per process: encrypts anything stored before encryption
+
+    @app.before_request
     def track_activity():
         if not current_user.is_authenticated or request.endpoint in (None, "static"):
             return
@@ -138,6 +164,8 @@ def _register_hooks(app: Flask) -> None:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        if app.config["ENV_NAME"] == "production":  # browsers only ever use HTTPS for this site
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
         return response
 
 
@@ -240,6 +268,20 @@ def _register_cli(app: Flask) -> None:
                    f"(write/read {'ok' if round_trip else 'FAILED'}, signed URL {'ok' if signed_ok else 'FAILED'})")
         except Exception as exc:
             report(False, "file storage", str(exc).splitlines()[0])
+        try:
+            from .services import crypto, encryption
+            from .services.storage import EncryptedStorage
+
+            ring = crypto.require_keyring()
+            ring.selftest()
+            sealed = isinstance(get_storage(), EncryptedStorage)
+            pending = encryption.field_status()
+            report(sealed and not pending, "encryption",
+                   f"active key {ring.active.kid}, files {'sealed' if sealed else 'NOT sealed'}, "
+                   f"{'all fields encrypted' if not pending else f'{len(pending)} columns still have unencrypted values'}"
+                   f", strict {'on' if crypto.strict() else 'off'}")
+        except Exception as exc:
+            report(False, "encryption", str(exc).splitlines()[0])
         if ai_service.available():
             report(True, "AI", app.config["AI_MODEL"])
         else:

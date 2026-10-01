@@ -5,21 +5,29 @@ Backends behind one small interface:
 - "supabase": Supabase Storage through its S3-compatible API.
 - "s3": any S3-compatible service (AWS S3, Cloudflare R2, MinIO).
 
-Object storage serves downloads via short-lived presigned URLs, and the extension uploads
-straight to presigned PUT URLs, so large files never stream through the web worker. Keys look like
+With ENCRYPTION_KEYS set (always, outside bare unit setups), the backend is wrapped in
+EncryptedStorage: every object is sealed before it reaches the provider and opened on the way
+back (see crypto.py), so downloads stream through the app and uploads come through it too; no
+presigned URLs hand out or accept plaintext. Keys look like
 "u/<user id>/files/<account id>/<canvas file id>/<version>/<filename>".
 """
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import re
 import shutil
+import tempfile
 import uuid
+from contextlib import closing
 from pathlib import Path
-from typing import IO, Protocol
+from typing import IO, Iterator, Protocol
 
 from flask import current_app
+
+from . import crypto
 
 
 class TooLarge(Exception):
@@ -103,6 +111,17 @@ class LocalStorage:
     def size(self, key):
         path = self._path(key)
         return path.stat().st_size if path.is_file() else None
+
+    def head_bytes(self, key, n):
+        with open(self._path(key), "rb") as fh:
+            return fh.read(n)
+
+    def list_keys(self, prefix=""):
+        for path in sorted(self.root.rglob("*")):
+            if path.is_file() and not path.name.startswith("."):
+                key = path.relative_to(self.root).as_posix()
+                if key.startswith(prefix):
+                    yield key
 
 
 def _xml_content_type(request, **kwargs):
@@ -197,6 +216,15 @@ class S3Storage:
         return self.s3.generate_presigned_url("put_object", ExpiresIn=ttl,
                                               Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type})
 
+    def head_bytes(self, key, n):
+        return self.s3.get_object(Bucket=self.bucket, Key=key, Range=f"bytes=0-{n - 1}")["Body"].read()
+
+    def list_keys(self, prefix=""):
+        paginator = self.s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for o in page.get("Contents", []):
+                yield o["Key"]
+
     def size(self, key):
         from botocore.exceptions import ClientError
 
@@ -206,6 +234,141 @@ class S3Storage:
             if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
                 return None
             raise StorageError(str(exc)) from exc
+
+
+SPOOL = 16 * 1024 * 1024  # bigger temporary copies go to disk, not memory (512 MB instances)
+
+
+def _prepend(head: bytes, raw: IO[bytes]):
+    """A read(n) that returns `head` first, then the rest of `raw`."""
+    buf = bytearray(head)
+
+    def read(n: int) -> bytes:
+        if buf:
+            out = bytes(buf[:n])
+            del buf[:n]
+            return out
+        return raw.read(n)
+    return read
+
+
+def _pieces(read, size: int = 1024 * 1024) -> Iterator[bytes]:
+    while piece := read(size):
+        yield piece
+
+
+class EncryptedStorage:
+    """Seals every object on the way in and opens it on the way out. Objects written before
+    encryption was switched on are read as they are until migrated (and refused in strict mode)."""
+
+    def __init__(self, backend):
+        self.backend = backend
+
+    @staticmethod
+    def _ring() -> crypto.Keyring:
+        return crypto.require_keyring()
+
+    def _sealed_spool(self, chunks, key: str):
+        spool = tempfile.SpooledTemporaryFile(max_size=SPOOL)
+        for piece in self._ring().seal(chunks, key):
+            spool.write(piece)
+        spool.seek(0)
+        return spool
+
+    def put_file(self, key, fileobj, content_type=None):
+        with self._sealed_spool(crypto.stream_file(fileobj), key) as spool:
+            self.backend.put_file(key, spool, "application/octet-stream")
+
+    def put_bytes(self, key, data, content_type=None):
+        self.backend.put_bytes(key, self._ring().seal_bytes(data, key), "application/octet-stream")
+
+    def open(self, key):
+        raw = self.backend.open(key)
+        head = crypto._read_upto(raw.read, len(crypto.MAGIC))
+        if head == crypto.MAGIC:
+            plain = self._ring().open(_prepend(head, raw), key)
+        elif crypto.strict():
+            raw.close()
+            raise crypto.CryptoError(f"{key} isn't encrypted (ENCRYPTION_STRICT is on)")
+        else:
+            plain = _pieces(_prepend(head, raw))
+        return io.BufferedReader(crypto.StreamReader(plain, on_close=raw.close), buffer_size=256 * 1024)
+
+    def read(self, key):
+        with closing(self.open(key)) as fh:
+            return fh.read()
+
+    def delete_prefix(self, prefix):
+        self.backend.delete_prefix(prefix)
+
+    def signed_url(self, key, filename, content_type, inline, ttl):
+        return None  # the provider only holds ciphertext: the app decrypts and streams
+
+    def presign_put(self, key, content_type, ttl):
+        return None  # uploads come through the app, which seals them before storage
+
+    def size(self, key):
+        return self.backend.size(key)
+
+    def list_keys(self, prefix=""):
+        return self.backend.list_keys(prefix)
+
+    def sealed_kid(self, key) -> str | None:
+        """The key id an object is sealed with, or None if it's stored unencrypted."""
+        return self._ring().file_kid(self.backend.head_bytes(key, len(crypto.MAGIC) + 17))
+
+    def rewrite(self, key: str, seal: bool) -> bool:
+        """Re-store one object sealed with the active key (seal=True) or unencrypted (seal=False),
+        if it isn't already. The new bytes are checked before they replace the old ones, and read
+        back afterwards; on any mismatch the original is put back. Returns whether it changed."""
+        ring = self._ring()
+        kid = self.sealed_kid(key)
+        if (seal and kid == ring.active.kid) or (not seal and kid is None):
+            return False
+        before = hashlib.sha256()
+        original = tempfile.SpooledTemporaryFile(max_size=SPOOL)
+        raw = self.backend.open(key)
+        try:
+            for piece in _pieces(raw.read):
+                original.write(piece)
+        finally:
+            raw.close()
+        original.seek(0)
+        plain = ring.open(original.read, key) if kid else _pieces(original.read)
+
+        def tee():
+            for piece in plain:
+                before.update(piece)
+                yield piece
+        new = self._sealed_spool(tee(), key) if seal else _spool(tee())
+        try:
+            check = hashlib.sha256()
+            for piece in (ring.open(new.read, key) if seal else _pieces(new.read)):
+                check.update(piece)
+            if check.hexdigest() != before.hexdigest():
+                raise crypto.CryptoError(f"re-encrypting {key} didn't round-trip; left it unchanged")
+            new.seek(0)
+            self.backend.put_file(key, new, "application/octet-stream")
+            after = hashlib.sha256()
+            with closing(self.open(key)) as fh:
+                for piece in _pieces(fh.read):
+                    after.update(piece)
+            if after.hexdigest() != before.hexdigest():
+                original.seek(0)
+                self.backend.put_file(key, original, "application/octet-stream")
+                raise crypto.CryptoError(f"{key} didn't read back correctly; restored the original")
+            return True
+        finally:
+            new.close()
+            original.close()
+
+
+def _spool(chunks) -> IO[bytes]:
+    spool = tempfile.SpooledTemporaryFile(max_size=SPOOL)
+    for piece in chunks:
+        spool.write(piece)
+    spool.seek(0)
+    return spool
 
 
 def get_storage() -> Storage:
@@ -222,5 +385,7 @@ def get_storage() -> Storage:
                             path_style=backend == "supabase" or bool(cfg["S3_ENDPOINT_URL"]))
     else:
         storage = LocalStorage(cfg["STORAGE_DIR"])
+    if crypto.keyring() is not None:
+        storage = EncryptedStorage(storage)
     app.extensions["hh_storage"] = storage
     return storage

@@ -70,7 +70,23 @@
   <p>You must be 13 or older to use Homework Hatch. If you're under 18, a parent or guardian must agree to the <a href="{{ url_for('main.terms') }}">Terms</a> and this policy. If we learn we have data from a child under 13, we delete it.</p>
 
   <h2>Security</h2>
-  <p>Connections use HTTPS. Passwords and sync tokens are stored as hashes, and files sit in private storage. File download links expire after five minutes, and the links the extension uploads with expire after an hour. No system is perfectly secure; if a breach affects your data, we'll tell you as the law requires.</p>
+  <p>Connections use HTTPS, and our server checks that it's really talking to our database before sending anything.</p>
+  <p>On top of our providers' disk encryption, we encrypt the following ourselves (AES-256), with keys kept apart from the data:</p>
+  <ul>
+    <li>your coursework content, grades and feedback;</li>
+    <li>your course files and uploads, and the text extracted from them;</li>
+    <li>your flashcards, quizzes and summaries;</li>
+    <li>your tutor and chat messages;</li>
+    <li>your Canvas name and your calendar link.</li>
+  </ul>
+  <p>Files are encrypted by our server before they're stored, and decrypted only when you open them.</p>
+  <p>What this doesn't cover:</p>
+  <ul>
+    <li>Account details (email, username, display name) and the names and dates of your classes and assignments have only the providers' encryption.</li>
+    <li>Our servers decrypt data to show it to you and to send it to our AI provider, so this protects a leaked copy of our database or file storage, not a compromise of our servers.</li>
+    <li>The extension also keeps a copy of your latest sync in your browser on your device.</li>
+  </ul>
+  <p>Passwords and sync tokens are stored as hashes. Details are in our public <a href="https://github.com/Tstansberry81/homeworkhatch/blob/main/SECURITY.md" target="_blank" rel="noopener">security notes</a>. No system is perfectly secure; if a breach affects your data, we'll tell you as the law requires.</p>
 
   <h2>Do Not Track and changes</h2>
   <p>We don't track you across other sites, so browser Do Not Track signals don't change anything here. If we change this policy in a way that matters, we'll post the new version with a new effective date and tell signed-in users.</p>

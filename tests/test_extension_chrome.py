@@ -106,8 +106,8 @@ def test_extension_in_chrome(tmp_path):
     assert r["study"] == {"start": "1 / 3", "flipped": True, "after_next": "2 / 3", "flipped_after_next": False,
                           "wrapped": "3 / 3", "back_text": "a2"}, r["study"]
 
-    # Bytes went straight to storage: the app only confirmed them.
-    assert hits["POST /v1/files/<file_id>/uploaded"] == 6 and hits["PUT /v1/files/<file_id>"] == 0, hits
+    # With encryption on, bytes go through the app, which seals them before storage.
+    assert hits["PUT /v1/files/<file_id>"] == 6 and hits["POST /v1/files/<file_id>/uploaded"] == 0, hits
     with app.app_context():
         files = db.session.scalars(select(CanvasFile)).all()
         assert all(f.is_stored for f in files if f.canvas_id in {"1", "2", "3", "4", "5", "77", "78"})

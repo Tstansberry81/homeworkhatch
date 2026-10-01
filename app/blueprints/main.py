@@ -12,7 +12,7 @@ from sqlalchemy import select
 from .. import queries
 from ..config import BASE_DIR
 from ..extensions import db
-from ..models import Assignment, CalendarEvent, Course, User, utcnow
+from ..models import Assignment, CalendarEvent, Course, User, calendar_token_hash, utcnow
 from ..services import ics, integrations
 from ..utils import local_now, log_activity, to_local
 from .auth import valid_timezone
@@ -30,7 +30,10 @@ def landing():
 @bp.route("/health")
 def health():
     """Render's health check: fast, and reports the deployed commit (no database call)."""
-    return {"ok": True, "commit": current_app.config.get("GIT_COMMIT")}
+    from ..services import crypto
+
+    return {"ok": True, "commit": current_app.config.get("GIT_COMMIT"),
+            "encryption": "on" if crypto.keyring() else "off"}
 
 
 @bp.route("/health/db")
@@ -200,7 +203,7 @@ def calendar_view():
 
 @bp.route("/calendar/<token>.ics")
 def ics_feed(token: str):
-    user = db.session.scalar(select(User).where(User.calendar_token == token))
+    user = db.session.scalar(select(User).where(User.calendar_token_hash == calendar_token_hash(token)))
     if user is None or not user.active:
         abort(404)
     course_ids = [c.id for c in queries.visible_courses(user.id)]

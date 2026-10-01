@@ -8,14 +8,16 @@ stable and anything that points at them (flashcard sources, coin awards) keeps w
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from .encrypted_types import EncryptedFloat, EncryptedJSON, EncryptedText
 from .extensions import db
 
 
@@ -59,7 +61,10 @@ class User(UserMixin, db.Model):
     # The student's standing choice for course files: True = keep files for every class, including
     # new ones; False = only classes they tick; None = not chosen yet (no files are copied).
     keep_all_files: Mapped[bool | None] = mapped_column(Boolean)
-    calendar_token: Mapped[str] = mapped_column(String(64), unique=True, default=lambda: secrets.token_urlsafe(24))
+    calendar_token: Mapped[str] = mapped_column(EncryptedText("user.calendar_token"), unique=True,
+                                                default=lambda: secrets.token_urlsafe(24))
+    # SHA-256 of the token (like API tokens): the feed is looked up by this, never by the token.
+    calendar_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     # Bumped on password change/reset; part of the login cookie, so old sessions stop working.
     session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
@@ -88,6 +93,36 @@ class User(UserMixin, db.Model):
         return self.birth_year is not None and utcnow().year - self.birth_year >= 19
 
 
+def calendar_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@event.listens_for(User, "before_insert")
+@event.listens_for(User, "before_update")
+def _hash_calendar_token(mapper, connection, user: User) -> None:
+    if user.calendar_token is None:
+        user.calendar_token = secrets.token_urlsafe(24)
+    user.calendar_token_hash = calendar_token_hash(user.calendar_token)
+
+
+class AppState(db.Model):
+    """Small named values the app keeps for itself (e.g. the last encryption sweep's result)."""
+
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[dict | None] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class EncryptionKey(db.Model):
+    """Every encryption key the data has been written with, by id and check value (never the key).
+    At startup the configured keys must match these, so a mistyped, swapped or dropped key stops the
+    app instead of silently making data unreadable."""
+
+    kid: Mapped[str] = mapped_column(String(16), primary_key=True)
+    check: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class ApiToken(db.Model):
     """Token the browser extension uses to upload Canvas data. Only a hash is stored."""
 
@@ -107,7 +142,7 @@ class ActivityLog(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     event: Mapped[str] = mapped_column(String(60))
-    detail: Mapped[str | None] = mapped_column(String(500))
+    detail: Mapped[str | None] = mapped_column(EncryptedText("activity_log.detail"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
@@ -122,7 +157,7 @@ class CanvasAccount(db.Model):
     host: Mapped[str] = mapped_column(String(255))
     base_url: Mapped[str] = mapped_column(String(300))
     canvas_user_id: Mapped[str] = mapped_column(String(64))
-    canvas_name: Mapped[str | None] = mapped_column(String(200))
+    canvas_name: Mapped[str | None] = mapped_column(EncryptedText("canvas_account.canvas_name"))
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_snapshot_id: Mapped[str | None] = mapped_column(String(80))
     # Fingerprint of the last snapshot (minus its timestamp): an identical hourly sync skips
@@ -149,12 +184,12 @@ class Course(db.Model):
     on_dashboard: Mapped[bool | None] = mapped_column(Boolean)
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    current_score: Mapped[float | None] = mapped_column(Float)
-    current_grade: Mapped[str | None] = mapped_column(String(20))
-    final_score: Mapped[float | None] = mapped_column(Float)
-    final_grade: Mapped[str | None] = mapped_column(String(20))
+    current_score: Mapped[float | None] = mapped_column(EncryptedFloat("course.current_score"))
+    current_grade: Mapped[str | None] = mapped_column(EncryptedText("course.current_grade"))
+    final_score: Mapped[float | None] = mapped_column(EncryptedFloat("course.final_score"))
+    final_grade: Mapped[str | None] = mapped_column(EncryptedText("course.final_grade"))
     html_url: Mapped[str | None] = mapped_column(String(500))
-    syllabus_html: Mapped[str | None] = mapped_column(Text)
+    syllabus_html: Mapped[str | None] = mapped_column(EncryptedText("course.syllabus_html"))
     files_tab_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     # Canvas's "weight final grade based on assignment groups" setting (None if unknown).
     group_weighting: Mapped[bool | None] = mapped_column(Boolean)
@@ -237,20 +272,20 @@ class Assignment(db.Model):
     is_quiz: Mapped[bool] = mapped_column(Boolean, default=False)
     omit_from_final_grade: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     html_url: Mapped[str | None] = mapped_column(String(500))
-    description_html: Mapped[str | None] = mapped_column(Text)
+    description_html: Mapped[str | None] = mapped_column(EncryptedText("assignment.description_html"))
     # Status as computed by the sync (graded/submitted/missing/past_due/upcoming/...).
     status: Mapped[str] = mapped_column(String(30), default="upcoming")
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
-    score: Mapped[float | None] = mapped_column(Float)
-    grade: Mapped[str | None] = mapped_column(String(40))
+    score: Mapped[float | None] = mapped_column(EncryptedFloat("assignment.score"))
+    grade: Mapped[str | None] = mapped_column(EncryptedText("assignment.grade"))
     late: Mapped[bool] = mapped_column(Boolean, default=False)
     missing: Mapped[bool] = mapped_column(Boolean, default=False)
     excused: Mapped[bool] = mapped_column(Boolean, default=False)
     workflow_state: Mapped[str | None] = mapped_column(String(40))
-    rubric: Mapped[list | None] = mapped_column(JSON)
-    comments: Mapped[list | None] = mapped_column(JSON)
-    attachments: Mapped[list | None] = mapped_column(JSON)
-    rubric_assessment: Mapped[dict | None] = mapped_column(JSON)
+    rubric: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.rubric"))
+    comments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.comments"))
+    attachments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.attachments"))
+    rubric_assessment: Mapped[dict | None] = mapped_column(EncryptedJSON("assignment.rubric_assessment"))
     # Student's own override ("I handed this in on paper"); never touched by sync.
     user_done: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -289,7 +324,7 @@ class Page(db.Model):
     course_id: Mapped[int] = mapped_column(ForeignKey("course.id", ondelete="CASCADE"), index=True)
     slug: Mapped[str] = mapped_column(String(300))
     title: Mapped[str] = mapped_column(String(300))
-    body_html: Mapped[str | None] = mapped_column(Text)
+    body_html: Mapped[str | None] = mapped_column(EncryptedText("page.body_html"))
     html_url: Mapped[str | None] = mapped_column(String(500))
     canvas_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -301,7 +336,7 @@ class Announcement(db.Model):
     course_id: Mapped[int] = mapped_column(ForeignKey("course.id", ondelete="CASCADE"), index=True)
     canvas_id: Mapped[str] = mapped_column(String(64))
     title: Mapped[str] = mapped_column(String(500))
-    message_html: Mapped[str | None] = mapped_column(Text)
+    message_html: Mapped[str | None] = mapped_column(EncryptedText("announcement.message_html"))
     author: Mapped[str | None] = mapped_column(String(200))
     posted_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     html_url: Mapped[str | None] = mapped_column(String(500))
@@ -344,7 +379,7 @@ class CanvasFile(db.Model):
     sha256: Mapped[str | None] = mapped_column(String(64))
     stored_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Deferred: extracted text can be hundreds of KB and most queries never need it.
-    text: Mapped[str | None] = mapped_column(Text, deferred=True)
+    text: Mapped[str | None] = mapped_column(EncryptedText("canvas_file.text"), deferred=True)
     # "pending" until the background reader (services/textjobs.py) gets to it, then "extracting"
     # since text_started_at, then ok / empty / unsupported / too_large / error / ai.
     text_status: Mapped[str | None] = mapped_column(String(40), index=True)
@@ -366,7 +401,7 @@ class CalendarEvent(db.Model):
     title: Mapped[str] = mapped_column(String(500))
     start_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     end_at: Mapped[datetime | None] = mapped_column(DateTime)
-    location: Mapped[str | None] = mapped_column(String(300))
+    location: Mapped[str | None] = mapped_column(EncryptedText("calendar_event.location"))
     html_url: Mapped[str | None] = mapped_column(String(500))
 
     __table_args__ = (UniqueConstraint("account_id", "canvas_id"),)
@@ -398,7 +433,7 @@ class ContentChunk(db.Model):
     title: Mapped[str] = mapped_column(String(500))
     url: Mapped[str | None] = mapped_column(String(500))
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
-    text: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(EncryptedText("content_chunk.text"))
 
 
 # ---------------------------------------------------------------- study tools
@@ -420,8 +455,8 @@ class Deck(db.Model):
 class Card(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     deck_id: Mapped[int] = mapped_column(ForeignKey("deck.id", ondelete="CASCADE"), index=True)
-    front: Mapped[str] = mapped_column(Text)
-    back: Mapped[str] = mapped_column(Text)
+    front: Mapped[str] = mapped_column(EncryptedText("card.front"))
+    back: Mapped[str] = mapped_column(EncryptedText("card.back"))
     position: Mapped[int] = mapped_column(Integer, default=0)
     # SM-2 spaced-repetition state.
     ease: Mapped[float] = mapped_column(Float, default=2.5)
@@ -441,7 +476,7 @@ class PracticeQuiz(db.Model):
     course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="SET NULL"))
     title: Mapped[str] = mapped_column(String(200))
     # [{"question", "choices": [4], "answer": index, "explanation"}]
-    questions: Mapped[list] = mapped_column(JSON)
+    questions: Mapped[list] = mapped_column(EncryptedJSON("practice_quiz.questions"))
     source: Mapped[str] = mapped_column(String(20), default="manual")
     # Generated from synced course files or uploads: those are instructors' or publishers' materials,
     # so the quiz stays with its owner and can't be hosted live for others (UVA PROV-005, copyright).
@@ -456,7 +491,7 @@ class QuizAttempt(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     quiz_id: Mapped[int] = mapped_column(ForeignKey("practice_quiz.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
-    answers: Mapped[list] = mapped_column(JSON)
+    answers: Mapped[list] = mapped_column(EncryptedJSON("quiz_attempt.answers"))
     score: Mapped[int] = mapped_column(Integer)
     total: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -467,7 +502,7 @@ class Summary(db.Model):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     source_type: Mapped[str] = mapped_column(String(20))
     source_id: Mapped[int] = mapped_column(Integer)
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(EncryptedText("summary.content"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "source_type", "source_id"),)
@@ -526,10 +561,10 @@ class TutorConversation(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="SET NULL"))
-    title: Mapped[str] = mapped_column(String(200), default="New conversation")
+    title: Mapped[str] = mapped_column(EncryptedText("tutor_conversation.title"), default="New conversation")
     # Sources the student attached to this chat ("file:12", "page:3", "upload:7"; see
     # services/sources.py). Their text goes with every question.
-    attachments: Mapped[list | None] = mapped_column(JSON, default=list)
+    attachments: Mapped[list | None] = mapped_column(EncryptedJSON("tutor_conversation.attachments"), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -541,8 +576,8 @@ class TutorMessage(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     conversation_id: Mapped[int] = mapped_column(ForeignKey("tutor_conversation.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(12))  # user / assistant
-    content: Mapped[str] = mapped_column(Text)
-    sources: Mapped[list | None] = mapped_column(JSON)
+    content: Mapped[str] = mapped_column(EncryptedText("tutor_message.content"))
+    sources: Mapped[list | None] = mapped_column(EncryptedJSON("tutor_message.sources"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -566,7 +601,7 @@ class ChatMessage(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     room_key: Mapped[str] = mapped_column(String(300), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
-    body: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(EncryptedText("chat_message.body"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -617,7 +652,7 @@ class Upload(db.Model):
     sha256: Mapped[str | None] = mapped_column(String(64))
     source: Mapped[str] = mapped_column(String(20), default="upload")  # upload | drive
     external_id: Mapped[str | None] = mapped_column(String(200))  # the Drive file id
-    text: Mapped[str | None] = mapped_column(Text, deferred=True)
+    text: Mapped[str | None] = mapped_column(EncryptedText("upload.text"), deferred=True)
     text_status: Mapped[str | None] = mapped_column(String(40), index=True)
     text_started_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
