@@ -3,6 +3,7 @@ from __future__ import annotations
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import select
+from sqlalchemy.orm import undefer_group
 
 from .. import queries
 from ..extensions import db
@@ -95,7 +96,7 @@ def page(page_id: int):
 @bp.route("/assignments/<int:assignment_id>")
 @login_required
 def assignment(assignment_id: int):
-    a = db.session.get(Assignment, assignment_id)
+    a = db.session.get(Assignment, assignment_id, options=[undefer_group("assignment_detail")])
     if a is None or a.course.user_id != current_user.id:
         abort(404)
     return render_template("courses/assignment.html", a=a, course=a.course, base_url=a.course.account.base_url)

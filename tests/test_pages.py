@@ -98,7 +98,8 @@ def test_extension_download_zip(app, synced_user, client):
     if r.status_code == 404:
         pytest.skip("extension folder not present")
     names = zipfile.ZipFile(io.BytesIO(r.data)).namelist()
-    assert "homework-hatch-extension/manifest.json" in names
+    assert "manifest.json" in names and not any("/" in n and n.split("/")[0] == "homework-hatch-extension" for n in names), \
+        "flat: Extract All must give a folder with manifest.json in it"
     assert not any("/tests/" in n or "node_modules" in n for n in names)
 
 

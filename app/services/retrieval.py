@@ -14,9 +14,10 @@ from collections import Counter
 
 from flask import current_app
 from sqlalchemy import delete, select
+from sqlalchemy.orm import undefer
 
 from ..extensions import db
-from ..models import CanvasFile, ContentChunk, Course
+from ..models import Assignment, CanvasFile, ContentChunk, Course
 from ..utils import html_to_text
 
 _WORD = re.compile(r"[a-z0-9][a-z0-9'+#.-]*[a-z0-9+#]|[a-z0-9]")
@@ -62,7 +63,8 @@ def _course_sources(course: Course):
     for page in course.pages:
         if page.body_html:
             yield "page", page.id, page.title, page.html_url, html_to_text(page.body_html)
-    for a in course.assignments:
+    for a in db.session.scalars(select(Assignment).options(undefer(Assignment.description_html))
+                                .where(Assignment.course_id == course.id).order_by(Assignment.due_at)):
         if a.description_html:
             yield "assignment", a.id, a.name, a.html_url, html_to_text(a.description_html)
     for ann in course.announcements:
@@ -125,7 +127,10 @@ def search(user_id: int, query: str, course_ids: list[int] | None = None, k: int
     if len(chunks) == max_candidates:
         current_app.logger.warning("search for user %s hit the %s-chunk cap; oldest chunks skipped", user_id, max_candidates)
     wanted = set(q_terms)
-    pairs = [(c, Counter(tokenize(c.text) + tokenize(c.title) * 2)) for c in chunks]
+    # Cheap substring test first: a chunk can only contain a query token if it contains it as a
+    # substring, so most chunks are skipped without running the tokenizer (same results).
+    pairs = [(c, Counter(tokenize(c.text) + tokenize(c.title) * 2)) for c in chunks
+             if any(w in c.text.lower() or w in c.title.lower() for w in wanted)]
     pairs = [(c, d) for c, d in pairs if wanted & d.keys()]
     if not pairs:
         return []

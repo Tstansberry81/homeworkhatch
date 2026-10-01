@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 
 from flask import current_app
 from sqlalchemy import exists, func, or_, select
+from sqlalchemy.orm import undefer, undefer_group
 
 from ..extensions import db
 from ..models import (Announcement, Assignment, AssignmentGroup, CalendarEvent, CanvasAccount, CanvasFile, Course,
@@ -119,7 +120,10 @@ def _sync_rows(model, parent: dict, items, key_attr: str, key_fn, apply_fn, dele
     if items is None:
         return
     filters = [getattr(model, k) == v for k, v in parent.items()]
-    existing = {getattr(r, key_attr): r for r in db.session.scalars(select(model).where(*filters))}
+    stmt = select(model).where(*filters)
+    if model is Assignment:
+        stmt = stmt.options(undefer_group("assignment_detail"))
+    existing = {getattr(r, key_attr): r for r in db.session.scalars(stmt)}
     seen = set()
     for item in items or []:
         key = key_fn(item)
@@ -295,7 +299,8 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
             failed.add((kind, course_ref))
     failed_announcements = any(str((e or {}).get("endpoint", "")) == "announcements" for e in snapshot.get("errors") or [])
     courses_by_canvas_id: dict[str, Course] = {}
-    existing_courses = {c.canvas_id: c for c in db.session.scalars(select(Course).where(Course.account_id == account.id))}
+    existing_courses = {c.canvas_id: c for c in db.session.scalars(select(Course).options(undefer(Course.syllabus_html))
+                                                                    .where(Course.account_id == account.id))}
     seen_courses = set()
     for c in snapshot.get("courses") or []:
         cid = _str(c.get("id"))

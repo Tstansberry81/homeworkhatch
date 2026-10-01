@@ -159,6 +159,7 @@ function renderStatus(status = {}) {
   const err = status.error || status.pushError || status.downloadError;
   $("error").hidden = !err;
   $("error").textContent = err || "";
+  $("linkSite").hidden = Boolean(settings.endpointToken);
   $("open").hidden = status.state !== "logged_out";
 }
 
@@ -242,6 +243,9 @@ async function render() {
 }
 
 $("sync").onclick = () => chrome.runtime.sendMessage({ type: "sync" });
+// Opens the website's Connect Canvas page with this copy's ID, so the page can link it.
+$("linkSite").onclick = () => chrome.tabs.create({
+  url: `${(settings.endpointUrl || HATCH_URL).replace(/\/+$/, "")}/settings/sync?ext=${chrome.runtime.id}` });
 $("download").onclick = () => chrome.runtime.sendMessage({ type: "download", mode: "new" });
 $("downloadAll").onclick = () => chrome.runtime.sendMessage({ type: "download", mode: "all" });
 $("open").onclick = () => chrome.tabs.create({ url: settings.baseUrl });

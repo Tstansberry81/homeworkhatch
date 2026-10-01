@@ -8,6 +8,7 @@ are saved as ordinary decks/quizzes the student can edit.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 import markdown as md
@@ -302,9 +303,15 @@ _MD_TAGS = {"p", "br", "strong", "em", "code", "pre", "ul", "ol", "li", "h1", "h
             "a", "table", "thead", "tbody", "tr", "th", "td", "hr", "sup", "sub", "del"}
 
 
+_md_local = threading.local()  # a Markdown converter isn't thread-safe; build one per thread, not per call
+
+
 def render_markdown(text: str) -> str:
     """Markdown (from the AI) -> sanitized HTML. Math stays as $...$ for KaTeX to render."""
-    html = md.markdown(text or "", extensions=["fenced_code", "tables", "sane_lists"])
+    converter = getattr(_md_local, "converter", None)
+    if converter is None:
+        converter = _md_local.converter = md.Markdown(extensions=["fenced_code", "tables", "sane_lists"])
+    html = converter.reset().convert(text or "")
     return nh3.clean(html, tags=_MD_TAGS, attributes={"a": {"href"}}, url_schemes={"http", "https"},
                      link_rel="noopener noreferrer")
 

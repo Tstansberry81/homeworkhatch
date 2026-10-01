@@ -189,7 +189,7 @@ class Course(db.Model):
     final_score: Mapped[float | None] = mapped_column(EncryptedFloat("course.final_score"))
     final_grade: Mapped[str | None] = mapped_column(EncryptedText("course.final_grade"))
     html_url: Mapped[str | None] = mapped_column(String(500))
-    syllabus_html: Mapped[str | None] = mapped_column(EncryptedText("course.syllabus_html"))
+    syllabus_html: Mapped[str | None] = mapped_column(EncryptedText("course.syllabus_html"), deferred=True)
     files_tab_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     # Canvas's "weight final grade based on assignment groups" setting (None if unknown).
     group_weighting: Mapped[bool | None] = mapped_column(Boolean)
@@ -272,7 +272,7 @@ class Assignment(db.Model):
     is_quiz: Mapped[bool] = mapped_column(Boolean, default=False)
     omit_from_final_grade: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     html_url: Mapped[str | None] = mapped_column(String(500))
-    description_html: Mapped[str | None] = mapped_column(EncryptedText("assignment.description_html"))
+    description_html: Mapped[str | None] = mapped_column(EncryptedText("assignment.description_html"), deferred=True, deferred_group="assignment_detail")
     # Status as computed by the sync (graded/submitted/missing/past_due/upcoming/...).
     status: Mapped[str] = mapped_column(String(30), default="upcoming")
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -282,10 +282,10 @@ class Assignment(db.Model):
     missing: Mapped[bool] = mapped_column(Boolean, default=False)
     excused: Mapped[bool] = mapped_column(Boolean, default=False)
     workflow_state: Mapped[str | None] = mapped_column(String(40))
-    rubric: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.rubric"))
-    comments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.comments"))
-    attachments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.attachments"))
-    rubric_assessment: Mapped[dict | None] = mapped_column(EncryptedJSON("assignment.rubric_assessment"))
+    rubric: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.rubric"), deferred=True, deferred_group="assignment_detail")
+    comments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.comments"), deferred=True, deferred_group="assignment_detail")
+    attachments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.attachments"), deferred=True, deferred_group="assignment_detail")
+    rubric_assessment: Mapped[dict | None] = mapped_column(EncryptedJSON("assignment.rubric_assessment"), deferred=True, deferred_group="assignment_detail")
     # Student's own override ("I handed this in on paper"); never touched by sync.
     user_done: Mapped[bool] = mapped_column(Boolean, default=False)
 

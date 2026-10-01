@@ -52,7 +52,7 @@
       {% if drive_connected %}
       <p class="small muted">Search your Drive and add files. Google Docs come in as text, Slides as PDF, Sheets as CSV.</p>
       <input type="search" id="drive-q" placeholder="Search your Drive (empty = recent files)">
-      <ul class="list picker-list" id="drive-list"><li class="muted">Loading…</li></ul>
+      <ul class="list picker-list" id="drive-list"><li><button type="button" class="btn btn-ghost btn-sm" id="drive-recent">Show recent Drive files</button></li></ul>
       <form method="post" action="{{ url_for('settings.integration_disconnect', kind='drive') }}" class="mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ url_for('uploads.index') }}"><button class="linklike small">Disconnect Google Drive</button></form>
       {% else %}
       <p class="small muted">Connect your Google account to pick files from Drive. We search your Drive to list files when you look for one, and download only the files you add.</p>
@@ -80,6 +80,7 @@
   let seq = 0, timer;
   const search = async () => {
     const mine = ++seq;
+    list.innerHTML = '<li class="muted">Searching your Drive…</li>';
     try {
       const data = await hh.get(`{{ url_for('uploads.drive_search') }}?q=${encodeURIComponent(q.value.trim())}`);
       if (mine !== seq) return;
@@ -98,7 +99,8 @@
       location.reload();
     } catch (err) { b.disabled = false; b.textContent = "Add"; b.insertAdjacentHTML("afterend", `<span class="small" style="color:var(--err)"> ${hh.escape(err.message)}</span>`); }
   });
-  search();
+  // Drive is only searched when asked (each search is a round trip to Google), not on every visit.
+  document.getElementById("drive-recent").addEventListener("click", search);
 })();
 </script>
 {% endblock %}

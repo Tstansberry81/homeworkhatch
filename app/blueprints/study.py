@@ -5,6 +5,7 @@ import re
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from .. import queries
 from ..extensions import db
@@ -59,13 +60,15 @@ def _preset(args) -> dict:
 @bp.route("/")
 @login_required
 def index():
-    decks = db.session.scalars(select(Deck).where(Deck.user_id == current_user.id).order_by(Deck.created_at.desc())).all()
-    quizzes = db.session.scalars(select(PracticeQuiz).where(PracticeQuiz.user_id == current_user.id)
+    decks = db.session.scalars(select(Deck).options(selectinload(Deck.course)).where(Deck.user_id == current_user.id).order_by(Deck.created_at.desc())).all()
+    quizzes = db.session.scalars(select(PracticeQuiz).options(selectinload(PracticeQuiz.course)).where(PracticeQuiz.user_id == current_user.id)
                                  .order_by(PracticeQuiz.created_at.desc())).all()
     best = dict(db.session.execute(select(QuizAttempt.quiz_id, func.max(QuizAttempt.score * 100 / QuizAttempt.total))
                                    .where(QuizAttempt.user_id == current_user.id, QuizAttempt.total > 0)
                                    .group_by(QuizAttempt.quiz_id)).all())
-    return render_template("study/index.html", decks=decks, quizzes=quizzes, best=best)
+    card_counts = dict(db.session.execute(select(Card.deck_id, func.count(Card.id)).join(Deck)
+                                          .where(Deck.user_id == current_user.id).group_by(Card.deck_id)).all())
+    return render_template("study/index.html", decks=decks, quizzes=quizzes, best=best, card_counts=card_counts)
 
 
 # ---------------------------------------------------------------- AI generation

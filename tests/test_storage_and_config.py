@@ -202,7 +202,7 @@ def test_database_urls_from_supabase_and_render():
     assert normalize_database_url("").startswith("sqlite:///")
 
     session = engine_options(normalize_database_url(pooler))
-    assert session["pool_pre_ping"] and session["pool_size"] == 3 and "connect_args" not in session
+    assert session["pool_pre_ping"] and session["pool_size"] == 6 and "connect_args" not in session
     transaction = engine_options(normalize_database_url(pooler.replace(":5432/", ":6543/")))
     assert transaction["connect_args"] == {"prepare_threshold": None}, "Supavisor transaction mode can't prepare"
     assert transaction["poolclass"].__name__ == "NullPool"

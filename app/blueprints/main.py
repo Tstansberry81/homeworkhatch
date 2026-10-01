@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar as cal
+import functools
 import io
 import zipfile
 from datetime import date, timedelta
@@ -8,6 +9,7 @@ from datetime import date, timedelta
 from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required, logout_user
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from .. import queries
 from ..config import BASE_DIR
@@ -187,7 +189,7 @@ def calendar_view():
     lo, hi = datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time())
     by_day: dict[date, list] = {}
     if course_ids:
-        for a in db.session.scalars(select(Assignment).where(Assignment.course_id.in_(course_ids),
+        for a in db.session.scalars(select(Assignment).options(selectinload(Assignment.course)).where(Assignment.course_id.in_(course_ids),
                                                              Assignment.due_at >= lo, Assignment.due_at < hi)):
             by_day.setdefault(to_local(a.due_at).date(), []).append(("assignment", a))
     for e in db.session.scalars(select(CalendarEvent).where(CalendarEvent.user_id == current_user.id,
@@ -208,7 +210,7 @@ def ics_feed(token: str):
         abort(404)
     course_ids = [c.id for c in queries.visible_courses(user.id)]
     since = utcnow() - timedelta(days=60)
-    assignments = db.session.scalars(select(Assignment).where(Assignment.course_id.in_(course_ids),
+    assignments = db.session.scalars(select(Assignment).options(selectinload(Assignment.course)).where(Assignment.course_id.in_(course_ids),
                                                               Assignment.due_at >= since)).all() if course_ids else []
     events = db.session.scalars(select(CalendarEvent).where(CalendarEvent.user_id == user.id,
                                                             CalendarEvent.start_at >= since)).all()
@@ -242,7 +244,7 @@ def extension_zip():
             rel = path.relative_to(root)
             if path.is_file() and not any(p in {"node_modules", "tests", ".chrome"} for p in rel.parts) \
                     and rel.name not in {"package.json", "package-lock.json"} and rel.suffix != ".md":
-                z.write(path, f"homework-hatch-extension/{rel}")
+                z.write(path, rel.as_posix())  # flat: "Extract All" gives a folder with manifest.json in it
     buf.seek(0)
     current_app.logger.info("extension download by user %s", current_user.id)
     return send_file(buf, mimetype="application/zip", as_attachment=True, download_name="homework-hatch-extension.zip")
@@ -254,6 +256,7 @@ def course_by_id(course_id: int) -> Course | None:
 
 
 @bp.app_template_global()
+@functools.cache
 def timezones() -> list[str]:
     from zoneinfo import available_timezones
 

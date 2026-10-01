@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from flask import current_app, url_for
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from ..extensions import db
 from ..models import Assignment, CalendarPush, Course, User, utcnow
@@ -73,7 +74,7 @@ def _event_id(data: dict) -> str | None:
 def _wanted(user: User) -> list[Assignment]:
     now = utcnow()
     return db.session.scalars(
-        select(Assignment).join(Course).where(Course.user_id == user.id, Course.hidden.is_(False),
+        select(Assignment).options(selectinload(Assignment.course)).join(Course).where(Course.user_id == user.id, Course.hidden.is_(False),
                                               Course.active.is_(True), Assignment.due_at.is_not(None),
                                               Assignment.due_at >= now - timedelta(hours=12),
                                               Assignment.due_at <= now + LOOKAHEAD)
@@ -92,56 +93,64 @@ def sync(user: User) -> dict:
     pushes = db.session.scalars(select(CalendarPush).where(CalendarPush.user_id == user.id)).all()
     by_assignment = {p.assignment_id: p for p in pushes if p.assignment_id is not None}
     stats = {"created": 0, "updated": 0, "removed": 0, "unchanged": 0}
+    calendar = lambda slug, calls: integrations.execute_many(user, "calendar", [(slug, c) for c in calls])  # noqa: E731
 
+    # Deleted, hidden, undated or pushed past the window while still in the future: remove it.
+    gone = [p for p in pushes
+            if p.assignment_id is None or (p.assignment_id not in wanted and (p.due_at is None or p.due_at > now))]
+    calendar("GOOGLECALENDAR_DELETE_EVENT", [{"event_id": p.event_id, "calendar_id": p.calendar_id,
+                                              "send_updates": "none"} for p in gone])  # errors: already deleted
+    for p in gone:
+        db.session.delete(p)
+        stats["removed"] += 1
     for p in pushes:
-        # Deleted, hidden, undated or pushed past the window while still in the future: remove it.
-        gone = p.assignment_id is None or (p.assignment_id not in wanted and (p.due_at is None or p.due_at > now))
-        if gone:
-            try:
-                integrations.execute(user, "calendar", "GOOGLECALENDAR_DELETE_EVENT",
-                                     {"event_id": p.event_id, "calendar_id": p.calendar_id, "send_updates": "none"})
-            except integrations.NotConnected:
-                raise
-            except integrations.IntegrationError:
-                pass  # already deleted in Google
-            db.session.delete(p)
-            stats["removed"] += 1
-        elif p.assignment_id not in wanted and p.due_at and p.due_at < now - timedelta(days=30):
+        if p not in gone and p.assignment_id not in wanted and p.due_at and p.due_at < now - timedelta(days=30):
             db.session.delete(p)  # an old event: keep it in Google, stop tracking it
 
+    to_patch, to_create = [], []
     for a in wanted.values():
         ev = _event(a, tz)
         fp = _fingerprint(ev)
         p = by_assignment.get(a.id)
         if p is not None and p.fingerprint == fp:
             stats["unchanged"] += 1
+        elif p is not None:
+            to_patch.append((a, p, ev, fp))
+        else:
+            to_create.append((a, ev, fp))
+
+    results = calendar("GOOGLECALENDAR_PATCH_EVENT", [{
+        "calendar_id": p.calendar_id, "event_id": p.event_id, "summary": ev["summary"],
+        "description": ev["description"], "start_time": ev["start"].isoformat(),
+        "end_time": ev["end"].isoformat(), "timezone": str(tz), "send_updates": "none"} for _a, p, ev, _fp in to_patch])
+    for (a, p, ev, fp), result in zip(to_patch, results):
+        if isinstance(result, integrations.IntegrationError):
+            db.session.delete(p)  # the student deleted it in Google: add it back
+            to_create.append((a, ev, fp))
+        else:
+            p.fingerprint, p.due_at, p.updated_at = fp, a.due_at, utcnow()
+            stats["updated"] += 1
+    db.session.flush()  # removals before re-adding the same assignments
+
+    results = calendar("GOOGLECALENDAR_CREATE_EVENT", [{
+        "calendar_id": calendar_id, "summary": ev["summary"], "description": ev["description"],
+        "start_datetime": ev["start"].replace(tzinfo=None).isoformat(timespec="seconds"),
+        "end_datetime": ev["end"].replace(tzinfo=None).isoformat(timespec="seconds"),
+        "timezone": str(tz), "create_meeting_room": False, "exclude_organizer": True, "send_updates": "none",
+        "transparency": "transparent"} for _a, ev, _fp in to_create])
+    failed = None
+    for (a, ev, fp), result in zip(to_create, results):
+        if isinstance(result, integrations.IntegrationError):
+            failed = failed or result
             continue
-        if p is not None:
-            try:
-                integrations.execute(user, "calendar", "GOOGLECALENDAR_PATCH_EVENT", {
-                    "calendar_id": p.calendar_id, "event_id": p.event_id, "summary": ev["summary"],
-                    "description": ev["description"], "start_time": ev["start"].isoformat(),
-                    "end_time": ev["end"].isoformat(), "timezone": str(tz), "send_updates": "none"})
-                p.fingerprint, p.due_at, p.updated_at = fp, a.due_at, utcnow()
-                stats["updated"] += 1
-                db.session.commit()
-                continue
-            except integrations.NotConnected:
-                raise
-            except integrations.IntegrationError:
-                db.session.delete(p)  # the student deleted it in Google: add it back
-        data = integrations.execute(user, "calendar", "GOOGLECALENDAR_CREATE_EVENT", {
-            "calendar_id": calendar_id, "summary": ev["summary"], "description": ev["description"],
-            "start_datetime": ev["start"].replace(tzinfo=None).isoformat(timespec="seconds"),
-            "end_datetime": ev["end"].replace(tzinfo=None).isoformat(timespec="seconds"),
-            "timezone": str(tz), "create_meeting_room": False, "exclude_organizer": True, "send_updates": "none",
-            "transparency": "transparent"})
-        event_id = _event_id(data)
+        event_id = _event_id(result)
         if event_id:
             db.session.add(CalendarPush(user_id=user.id, assignment_id=a.id, event_id=event_id, calendar_id=calendar_id,
                                         fingerprint=fp, due_at=a.due_at))
             stats["created"] += 1
-        db.session.commit()
+    db.session.commit()
+    if failed is not None:
+        raise failed  # what worked is saved; the next sync retries the rest
 
     row.last_sync_at, row.last_error = utcnow(), None
     row.settings = {**(row.settings or {}), "last_stats": stats}
@@ -152,18 +161,48 @@ def sync(user: User) -> dict:
 def remove_all(user: User) -> int:
     """Delete the upcoming events we created (turning the toggle off)."""
     now = utcnow()
-    removed = 0
-    for p in db.session.scalars(select(CalendarPush).where(CalendarPush.user_id == user.id)).all():
-        if p.due_at is None or p.due_at > now:
-            try:
-                integrations.execute(user, "calendar", "GOOGLECALENDAR_DELETE_EVENT",
-                                     {"event_id": p.event_id, "calendar_id": p.calendar_id, "send_updates": "none"})
-                removed += 1
-            except integrations.IntegrationError:
-                pass
+    pushes = db.session.scalars(select(CalendarPush).where(CalendarPush.user_id == user.id)).all()
+    upcoming = [p for p in pushes if p.due_at is None or p.due_at > now]
+    try:
+        results = integrations.execute_many(user, "calendar", [("GOOGLECALENDAR_DELETE_EVENT", {
+            "event_id": p.event_id, "calendar_id": p.calendar_id, "send_updates": "none"}) for p in upcoming])
+    except integrations.NotConnected:
+        results = []
+    removed = sum(1 for r in results if not isinstance(r, integrations.IntegrationError))
+    for p in pushes:
         db.session.delete(p)
     db.session.commit()
     return removed
+
+
+def remove_in_background(user_id: int, disconnect: bool = False) -> None:
+    """Turning the calendar off (or disconnecting) answers right away; the events go in the background."""
+    app = current_app._get_current_object()
+
+    def work():
+        user = db.session.get(User, user_id)
+        if user is None:
+            return
+        try:
+            remove_all(user)
+            if disconnect:
+                integrations.disconnect(user, "calendar")
+        except integrations.IntegrationError as exc:
+            db.session.rollback()
+            current_app.logger.warning("removing google calendar events for user %s failed: %s", user_id, exc)
+
+    if app.config.get("EXTRACT_INLINE"):  # tests: run inline
+        work()
+        return
+
+    def thread():
+        with app.app_context():
+            try:
+                work()
+            finally:
+                db.session.remove()
+
+    threading.Thread(target=thread, name="gcal-remove", daemon=True).start()
 
 
 def kick(user_id: int) -> None:

@@ -307,9 +307,15 @@ def integration_disconnect(kind: str):
     kind = _kind(kind)
     try:
         if kind == "calendar" and gcal.enabled(current_user) and request.form.get("remove_events"):
-            gcal.remove_all(current_user)
-        integrations.disconnect(current_user, kind)
-        flash(f"{integrations.LABELS[kind]} disconnected.", "info")
+            row = integrations.get(current_user, kind)
+            row.connected = False
+            row.settings = {**(row.settings or {}), "enabled": False}
+            db.session.commit()
+            gcal.remove_in_background(current_user.id, disconnect=True)
+            flash("Google Calendar disconnected. Your upcoming due-date events are being removed.", "info")
+        else:
+            integrations.disconnect(current_user, kind)
+            flash(f"{integrations.LABELS[kind]} disconnected.", "info")
     except integrations.IntegrationError as exc:
         flash(str(exc), "error")
     return redirect(_safe_next(request.form.get("next")) or url_for("settings.integrations_page"))
@@ -329,13 +335,10 @@ def calendar_toggle():
         gcal.kick(current_user.id)
         flash("Adding your due dates to Google Calendar. This takes a minute the first time.", "success")
     else:
-        try:
-            removed = gcal.remove_all(current_user) if request.form.get("remove_events") else 0
-        except integrations.IntegrationError as exc:
-            removed = 0
-            flash(str(exc), "error")
+        if request.form.get("remove_events"):
+            gcal.remove_in_background(current_user.id)
         flash("Stopped adding due dates to Google Calendar." +
-              (f" Removed {removed} upcoming event{'s' if removed != 1 else ''}." if removed else ""), "info")
+              (" Your upcoming due-date events are being removed." if request.form.get("remove_events") else ""), "info")
     return redirect(_safe_next(request.form.get("next")) or url_for("settings.integrations_page"))
 
 

@@ -7,8 +7,11 @@ in render.yaml. Hooks below still apply.
 
 import os
 
-workers = int(os.environ.get("WEB_CONCURRENCY", "2"))
-threads = int(os.environ.get("GUNICORN_THREADS", "4"))
+# One process with threads: on a fractional-CPU instance a second process adds no CPU, only
+# memory (512 MB) and a second copy of every per-process cache. Requests mostly wait on the
+# database, Claude and Composio, which threads handle well.
+workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
+threads = int(os.environ.get("GUNICORN_THREADS", "8"))
 worker_class = "gthread"  # threads keep tutor streaming and uploads from blocking a worker
 timeout = 180  # large Canvas files and AI answers can take a while
 graceful_timeout = 30

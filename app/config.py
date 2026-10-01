@@ -86,7 +86,7 @@ def engine_options(url: str) -> dict:
     else:
         # Session-mode pooler / direct connection: a small pool per gunicorn worker. Keep
         # workers x (pool_size + max_overflow) under Supabase's pooler "Pool Size".
-        options.update(pool_size=env_int("DB_POOL_SIZE", 3), max_overflow=env_int("DB_MAX_OVERFLOW", 2),
+        options.update(pool_size=env_int("DB_POOL_SIZE", 6), max_overflow=env_int("DB_MAX_OVERFLOW", 4),
                        pool_timeout=30)
     return options
 
@@ -189,6 +189,8 @@ def load_config(env_name: str) -> dict:
         # Probability Lab with virtual coins: 18+ only, off unless enabled.
         "FEATURE_SIMULATIONS": env_bool("FEATURE_SIMULATIONS", False),
 
+        # Static files: cached by browsers for a year (URLs carry the deploy's commit, see url_defaults).
+        "SEND_FILE_MAX_AGE_DEFAULT": 31536000,
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",
         "REMEMBER_COOKIE_HTTPONLY": True,

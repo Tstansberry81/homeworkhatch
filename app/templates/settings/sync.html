@@ -41,24 +41,39 @@
       <h2>Chrome extension</h2>
       <p id="ext-status" class="muted">Looking for the extension…</p>
       <div class="btn-row">
-        <a id="ext-install" class="btn" href="https://chromewebstore.google.com/detail/{{ config.EXTENSION_IDS[0] }}" target="_blank" rel="noopener" hidden>Add to Chrome</a>
+        <a id="ext-install" class="btn" href="{{ url_for('main.extension_zip') }}" hidden>Download the extension (.zip)</a>
         <a id="ext-canvas" class="btn" target="_blank" rel="noopener" hidden>Open Canvas</a>
         <button id="ext-sync" class="btn btn-ghost" hidden>Sync now</button>
       </div>
       <p id="ext-hint" class="small muted" hidden></p>
     </div>
-    <details class="card">
-      <summary><strong>Set it up by hand</strong> <span class="muted small">(Edge, Brave, Arc, or without the Chrome Web Store)</span></summary>
-      <ol class="mt">
-        <li class="mb"><strong>Download the extension.</strong> <a class="btn btn-sm" href="{{ url_for('main.extension_zip') }}">Download .zip</a><br>
-          <span class="small muted">Unzip it somewhere you'll keep it (e.g. your Documents folder).</span></li>
-        <li class="mb"><strong>Load it</strong>: go to <code>chrome://extensions</code>, turn on <em>Developer mode</em>, click <em>Load unpacked</em>, and pick the unzipped folder.</li>
-        <li class="mb"><strong>Connect your school:</strong> open your Canvas in a tab, click the Homework Hatch icon, then <em>Connect</em>.</li>
-        <li class="mb"><strong>Link it to your account:</strong> in the extension's <em>Settings</em>, the server is
-          <code id="server">{{ server_url }}</code> <button class="btn btn-ghost btn-sm" data-copy="#server">Copy</button>;
-          paste a <em>server token</em> from the box on the right. Then click <em>Sync now</em>.</li>
-      </ol>
-    </details>
+    <div class="card" id="install">
+      <h2>Install the extension</h2>
+      <p class="small muted">It works in Google Chrome 109 or newer, on Chromebooks, Windows and Mac. Until the Chrome Web Store listing is approved, install it from the zip:</p>
+      <p><a class="btn btn-sm" href="{{ url_for('main.extension_zip') }}">Download .zip</a></p>
+      <details open>
+        <summary><strong>Chromebook</strong></summary>
+        <ol class="small">
+          <li>Check <code>chrome://management</code>: if it says your Chromebook or account is <em>managed</em> by a school or Family Link, Chrome won't load extensions from a zip. Use a personal Google account or device, or wait for the Chrome Web Store listing.</li>
+          <li>Open the <strong>Files</strong> app &rarr; <strong>Downloads</strong>. Right-click (two-finger tap) <code>homework-hatch-extension.zip</code> &rarr; <strong>Extract all</strong>. Don't just double-click it: that only opens it as a temporary drive, and the extension disappears after a restart.</li>
+          <li>Keep the extracted folder in <em>My files</em> (not Google Drive) and don't delete it.</li>
+          <li>Go to <code>chrome://extensions</code>, turn on <strong>Developer mode</strong> (top right), click <strong>Load unpacked</strong>, select the extracted <code>homework-hatch-extension</code> folder (the one with <code>manifest.json</code> inside) and click <strong>Open</strong>.</li>
+        </ol>
+      </details>
+      <details>
+        <summary><strong>Windows</strong></summary>
+        <ol class="small">
+          <li>In File Explorer &rarr; <strong>Downloads</strong>, right-click <code>homework-hatch-extension.zip</code> &rarr; <strong>Extract All</strong> &rarr; <strong>Extract</strong>. Move the extracted folder somewhere you'll keep it, like <strong>Documents</strong>.</li>
+          <li>Go to <code>chrome://extensions</code>, turn on <strong>Developer mode</strong> (top right), click <strong>Load unpacked</strong>, select the <code>homework-hatch-extension</code> folder (the one with <code>manifest.json</code> inside) and click <strong>Select Folder</strong>.</li>
+          <li>If Chrome says <em>Manifest file is missing</em>, you picked the wrong folder: pick the one that has <code>manifest.json</code> directly inside.</li>
+        </ol>
+      </details>
+      <p class="small">Then: pin it from the puzzle-piece menu, open your school's Canvas, click the Homework Hatch icon &rarr; <strong>Agree and connect</strong>. It opens this page and links itself to your account; if it doesn't, click the icon &rarr; <strong>Link to my Homework Hatch account</strong>.</p>
+      <details class="small mt">
+        <summary>Link it by hand instead</summary>
+        <p>In the extension's <em>Settings</em>, the server is <code id="server">{{ server_url }}</code> <button class="btn btn-ghost btn-sm" data-copy="#server">Copy</button>; paste a <em>server token</em> from the box on the right, click <em>Save</em>, then <em>Sync now</em>.</p>
+      </details>
+    </div>
     <p class="small muted">Once set up it syncs every hour while Chrome is open: new files, grades and announcements, and never a file it already has. Hidden tabs, locked files and outside tools (WebAssign, Gradescope…) can't be read.</p>
   </div>
   <div>
@@ -86,7 +101,18 @@
 <script>
 (() => {
   const card = document.getElementById("ext");
-  const ids = JSON.parse(card.dataset.ids), knownCanvas = JSON.parse(card.dataset.canvas)[0];
+  const knownCanvas = JSON.parse(card.dataset.canvas)[0];
+  // The store copy's ID, plus the ID of a copy loaded from the zip (it differs, and the extension
+  // passes it here as ?ext=… when it opens this page); remembered in this browser.
+  const ids = JSON.parse(card.dataset.ids);
+  let extra = [];
+  try { extra = JSON.parse(localStorage.getItem("hh_ext_ids") || "[]"); } catch {}
+  const fromUrl = new URLSearchParams(location.search).get("ext");
+  if (fromUrl && /^[a-p]{32}$/.test(fromUrl) && !extra.includes(fromUrl)) {
+    extra.unshift(fromUrl);
+    try { localStorage.setItem("hh_ext_ids", JSON.stringify(extra.slice(0, 5))); } catch {}
+  }
+  for (const id of extra) if (!ids.includes(id)) ids.push(id);
   const $ = (id) => document.getElementById(id);
   const show = (id, on = true) => { $(id).hidden = !on; };
   const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
@@ -105,7 +131,7 @@
   function render() {
     ["ext-install", "ext-canvas", "ext-sync", "ext-hint"].forEach((id) => show(id, false));
     if (!ext) {
-      $("ext-status").textContent = "Not installed in this browser. Add it from the Chrome Web Store; it links to your account on its own.";
+      $("ext-status").textContent = "Not found in this browser. Install it from the zip below (the Chrome Web Store listing is still in review). Already installed? Click the Homework Hatch icon, then \"Link to my Homework Hatch account\".";
       show("ext-install");
       return;
     }

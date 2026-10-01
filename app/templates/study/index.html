@@ -18,8 +18,8 @@
     <ul class="list">
       {% for d in decks %}
       <li><div class="grow"><a class="title" href="{{ url_for('study.deck', deck_id=d.id) }}">{{ d.title }}</a>
-        <div class="small muted">{{ d.cards|length }} cards{% if d.course %} · {{ d.course.name }}{% endif %}{% if d.source == 'ai' %} · AI-made{% endif %}</div></div>
-        {% if d.cards %}<a class="btn btn-sm" href="{{ url_for('study.review', deck_id=d.id) }}">Study</a>{% endif %}</li>
+        <div class="small muted">{{ card_counts.get(d.id, 0) }} cards{% if d.course %} · {{ d.course.name }}{% endif %}{% if d.source == 'ai' %} · AI-made{% endif %}</div></div>
+        {% if card_counts.get(d.id) %}<a class="btn btn-sm" href="{{ url_for('study.review', deck_id=d.id) }}">Study</a>{% endif %}</li>
       {% endfor %}
     </ul>
     {% else %}{{ empty("", "No decks yet.") }}{% endif %}

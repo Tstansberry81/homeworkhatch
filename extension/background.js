@@ -336,8 +336,9 @@ async function schedule(keep = false) {
 chrome.runtime.onInstalled.addListener(({ reason }) => {
   schedule();
   runSync("install");
-  // First install: open the page that hands out the sync token.
-  if (reason === "install") chrome.tabs.create({ url: `${HATCH_URL}/settings/sync` });
+  // First install: open the page that hands out the sync token. It's told this copy's ID, which
+  // for a copy loaded from the zip differs from the Chrome Web Store's, so it can link either.
+  if (reason === "install") chrome.tabs.create({ url: `${HATCH_URL}/settings/sync?ext=${chrome.runtime.id}` });
 });
 chrome.runtime.onStartup.addListener(async () => {
   await schedule(true);

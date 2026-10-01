@@ -37,10 +37,10 @@ def client():
     app = current_app
     composio = app.extensions.get("hh_composio")
     if composio is None:
-        from composio import Composio
+        from .composio_rest import ComposioREST
 
-        versions = app.config.get("COMPOSIO_TOOLKIT_VERSIONS") or None
-        composio = Composio(api_key=app.config["COMPOSIO_API_KEY"], toolkit_versions=versions)
+        composio = ComposioREST(app.config["COMPOSIO_API_KEY"],
+                                toolkit_versions=app.config.get("COMPOSIO_TOOLKIT_VERSIONS") or None)
         app.extensions["hh_composio"] = composio
     return composio
 
@@ -134,14 +134,48 @@ def disconnect(user: User, kind: str) -> None:
         db.session.commit()
 
 
-def execute(user: User, kind: str, slug: str, arguments: dict) -> dict:
-    """Run one Composio tool as the student; returns the tool's `data`."""
-    kwargs = {"user_id": composio_user(user)}
-    if not current_app.config.get("COMPOSIO_TOOLKIT_VERSIONS"):
+def _call(composio, user_id: str, slug: str, arguments: dict, pinned: bool):
+    """One raw tool call; returns the response, or the exception (safe to run in worker threads)."""
+    kwargs = {"user_id": user_id}
+    if not pinned:
         kwargs["dangerously_skip_version_check"] = True  # latest tool versions
     try:
-        response = client().tools.execute(slug, arguments, **kwargs)
+        return composio.tools.execute(slug, arguments, **kwargs)
     except Exception as exc:
+        return exc
+
+
+def execute(user: User, kind: str, slug: str, arguments: dict) -> dict:
+    """Run one Composio tool as the student; returns the tool's `data`."""
+    pinned = bool(current_app.config.get("COMPOSIO_TOOLKIT_VERSIONS"))
+    return _interpret(user, kind, _call(client(), composio_user(user), slug, arguments, pinned))
+
+
+def execute_many(user: User, kind: str, calls: list[tuple[str, dict]], workers: int = 6) -> list:
+    """Run several tools at once (each is a round trip to Google). Returns, per call, its `data` or
+    the IntegrationError it failed with; NotConnected stops everything and is raised."""
+    if not calls:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    composio, uid = client(), composio_user(user)
+    pinned = bool(current_app.config.get("COMPOSIO_TOOLKIT_VERSIONS"))
+    with ThreadPoolExecutor(max_workers=min(workers, len(calls))) as pool:
+        raw = list(pool.map(lambda c: _call(composio, uid, c[0], c[1], pinned), calls))
+    out = []
+    for response in raw:
+        try:
+            out.append(_interpret(user, kind, response))
+        except NotConnected:
+            raise
+        except IntegrationError as exc:
+            out.append(exc)
+    return out
+
+
+def _interpret(user: User, kind: str, response) -> dict:
+    if isinstance(response, Exception):
+        exc = response
         if "connected account" in str(exc).lower() or "ConnectedAccountNotFound" in type(exc).__name__:
             _mark_disconnected(user, kind, str(exc))
             raise NotConnected(f"{LABELS[kind]} isn't connected.") from exc

@@ -96,6 +96,12 @@ def load_user(user_id: str):
 
 
 def _register_template_helpers(app: Flask) -> None:
+    @app.url_defaults
+    def static_cache_buster(endpoint, values):
+        # Static files are cached for a year; each deploy's commit makes their URLs new.
+        if endpoint == "static" and "v" not in values:
+            values["v"] = app.config.get("GIT_COMMIT") or "dev"
+
     from .services import ai as ai_service
     from .services import integrations as integration_service
     from .services import coins as coin_service
@@ -133,7 +139,7 @@ def _register_hooks(app: Flask) -> None:
 
     @app.before_request
     def track_activity():
-        if not current_user.is_authenticated or request.endpoint in (None, "static"):
+        if request.endpoint in (None, "static") or not current_user.is_authenticated:  # no DB for static files
             return
         now = utcnow()
         if current_user.last_seen_at and now - current_user.last_seen_at < timedelta(minutes=5):
@@ -155,8 +161,8 @@ def _register_hooks(app: Flask) -> None:
 
     @app.before_request
     def require_age():
-        if (current_user.is_authenticated and current_user.birth_year is None
-                and request.endpoint not in AGE_EXEMPT and not (request.endpoint or "").startswith("api.")):
+        if (request.endpoint not in AGE_EXEMPT and not (request.endpoint or "").startswith("api.")
+                and current_user.is_authenticated and current_user.birth_year is None):
             return redirect(url_for("main.age", next=request.full_path if request.method == "GET" else None))
 
     @app.after_request
