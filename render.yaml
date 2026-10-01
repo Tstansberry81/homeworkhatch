@@ -21,6 +21,10 @@ services:
         value: wsgi.py
       - key: SECRET_KEY
         generateValue: true
+      - key: ENCRYPTION_KEYS
+        sync: false  # "k1:<base64>" from `flask encryption new-key k1`; keep a copy in a password manager
+      - key: ENCRYPTION_STRICT
+        value: "0"  # set to 1 once Admin says everything stored is encrypted
       - key: ADMIN_EMAIL
         sync: false  # the account registered with this email becomes admin
       - key: REQUIRE_APPROVAL

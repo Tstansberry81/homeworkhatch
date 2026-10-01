@@ -509,7 +509,7 @@ def _apply_event(row: CalendarEvent, e: dict, courses: dict[str, Course]):
 
 def _spool(stream, limit: int):
     """Copy the request body to a temp file, enforcing the size limit and hashing as we go."""
-    spool = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+    spool = tempfile.SpooledTemporaryFile(max_size=2 * 1024 * 1024)  # bigger uploads wait on disk, not in RAM
     digest = hashlib.sha256()
     size = 0
     while True:

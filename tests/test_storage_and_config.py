@@ -238,3 +238,31 @@ def test_health_endpoints(client, app):
     assert client.get("/health").get_json()["ok"] is True
     body = client.get("/health/db").get_json()
     assert body["ok"] is True and body["database"] in {"sqlite", "postgresql"}
+
+
+def test_encryption_sweep_handles_empty_objects_and_restores_on_a_bad_read_back(s3_app, monkeypatch):
+    from app.services import crypto, encryption
+    from app.services.storage import EncryptedStorage, get_storage
+
+    with s3_app.app_context():
+        st = get_storage()
+        st.backend.put_bytes("u/1/files/empty.txt", b"")            # stored before encryption, 0 bytes
+        st.backend.put_bytes("u/1/files/plain.txt", b"old plain bytes")
+        assert st.sealed_kid("u/1/files/empty.txt") is None, "an empty object reads as unsealed, not an error"
+        result = encryption.convert_objects(seal=True)
+        assert result["failed"] == [] and encryption.object_status()["unencrypted"] == 0
+        assert st.read("u/1/files/empty.txt") == b"" and st.read("u/1/files/plain.txt") == b"old plain bytes"
+
+        # A rewrite whose read-back blows up puts the original bytes back.
+        st.backend.put_bytes("u/1/files/again.txt", b"keep me")
+        real_open = EncryptedStorage.open
+        calls = {"n": 0}
+
+        def flaky_open(self, key):
+            calls["n"] += 1
+            raise crypto.CryptoError("simulated provider corruption")
+        monkeypatch.setattr(EncryptedStorage, "open", flaky_open)
+        with pytest.raises(crypto.CryptoError):
+            st.rewrite("u/1/files/again.txt", seal=True)
+        monkeypatch.setattr(EncryptedStorage, "open", real_open)
+        assert calls["n"] == 1 and st.backend.read("u/1/files/again.txt") == b"keep me", "original restored"

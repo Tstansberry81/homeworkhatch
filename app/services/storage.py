@@ -152,8 +152,10 @@ class S3Storage:
         # boto3 sends DeleteObjects without a Content-Type; Supabase then ignores the XML body
         # and rejects the request ("must have required property 'Body'").
         self.s3.meta.events.register("before-sign.s3.DeleteObjects", _xml_content_type)
-        self.transfer = TransferConfig(multipart_threshold=8 * 1024 * 1024, multipart_chunksize=8 * 1024 * 1024,
-                                       max_concurrency=4)
+        # One streamed PutObject per file (objects are capped at 50 MB anyway): multipart uploads
+        # buffer every part in memory, which a 512 MB instance can't afford with uploads in parallel.
+        self.transfer = TransferConfig(multipart_threshold=64 * 1024 * 1024, multipart_chunksize=8 * 1024 * 1024,
+                                       max_concurrency=1)
 
     @staticmethod
     def _too_large(exc) -> bool:
@@ -217,7 +219,15 @@ class S3Storage:
                                               Params={"Bucket": self.bucket, "Key": key, "ContentType": content_type})
 
     def head_bytes(self, key, n):
-        return self.s3.get_object(Bucket=self.bucket, Key=key, Range=f"bytes=0-{n - 1}")["Body"].read()
+        from botocore.exceptions import ClientError
+
+        try:
+            return self.s3.get_object(Bucket=self.bucket, Key=key, Range=f"bytes=0-{n - 1}")["Body"].read()
+        except ClientError as exc:
+            err = exc.response.get("Error", {}).get("Code")
+            if err == "InvalidRange" or exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 416:
+                return b""  # an empty object: nothing to read, and certainly not sealed
+            raise StorageError(str(exc)) from exc
 
     def list_keys(self, prefix=""):
         paginator = self.s3.get_paginator("list_objects_v2")
@@ -236,7 +246,7 @@ class S3Storage:
             raise StorageError(str(exc)) from exc
 
 
-SPOOL = 16 * 1024 * 1024  # bigger temporary copies go to disk, not memory (512 MB instances)
+SPOOL = 2 * 1024 * 1024  # bigger temporary copies go to disk, not memory (512 MB instances)
 
 
 def _prepend(head: bytes, raw: IO[bytes]):
@@ -349,18 +359,32 @@ class EncryptedStorage:
                 raise crypto.CryptoError(f"re-encrypting {key} didn't round-trip; left it unchanged")
             new.seek(0)
             self.backend.put_file(key, new, "application/octet-stream")
-            after = hashlib.sha256()
-            with closing(self.open(key)) as fh:
-                for piece in _pieces(fh.read):
-                    after.update(piece)
-            if after.hexdigest() != before.hexdigest():
-                original.seek(0)
-                self.backend.put_file(key, original, "application/octet-stream")
-                raise crypto.CryptoError(f"{key} didn't read back correctly; restored the original")
+            try:
+                after = hashlib.sha256()
+                with closing(self.open(key)) as fh:
+                    for piece in _pieces(fh.read):
+                        after.update(piece)
+                if after.hexdigest() != before.hexdigest():
+                    raise crypto.CryptoError(f"{key} didn't read back correctly")
+            except Exception:
+                self._put_back(key, original)
+                raise
             return True
         finally:
             new.close()
             original.close()
+
+    def _put_back(self, key: str, original) -> None:
+        """Restore an object's original bytes after a failed rewrite; if that fails too, keep them
+        under a quarantine key rather than lose them."""
+        try:
+            original.seek(0)
+            self.backend.put_file(key, original, "application/octet-stream")
+        except Exception:
+            original.seek(0)
+            self.backend.put_file(f"_quarantine/{key}", original, "application/octet-stream")
+            current_app.logger.error("encryption: couldn't restore %s; original kept at _quarantine/%s", key, key)
+            raise
 
 
 def _spool(chunks) -> IO[bytes]:

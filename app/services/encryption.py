@@ -192,13 +192,23 @@ def migrate_all(rotate: bool = True) -> dict:
 
 
 def _vacuum() -> None:
-    """Rewrite tables once so old unencrypted row versions don't linger in the database files."""
+    """Rewrite tables once so old unencrypted row versions don't linger in the database files.
+    Short lock and statement timeouts: a busy table is skipped (and retried after the next
+    restart) rather than holding up requests."""
     tables = sorted({t.name for t, _ in encrypted_columns()})
+    skipped = []
     with db.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text("SET lock_timeout = '3s'"))
+        conn.execute(text("SET statement_timeout = '120s'"))
         for name in tables:
-            conn.execute(text(f'VACUUM (FULL, ANALYZE) "{name}"'))
+            try:
+                conn.execute(text(f'VACUUM (FULL, ANALYZE) "{name}"'))
+            except Exception as exc:
+                log.warning("encryption: VACUUM %s skipped: %s", name, str(exc).splitlines()[0])
+                skipped.append(name)
     value = state() or {}
-    value["vacuumed"] = utcnow().isoformat() + "Z"
+    value["vacuumed"] = None if skipped else utcnow().isoformat() + "Z"
+    value["vacuum_skipped"] = skipped
     _save_state(value)
 
 
@@ -279,7 +289,14 @@ def register_cli(app: Flask) -> None:
         if crypto.strict():
             raise SystemExit("Turn ENCRYPTION_STRICT off first.")
         n = sum(convert_column(t, c, "decrypt") for t, c in encrypted_columns())
-        click.echo(f"fields decrypted: {n}; files: {convert_objects(seal=False)}")
+        files = convert_objects(seal=False)
+        click.echo(f"fields decrypted: {n}; files: {files}")
+        left = [f"{t.name}.{c.name}" for t, c in encrypted_columns()
+                if db.session.scalar(select(db.func.count()).where(cast(c, Text).like("enc1:%")))]
+        status = object_status()
+        if files["failed"] or left or status["unencrypted"] != status["objects"]:
+            click.echo(f"NOT finished: encrypted columns {left}, files {status}. Keep the keys and run it again.")
+            raise SystemExit(1)
 
     @group.command("retire")
     @click.argument("kid")

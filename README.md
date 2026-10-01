@@ -65,29 +65,41 @@ git-ignored.
 - **Database:** click **Connect** and copy the **Session pooler** URI
   (`postgresql://postgres.<ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres`).
   Use the session pooler because Render only speaks IPv4, while the direct
-  `db.<ref>.supabase.co` host is IPv6-only. The app adds `sslmode=require` itself.
+  `db.<ref>.supabase.co` host is IPv6-only. The app adds `sslmode=verify-full` itself and
+  checks the server certificate against Supabase's root CA (bundled in `app/certs`).
 - **Storage:** create a **private** bucket named `canvas-files`. Then go to Storage →
   Settings → **S3 connection**, enable it, and create an access key. Note the region shown
   there.
 - **Security:** optionally turn on *Enforce SSL* in Database settings. The app turns on Row
   Level Security for every table after each migration, so Supabase's public Data API can't
   read app data. Supabase's Security Advisor should show no "RLS disabled" errors.
-- **File size:** the Free plan caps files at 50 MB, which is the app's default limit on
-  Supabase. After upgrading, raise the global file size limit and set `MAX_FILE_MB`.
+- **File size:** Supabase caps objects at 50 MB. Encrypted files are slightly larger, so the
+  app's default limit on Supabase is 49 MB. After upgrading, raise the global limit and set `MAX_FILE_MB`.
 
-**2. Render** (render.com → New → **Blueprint**, pick this repo)
+**2. Encryption key** (before the first deploy). Data is encrypted with a key that never goes
+in the repo; see [SECURITY.md](SECURITY.md).
+- On a trusted machine, run `flask encryption new-key k1` and save the line in a password
+  manager right away. **Losing it means losing the data.**
+- Paste it as `ENCRYPTION_KEYS` in Render.
+- After the deploy, Admin shows the key's check value. Compare it with your saved copy.
+- Once Admin says everything is encrypted, set `ENCRYPTION_STRICT=1`.
+
+**3. Render** (render.com → New → **Blueprint**, pick this repo)
 - It reads `render.yaml` and asks once for the secret values: `DATABASE_URL`,
   `SUPABASE_URL`, `SUPABASE_S3_REGION`, `SUPABASE_S3_ACCESS_KEY_ID`,
-  `SUPABASE_S3_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY`, and optionally Stripe. `SECRET_KEY` is generated for you.
+  `SUPABASE_S3_SECRET_ACCESS_KEY`, `ENCRYPTION_KEYS`, `ANTHROPIC_API_KEY`, and optionally Stripe.
+  `SECRET_KEY` is generated for you.
 - Migrations run on start (`flask db upgrade`). On a paid plan you can move them to
   `preDeployCommand`.
-- The app refuses to boot in production with an unsafe config: no `SECRET_KEY`, a SQLite
-  database, or local file storage.
+- The app refuses to boot in production with an unsafe config: no `SECRET_KEY`, no
+  `ENCRYPTION_KEYS`, a SQLite database, or local file storage. It also refuses an encryption
+  key that doesn't match the one the data was written with.
 
-**3. Verify** from Render's shell (paid plans) or any machine with the same env vars:
+**4. Verify** from Render's shell (paid plans) or any machine with the same env vars:
 
 ```bash
-flask check-deploy   # config, database + migrations, row level security, storage round-trip, AI
+flask check-deploy   # config, database + migrations, row level security, storage round-trip, encryption, AI
+flask encryption status   # what's encrypted, key check values
 ```
 
 `/health` returns the deployed commit (Render's health check), and `/health/db` pings the
