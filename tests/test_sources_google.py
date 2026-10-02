@@ -278,3 +278,58 @@ def test_drive_search_and_import(synced_user, client, composio):
     client.post("/files/drive/import", json=body)
     assert db.session.query(Upload).count() == 1
     assert sum(1 for s, _ in composio.calls if s == "GOOGLEDRIVE_DOWNLOAD_FILE") == 1
+
+
+def test_google_calendar_patch_failures_never_duplicate_and_links_dont_churn(app, synced_user, client, composio):
+    from app.services import gcal
+
+    composio.connect(synced_user, "googlecalendar")
+    db.session.add(Integration(user_id=synced_user.id, kind="calendar", connected=True, settings={"enabled": True}))
+    db.session.commit()
+    client.post("/settings/integrations/calendar/sync")
+    pushes = db.session.query(CalendarPush).count()
+    assert pushes and len(composio.events) == pushes
+
+    # The same sync from another address (or a new PUBLIC_URL) changes nothing in Google.
+    seen = len(composio.calls)  # (the fake numbers events by call count, so don't clear it)
+    app.config["PUBLIC_URL"] = "https://homeworkhatch.com"
+    try:
+        client.post("/settings/integrations/calendar/sync")
+    finally:
+        app.config["PUBLIC_URL"] = ""
+    assert not [s for s, _ in composio.calls[seen:] if s.endswith(("PATCH_EVENT", "CREATE_EVENT"))]
+
+    # A due date moves and Google has a hiccup: the row is kept and retried, nothing is duplicated.
+    moved = _upcoming(synced_user)[0]
+    moved.due_at += timedelta(days=1)
+    db.session.commit()
+    real_execute = composio.tools.execute
+    composio.tools.execute = lambda slug, arguments, **kw: (
+        {"successful": False, "error": "Rate Limit Exceeded", "data": {}} if slug.endswith("PATCH_EVENT")
+        else real_execute(slug, arguments, **kw))
+    client.post("/settings/integrations/calendar/sync")
+    composio.tools.execute = real_execute
+    assert db.session.query(CalendarPush).count() == pushes and len(composio.events) == pushes, "no duplicate"
+
+    # Deleted in Google: re-created once, and the same tracking row points at the new event.
+    push = db.session.scalar(select(CalendarPush).where(CalendarPush.assignment_id == moved.id))
+    old_event = push.event_id
+    composio.events.pop(old_event)
+    client.post("/settings/integrations/calendar/sync")
+    db.session.refresh(push)
+    assert push.event_id != old_event and push.event_id in composio.events
+    assert db.session.query(CalendarPush).count() == pushes and len(composio.events) == pushes
+    assert gcal._gone(Exception("Google Calendar: Not Found")) and not gcal._gone(Exception("Rate Limit Exceeded"))
+
+
+def test_stripe_returns_to_the_address_the_student_is_using(app):
+    from app.blueprints.billing import _external
+
+    app.config.update(PUBLIC_URL="https://homeworkhatch.com", RENDER_URL="https://homeworkhatch.onrender.com")
+    try:
+        with app.test_request_context(base_url="https://homeworkhatch.onrender.com"):
+            assert _external("billing.plans", status="success").startswith("https://homeworkhatch.onrender.com/")
+        with app.test_request_context(base_url="https://evil.example"):
+            assert _external("billing.plans").startswith("https://homeworkhatch.com/"), "a forged host isn't used"
+    finally:
+        app.config.update(PUBLIC_URL="", RENDER_URL="")

@@ -346,6 +346,55 @@ a.cite { display: inline-block; font: 700 .7rem var(--mono); padding: 0 6px; bor
 .cal .item.done, .cal .item.graded, .cal .item.submitted { background: var(--mint-soft); border-left-color: var(--mint); text-decoration: line-through; color: var(--muted); }
 .cal .item.missing { background: var(--tomato-soft); border-left-color: var(--tomato); }
 @media (max-width: 700px) { .cal { border-spacing: 3px; } .cal td { height: 64px; padding: 3px; border-radius: 7px; } .cal .item { font-size: .6rem; padding: 1px 3px; } }
+.cal .day { color: inherit; text-decoration: none; display: inline-block; min-width: 1.6em; }
+.cal .day:hover { text-decoration: underline; }
+.cal .item.submitted_late { background: var(--mint-soft); border-left-color: var(--mint); text-decoration: line-through; color: var(--muted); }
+.cal-views { margin: -8px 0 16px; }
+.cal-views a { padding: 5px 14px; }
+
+/* week and day views: one entry per assignment or event, in time order */
+.cal-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "when act" "what what"; column-gap: 6px;
+  padding: 6px 6px 6px 9px; border-radius: 9px; border: 1.5px solid var(--hair); border-left: 4px solid var(--c, var(--sky));
+  background: color-mix(in srgb, var(--c, var(--sky)) 14%, var(--surface)); font-size: .82rem; }
+.cal-entry + .cal-entry { margin-top: 6px; }
+.cal-entry .when { grid-area: when; align-self: center; font: 600 .68rem var(--mono); color: var(--muted); }
+.cal-entry .what { grid-area: what; min-width: 0; overflow-wrap: break-word; }
+.cal-entry .what > a, .cal-entry .what > span { font-weight: 650; color: var(--text); }
+.cal-entry .meta { font-size: .72rem; color: var(--muted); margin-top: 2px; }
+.cal-entry .meta .badge { font-size: .64rem; padding: 0 7px; }
+.cal-entry form { grid-area: act; align-self: start; }
+.cal-entry .btn-sm { padding: 3px 6px; }
+.cal-entry.event { --c: var(--lilac); }
+.cal-entry.done, .cal-entry.submitted, .cal-entry.submitted_late, .cal-entry.graded { background: var(--mint-soft); border-left-color: var(--mint); }
+.cal-entry.done .what > a, .cal-entry.submitted .what > a, .cal-entry.submitted_late .what > a, .cal-entry.graded .what > a { text-decoration: line-through; color: var(--muted); }
+.cal-entry.done .btn { background: var(--mint); color: #141311; border-color: var(--line); }
+.cal-entry.missing { background: var(--tomato-soft); border-left-color: var(--tomato); }
+.cal-entry.wide { grid-template-columns: 92px minmax(0, 1fr) auto; grid-template-areas: "when what act"; column-gap: 12px; padding: 12px 12px 12px 14px; font-size: .95rem; }
+.cal-entry.wide .when { font-size: .8rem; padding-top: 2px; align-self: start; }
+.cal-entry.wide .meta { font-size: .8rem; }
+.cal-entry.wide + .cal-entry.wide { margin-top: 10px; }
+.calw-wrap { container-type: inline-size; margin-bottom: 22px; }
+.calw { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: start; }
+.calw-day { background: var(--surface); border: 1.5px solid var(--line); border-radius: 12px; padding: 8px; min-height: 160px; }
+.calw-day.today { background: var(--yolk-soft); box-shadow: var(--shadow); }
+.calw-day.past { background: var(--surface-2); border-color: var(--hair); }
+.calw-head { display: flex; align-items: baseline; gap: 6px; margin: 0 0 8px; color: inherit; text-decoration: none; }
+.calw-head:hover { text-decoration: none; }
+.calw-head .dow { font: 600 .7rem var(--mono); text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.calw-head .date { font: 800 1.3rem/1 var(--display); }
+.calw-day.today .calw-head .date { background: var(--yolk); color: #141311; border: 1.5px solid var(--line); border-radius: 8px; padding: 1px 6px; }
+.calw-empty { font-size: .75rem; color: var(--muted); margin: 0; }
+.cald { padding: 14px; }
+/* Seven columns need about 120px each; narrower than that, each day becomes a row. */
+@container (max-width: 880px) {
+  .calw { grid-template-columns: 1fr; gap: 10px; }
+  .calw-day { min-height: 0; display: grid; grid-template-columns: 64px minmax(0, 1fr); column-gap: 10px; }
+  .calw-head { grid-row: 1 / span 99; flex-direction: column; gap: 2px; margin: 0; }
+  .calw-day > :not(.calw-head) { grid-column: 2; }
+  .calw-day > .cal-entry + .cal-entry { margin-top: 6px; }
+  .calw-empty { align-self: center; }
+}
+@media (max-width: 560px) { .cal-entry.wide { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "when act" "what what"; padding: 10px; } }
 
 /* ---------- study ---------- */
 .flashcard { perspective: 1400px; cursor: pointer; margin: 8px auto 16px; max-width: 660px; }

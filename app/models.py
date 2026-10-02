@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from flask_login import UserMixin
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event
+from sqlalchemy import JSON, BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -67,6 +67,9 @@ class User(UserMixin, db.Model):
     calendar_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     # Bumped on password change/reset; part of the login cookie, so old sessions stop working.
     session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # IDs of extension copies loaded from the zip (each install gets its own), so the Connect Canvas
+    # page finds them on every address the site has. The Web Store copy's ID is in config.
+    extension_ids: Mapped[list | None] = mapped_column(JSON)
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -403,6 +406,10 @@ class CalendarEvent(db.Model):
     end_at: Mapped[datetime | None] = mapped_column(DateTime)
     location: Mapped[str | None] = mapped_column(EncryptedText("calendar_event.location"))
     html_url: Mapped[str | None] = mapped_column(String(500))
+    # Canvas's all-day events are a calendar date (start_at is midnight in the course's zone, which
+    # may not be the student's). None for rows synced before extension 1.4.3.
+    all_day: Mapped[bool | None] = mapped_column(Boolean)
+    all_day_date: Mapped[date | None] = mapped_column(Date)
 
     __table_args__ = (UniqueConstraint("account_id", "canvas_id"),)
 

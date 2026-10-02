@@ -413,6 +413,7 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
       id: String(e.id), title: e.title, start_at: e.start_at, end_at: e.end_at,
       course_id: String(e.context_code || "").replace("course_", "") || null,
       location: e.location_name ?? null, html_url: e.html_url,
+      all_day: Boolean(e.all_day), all_day_date: e.all_day ? (e.all_day_date ?? null) : null,
     })),
     missing: (missing || []).map((a) => ({
       id: String(a.id), course_id: String(a.course_id), name: a.name, due_at: a.due_at, html_url: a.html_url,

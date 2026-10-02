@@ -1,6 +1,7 @@
 import { syncCanvas, NotLoggedInError, zipPlan, fileKey, pool } from "./canvas.js";
 import { buildZip } from "./zip.js";
 import { uploadSnapshot, HATCH_URL } from "./upload.js";
+import { sameServerAs } from "./origins.js";
 
 const DEFAULTS = {
   // Empty until the student connects their school's Canvas from the popup.
@@ -368,6 +369,11 @@ chrome.tabs.onUpdated.addListener(async (_id, info, tab) => {
 // The Homework Hatch site (only the origins in the manifest's externally_connectable) asks
 // whether the extension is installed and linked, hands it a sync token, or starts a sync. The
 // server is always the site that sent the token, and nothing is ever sent back but status.
+// Every origin in externally_connectable is the same Homework Hatch server (one database, so a
+// token works on any of them): an extension linked on one address counts as linked on the others,
+// instead of re-linking and re-syncing each time the student opens Connect Canvas elsewhere.
+const sameServer = sameServerAs(chrome.runtime.getManifest().externally_connectable?.matches);
+
 chrome.runtime.onMessageExternal.addListener((msg, sender, reply) => {
   const origin = sender.origin || (sender.url ? new URL(sender.url).origin : null);
   if (!origin) return;
@@ -379,14 +385,14 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, reply) => {
       await chrome.storage.local.set({ settings: s });
       if (s.baseUrl) runSync("link");
     } else if (msg?.type === "sync") {
-      if (s.baseUrl && s.endpointToken && s.endpointUrl === origin) runSync("site");
+      if (s.baseUrl && s.endpointToken && sameServer(s.endpointUrl, origin)) runSync("site");
     } else if (msg?.type !== "ping") {
       return reply({ error: "unknown message" });
     }
     const { status = {} } = await chrome.storage.local.get("status");
     reply({
       version: chrome.runtime.getManifest().version,
-      linked: Boolean(s.endpointToken) && s.endpointUrl === origin,
+      linked: Boolean(s.endpointToken) && sameServer(s.endpointUrl, origin),
       canvas: s.baseUrl || null,
       state: running ? "syncing" : status.state || null,
       lastSync: status.lastSync || null,

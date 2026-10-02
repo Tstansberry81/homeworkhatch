@@ -180,6 +180,12 @@ def load_config(env_name: str) -> dict:
         # Shown on /support (and used as the Chrome Web Store support contact). Without it the
         # page points to GitHub issues.
         "SUPPORT_EMAIL": os.environ.get("SUPPORT_EMAIL", "").strip(),
+        # A form for suggestions and bug reports (e.g. a Google Form), linked from Account and
+        # Support. Only https links are shown.
+        "FEEDBACK_URL": (lambda u: u if u.startswith("https://") else "")(os.environ.get("FEEDBACK_URL", "").strip()),
+        # Render's own address for this service. It keeps working after a custom domain is added,
+        # and extensions too old to know the custom domain can only link from it.
+        "RENDER_URL": os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/"),
 
         # The account registered with this email becomes an admin (production has no
         # "first user is admin" shortcut). `flask create-admin` works too.

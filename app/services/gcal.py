@@ -14,7 +14,7 @@ import threading
 from datetime import timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from flask import current_app, url_for
+from flask import current_app, has_request_context, request, url_for
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -56,14 +56,31 @@ def _event(a: Assignment, tz: ZoneInfo) -> dict:
         lines.append(f"{a.points_possible:g} points")
     if a.html_url:
         lines.append(f'<a href="{a.html_url}">Open in Canvas</a>')
-    lines.append(f'<a href="{url_for("courses.assignment", assignment_id=a.id, _external=True)}">Open in Homework Hatch</a>')
+    path = url_for("courses.assignment", assignment_id=a.id)
     due = a.due_at.replace(tzinfo=timezone.utc).astimezone(tz)
-    return {"summary": summary, "description": "<br>".join(lines), "end": due,
-            "start": due - timedelta(minutes=EVENT_MINUTES)}
+    return {"summary": summary, "end": due, "start": due - timedelta(minutes=EVENT_MINUTES),
+            "description": "<br>".join(lines + [f'<a href="{_site()}{path}">Open in Homework Hatch</a>']),
+            # What the fingerprint sees: the link's path, not the site's address, so a sync started
+            # on another address (or a new PUBLIC_URL) doesn't rewrite every event.
+            "stable": "<br>".join(lines + [path])}
+
+
+def _site() -> str:
+    """The site's public address for links in Google: PUBLIC_URL, else the address in use."""
+    base = current_app.config.get("PUBLIC_URL")
+    if base:
+        return base.rstrip("/")
+    return request.host_url.rstrip("/") if has_request_context() else ""
 
 
 def _fingerprint(ev: dict) -> str:
-    return hashlib.sha1(f"{ev['summary']}|{ev['end'].isoformat()}|{ev['description']}".encode()).hexdigest()
+    return hashlib.sha1(f"{ev['summary']}|{ev['end'].isoformat()}|{ev['stable']}".encode()).hexdigest()
+
+
+def _gone(error: Exception) -> bool:
+    """Google says the event no longer exists (the student deleted it), rather than some other failure."""
+    text = str(error).lower()
+    return any(s in text for s in ("not found", "notfound", "404", "410", "deleted", "gone"))
 
 
 def _event_id(data: dict) -> str | None:
@@ -123,14 +140,19 @@ def sync(user: User) -> dict:
         "calendar_id": p.calendar_id, "event_id": p.event_id, "summary": ev["summary"],
         "description": ev["description"], "start_time": ev["start"].isoformat(),
         "end_time": ev["end"].isoformat(), "timezone": str(tz), "send_updates": "none"} for _a, p, ev, _fp in to_patch])
+    failed = None
+    replace = {}  # assignment id -> its tracking row, kept until the new event exists
     for (a, p, ev, fp), result in zip(to_patch, results):
         if isinstance(result, integrations.IntegrationError):
-            db.session.delete(p)  # the student deleted it in Google: add it back
-            to_create.append((a, ev, fp))
+            if _gone(result):  # the student deleted it in Google: add it back
+                replace[a.id] = p
+                to_create.append((a, ev, fp))
+            else:  # anything else (rate limit, Google hiccup): keep the row, retry next sync
+                failed = failed or result
         else:
             p.fingerprint, p.due_at, p.updated_at = fp, a.due_at, utcnow()
             stats["updated"] += 1
-    db.session.flush()  # removals before re-adding the same assignments
+    db.session.flush()
 
     results = calendar("GOOGLECALENDAR_CREATE_EVENT", [{
         "calendar_id": calendar_id, "summary": ev["summary"], "description": ev["description"],
@@ -138,16 +160,20 @@ def sync(user: User) -> dict:
         "end_datetime": ev["end"].replace(tzinfo=None).isoformat(timespec="seconds"),
         "timezone": str(tz), "create_meeting_room": False, "exclude_organizer": True, "send_updates": "none",
         "transparency": "transparent"} for _a, ev, _fp in to_create])
-    failed = None
     for (a, ev, fp), result in zip(to_create, results):
         if isinstance(result, integrations.IntegrationError):
             failed = failed or result
             continue
         event_id = _event_id(result)
-        if event_id:
+        if not event_id:
+            continue
+        p = replace.get(a.id)
+        if p is not None:  # re-created: point the same row at the new event
+            p.event_id, p.calendar_id, p.fingerprint, p.due_at, p.updated_at = event_id, calendar_id, fp, a.due_at, utcnow()
+        else:
             db.session.add(CalendarPush(user_id=user.id, assignment_id=a.id, event_id=event_id, calendar_id=calendar_id,
                                         fingerprint=fp, due_at=a.due_at))
-            stats["created"] += 1
+        stats["created"] += 1
     db.session.commit()
     if failed is not None:
         raise failed  # what worked is saved; the next sync retries the rest

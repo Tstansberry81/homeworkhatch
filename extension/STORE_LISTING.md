@@ -79,8 +79,10 @@ account so you can plan and study.
 
 **Remote code:** No, I am not using remote code. All code ships in the package.
 
-**Externally connectable** (if asked): only https://homeworkhatch.onrender.com can message the
-extension, to link it to the signed-in account (it hands over a sync token) and to show sync status.
+**Externally connectable** (if asked): only the Homework Hatch site can message the extension
+(https://homeworkhatch.com, https://www.homeworkhatch.com and https://homeworkhatch.onrender.com, three
+addresses of the same server), to link it to the signed-in account (it hands over a sync token) and to
+show sync status.
 The extension never sends Canvas data or the token back to the page.
 
 **Data usage.** Tick these:

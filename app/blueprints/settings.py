@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from urllib.parse import urlsplit
 
@@ -17,6 +18,8 @@ from ..services import gcal, integrations
 from ..services.storage import get_storage
 from .api import hash_token
 from .auth import USERNAME_RE, valid_timezone
+
+EXTENSION_ID_RE = re.compile(r"[a-p]{32}")
 
 bp = Blueprint("settings", __name__, url_prefix="/settings")
 
@@ -148,6 +151,10 @@ def extension_token():
     token = "hh_" + secrets.token_urlsafe(32)
     db.session.add(ApiToken(user_id=current_user.id, name=EXTENSION_TOKEN_NAME, token_hash=hash_token(token),
                             prefix=token[:10]))
+    # A copy loaded from the zip has its own ID: remember it, so the page finds it on every address.
+    ext = str((request.get_json(silent=True) or {}).get("ext") or "")
+    if EXTENSION_ID_RE.fullmatch(ext) and ext not in current_app.config["EXTENSION_IDS"]:
+        current_user.extension_ids = [ext] + [i for i in (current_user.extension_ids or []) if i != ext][:4]
     db.session.commit()
     return jsonify({"token": token})
 

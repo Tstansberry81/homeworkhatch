@@ -1,15 +1,53 @@
 {% extends "base.html" %}
 {% from "_gcal_card.html" import gcal_card %}
+{% from "_macros.html" import status_badge, csrf, empty %}
+{% from "_icons.html" import icon %}
 {% block title %}Calendar{% endblock %}
+{% macro entry(kind, item, wide=false) %}
+{% if kind == 'assignment' %}
+  {% set st = item.effective_status %}
+  <div class="cal-entry {{ st }}{{ ' wide' if wide }}" style="--c: {{ course_color(item.course_id) }}">
+    <span class="when">{{ item.due_at|dt('time') }}</span>
+    <div class="what">
+      <a href="{{ url_for('courses.assignment', assignment_id=item.id) }}">{{ item.name }}</a>
+      <div class="meta">{{ item.course.code or item.course.name }}{% if wide and item.points_possible %} · {{ '%g' % item.points_possible }} pts{% endif %}{% if wide or st not in ('upcoming', 'no_submission') %} · {{ status_badge(item) }}{% endif %}</div>
+    </div>
+    {% if st in ('upcoming', 'past_due', 'no_submission', 'missing', 'done') %}
+    <form method="post" action="{{ url_for('main.toggle_done', assignment_id=item.id) }}" class="inline">
+      {{ csrf() }}
+      <button class="btn btn-ghost btn-sm" title="{{ 'Mark not done' if st == 'done' else 'Mark done (e.g. handed in on paper)' }}" aria-label="Done: {{ item.name }}" aria-pressed="{{ 'true' if st == 'done' else 'false' }}">{{ icon('check', 14) }}</button>
+    </form>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="cal-entry event{{ ' wide' if wide }}">
+    <span class="when">{{ item.long if wide else item.short }}</span>
+    <div class="what">
+      {% if item.html_url and item.html_url.startswith('https://') %}<a href="{{ item.html_url }}" target="_blank" rel="noopener">{{ item.title }}</a>{% else %}<span>{{ item.title }}</span>{% endif %}
+      {% if item.location %}<div class="meta">{{ item.location }}</div>{% endif %}
+    </div>
+  </div>
+{% endif %}
+{% endmacro %}
 {% block content %}
 <div class="page-head">
-  <div><h1>{{ first.strftime('%B %Y') }}</h1><p class="muted">Due dates and Canvas events in your time zone ({{ current_user.timezone }}).</p></div>
+  <div>
+    <h1>{{ title }}</h1>
+    <p class="muted">{% if to_do or done %}{{ to_do }} to do{% if done %} · {{ done }} done{% endif %} · {% endif %}Due dates and Canvas events in your time zone ({{ current_user.timezone }}).</p>
+  </div>
   <div class="btn-row">
-    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', y=prev_month.year, m=prev_month.month) }}">←</a>
-    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view') }}">Today</a>
-    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', y=next_month.year, m=next_month.month) }}">→</a>
+    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=prev.isoformat()) }}" aria-label="Previous {{ view }}">←</a>
+    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view) }}">Today</a>
+    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=nxt.isoformat()) }}" aria-label="Next {{ view }}">→</a>
   </div>
 </div>
+<nav class="tabs cal-views" aria-label="Calendar view">
+  {% for v, label in [('day', 'Day'), ('week', 'Week'), ('month', 'Month')] %}
+  <a href="{{ url_for('main.calendar_view', view=v, d=anchor.isoformat()) }}" class="{{ 'active' if v == view }}"{% if v == view %} aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+</nav>
+
+{% if view == 'month' %}
 <div class="card" style="padding:10px">
   <table class="cal">
     <thead><tr>{% for d in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] %}<th>{{ d }}</th>{% endfor %}</tr></thead>
@@ -18,12 +56,12 @@
       <tr>
       {% for day in week %}
         <td class="{{ 'other' if day.month != first.month }} {{ 'today' if day == today }}">
-          <div class="day">{{ day.day }}</div>
+          <a class="day" href="{{ url_for('main.calendar_view', view='day', d=day.isoformat()) }}" aria-label="{{ day.strftime('%A, %B %-d') }}">{{ day.day }}</a>
           {% for kind, item in by_day.get(day, []) %}
             {% if kind == 'assignment' %}
               <a class="item {{ item.effective_status }}" style="--c: {{ course_color(item.course_id) }}" href="{{ url_for('courses.assignment', assignment_id=item.id) }}" title="{{ item.name }} — {{ item.course.name }} ({{ item.due_at|dt('time') }})">{{ item.name }}</a>
             {% else %}
-              <span class="item event" title="{{ item.title }} ({{ item.start_at|dt('time') }}){% if item.location %} @ {{ item.location }}{% endif %}">{{ item.title }}</span>
+              <span class="item event" title="{{ item.title }} ({{ item.long }}){% if item.location %} @ {{ item.location }}{% endif %}">{{ item.title }}</span>
             {% endif %}
           {% endfor %}
         </td>
@@ -33,6 +71,41 @@
     </tbody>
   </table>
 </div>
+
+{% elif view == 'week' %}
+<div class="calw-wrap"><div class="calw">
+  {% for day in weeks[0] %}
+  <section class="calw-day {{ 'today' if day == today }} {{ 'past' if day < today }}" aria-label="{{ day.strftime('%A, %B %-d') }}">
+    <a class="calw-head" href="{{ url_for('main.calendar_view', view='day', d=day.isoformat()) }}">
+      <span class="dow">{{ 'Today' if day == today else day.strftime('%a') }}</span><span class="date">{{ day.day }}</span>
+    </a>
+    {% for kind, item in by_day.get(day, []) %}{{ entry(kind, item) }}{% else %}<p class="calw-empty">Nothing due</p>{% endfor %}
+  </section>
+  {% endfor %}
+</div></div>
+
+{% else %}
+<div class="week" aria-label="This week">
+  {% for d in weeks[0] %}
+  {% set items = by_day.get(d, []) %}
+  <a class="day-cell {{ 'today' if d == anchor }} {{ 'empty-day' if not items and d != anchor }}" href="{{ url_for('main.calendar_view', view='day', d=d.isoformat()) }}"
+     {% if d == anchor %}aria-current="page"{% endif %} title="{{ items|length }} on {{ d.strftime('%A') }}">
+    <span class="dow">{{ 'Today' if d == today else d.strftime('%a') }}</span>
+    <span class="date">{{ d.day }}</span>
+    <span class="dots">{% for kind, item in items[:8] %}<i style="--c: {{ course_color(item.course_id) if kind == 'assignment' else 'var(--lilac)' }}"></i>{% endfor %}</span>
+  </a>
+  {% endfor %}
+</div>
+<div class="card cald">
+  {% for kind, item in by_day.get(anchor, []) %}{{ entry(kind, item, wide=true) }}{% else %}
+  {{ empty('🎉', 'Nothing due ' ~ ('today' if anchor == today else 'this day') ~ '.') }}
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if view == 'day' %}
+<script>document.querySelector('.week [aria-current]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });</script>
+{% endif %}
 {% if integrations_available %}{{ gcal_card(gcal, url_for('main.calendar_view')) }}{% endif %}
 <div class="card">
   <h2>{{ 'Or subscribe from any calendar app' if integrations_available else "Add to your phone's calendar" }}</h2>

@@ -39,10 +39,10 @@ def upcoming(user_id: int, days: int = 14, back_days: int = 7) -> list[Assignmen
         .where(Assignment.course_id.in_(course_ids), Assignment.due_at.is_not(None),
                Assignment.due_at <= now + timedelta(days=days), Assignment.due_at >= now - timedelta(days=back_days))
         .order_by(Assignment.due_at)).all()
-    return [a for a in rows if _still_to_do(a, now)]
+    return [a for a in rows if still_to_do(a, now)]
 
 
-def _still_to_do(a: Assignment, now) -> bool:
+def still_to_do(a: Assignment, now) -> bool:
     status = a.effective_status
     if status == "no_submission":
         # In-class items (exams, checkpoints) show while upcoming and worth points.
@@ -55,7 +55,7 @@ def upcoming_for_course(course: Course, days: int = 14, back_days: int = 7) -> l
     now = utcnow()
     return [a for a in course.assignments
             if a.due_at and now - timedelta(days=back_days) <= a.due_at <= now + timedelta(days=days)
-            and _still_to_do(a, now)]
+            and still_to_do(a, now)]
 
 
 def missing(user_id: int) -> list[Assignment]:

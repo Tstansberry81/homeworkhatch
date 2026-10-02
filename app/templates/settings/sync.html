@@ -36,7 +36,8 @@
 
 <div class="grid grid-main">
   <div>
-    <div class="card" id="ext" data-ids='{{ config.EXTENSION_IDS|tojson }}' data-token-url="{{ url_for('settings.extension_token') }}"
+    {% set link_elsewhere = config.RENDER_URL if config.RENDER_URL and config.RENDER_URL.split('://')[-1] != request.host else '' %}
+    <div class="card" id="ext" data-ids='{{ (config.EXTENSION_IDS + (current_user.extension_ids or []))|unique|list|tojson }}' data-link-elsewhere="{{ link_elsewhere }}" data-token-url="{{ url_for('settings.extension_token') }}"
          data-canvas='{{ (accounts|map(attribute="host")|list)[:1]|tojson }}'>
       <h2>Chrome extension</h2>
       <p id="ext-status" class="muted">Looking for the extension…</p>
@@ -46,6 +47,9 @@
         <button id="ext-sync" class="btn btn-ghost" hidden>Sync now</button>
       </div>
       <p id="ext-hint" class="small muted" hidden></p>
+      {% if link_elsewhere %}
+      <p id="ext-elsewhere" class="small muted" hidden>Already installed, but it isn't found here? Older versions of the extension only talk to <a href="{{ link_elsewhere }}{{ url_for('settings.sync') }}">{{ link_elsewhere.split('://')[1] }}</a>: open Connect Canvas there to link it (you may need to sign in there once).</p>
+      {% endif %}
     </div>
     <div class="card" id="install">
       <h2>Install the extension</h2>
@@ -116,7 +120,7 @@
   }
   for (const id of extra) if (!ids.includes(id)) ids.push(id);
   const $ = (id) => document.getElementById(id);
-  const show = (id, on = true) => { $(id).hidden = !on; };
+  const show = (id, on = true) => { const el = $(id); if (el) el.hidden = !on; };
   const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
     return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
   // chrome.runtime exists on this page only when an extension lists this site in externally_connectable.
@@ -131,10 +135,11 @@
     return null;
   }
   function render() {
-    ["ext-install", "ext-canvas", "ext-sync", "ext-hint"].forEach((id) => show(id, false));
+    ["ext-install", "ext-canvas", "ext-sync", "ext-hint", "ext-elsewhere"].forEach((id) => show(id, false));
     if (!ext) {
       $("ext-status").textContent = "Not installed in this browser. Add it from the Chrome Web Store; it links to your account on its own. Installed it from a zip? Click the Homework Hatch icon, then \"Link to my Homework Hatch account\".";
       show("ext-install");
+      if (card.dataset.linkElsewhere) show("ext-elsewhere");
       return;
     }
     if (!ext.linked) { $("ext-status").textContent = "Linking the extension to your account…"; return; }
@@ -158,7 +163,7 @@
     ext = await find();
     if (ext && !ext.linked) {
       try {
-        const { token } = await hh.post(card.dataset.tokenUrl);
+        const { token } = await hh.post(card.dataset.tokenUrl, { ext: ext.id });
         const r = await ask(ext.id, { type: "link", token });
         if (r?.linked) ext = { id: ext.id, ...r };
       } catch (e) { $("ext-status").textContent = `Couldn't link the extension: ${e.message}`; return; }

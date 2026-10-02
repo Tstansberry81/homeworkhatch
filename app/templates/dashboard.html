@@ -43,7 +43,7 @@
 
 <div class="week" aria-label="This week">
   {% for d in week %}
-  <a class="day-cell {{ 'today' if loop.first }} {{ 'empty-day' if not d['items'] and not loop.first }}" href="{{ url_for('main.calendar_view', y=d.date.year, m=d.date.month) }}"
+  <a class="day-cell {{ 'today' if loop.first }} {{ 'empty-day' if not d['items'] and not loop.first }}" href="{{ url_for('main.calendar_view', view='day', d=d.date.isoformat()) }}"
      title="{{ d['items']|length }} due {{ d.date.strftime('%A') }}">
     <span class="dow">{{ 'Today' if loop.first else d.date.strftime('%a') }}</span>
     <span class="date">{{ d.date.day }}</span>

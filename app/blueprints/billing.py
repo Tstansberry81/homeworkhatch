@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
@@ -9,9 +11,14 @@ bp = Blueprint("billing", __name__, url_prefix="/billing")
 
 
 def _external(endpoint: str, **values) -> str:
-    base = current_app.config.get("PUBLIC_URL")
+    """An absolute link for Stripe to send the student back to: the address they're using when it's
+    one of ours (login cookies are per address), else PUBLIC_URL."""
     path = url_for(endpoint, **values)
-    return f"{base}{path}" if base else url_for(endpoint, _external=True, **values)
+    cfg = current_app.config
+    ours = {urlsplit(u).netloc for u in (cfg.get("PUBLIC_URL"), cfg.get("RENDER_URL")) if u}
+    if request.host in ours or not cfg.get("PUBLIC_URL"):
+        return request.host_url.rstrip("/") + path
+    return cfg["PUBLIC_URL"].rstrip("/") + path
 
 
 @bp.route("/")

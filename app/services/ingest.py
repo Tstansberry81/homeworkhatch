@@ -19,6 +19,7 @@ import hashlib
 import json
 import secrets
 import tempfile
+from datetime import date
 from urllib.parse import urlparse
 
 from flask import current_app
@@ -507,6 +508,12 @@ def _apply_event(row: CalendarEvent, e: dict, courses: dict[str, Course]):
     row.html_url = _clip(e.get("html_url"), 500)
     course = courses.get(_str(e.get("course_id")))
     row.course_id = course.id if course else None
+    if e.get("all_day") is not None:  # extension 1.4.3+
+        row.all_day = bool(e.get("all_day"))
+        try:
+            row.all_day_date = date.fromisoformat(str(e.get("all_day_date"))[:10]) if row.all_day else None
+        except ValueError:
+            row.all_day_date = None
 
 
 # ---------------------------------------------------------------- files

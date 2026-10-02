@@ -8,6 +8,9 @@
   {% else %}
   <p>Our support email is being set up and will be listed here. Until then, you can export or delete your data yourself from Settings → Your data. For bugs only (never personal information), <a href="https://github.com/Tstansberry81/homeworkhatch/issues" target="_blank" rel="noopener">open a public issue</a>.</p>
   {% endif %}
+  {% if config.FEEDBACK_URL %}
+  <p>Have an idea, or found a bug? <a href="{{ config.FEEDBACK_URL }}" target="_blank" rel="noopener">Tell us with this form</a>. We read every one.</p>
+  {% endif %}
 
   <h2>Setting up</h2>
   <ol>

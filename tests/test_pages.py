@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.extensions import db
 from app.models import (Assignment, CanvasFile, CoinTransaction, Course, Deck, Page, PracticeQuiz, User, utcnow)
 from app.services import coins
+from app.utils import user_zone
 
 from .conftest import login, make_user
 
@@ -422,3 +423,130 @@ def test_connect_page_sends_people_to_the_web_store_first(app, synced_user, clie
     assert f'id="ext-install" class="btn" href="{store}"' in html, "the not-installed button opens the store"
     assert html.index(store) < html.index("/extension.zip"), "the zip is the fallback, after the store"
     assert "still in review" not in html
+
+
+def test_calendar_month_week_and_day_views(app, synced_user, client):
+    from datetime import datetime, timezone
+
+    from app.models import Assignment, Course
+    from app.utils import local_now, user_zone
+
+    course = db.session.scalar(select(Course).where(Course.user_id == synced_user.id))
+    zone = user_zone(synced_user)
+    day = local_now(synced_user).date() + timedelta(days=3)
+
+    def utc(d, hour, minute=0):  # a local wall-clock time, stored as naive UTC like the app does
+        return datetime(d.year, d.month, d.day, hour, minute, tzinfo=zone).astimezone(timezone.utc).replace(tzinfo=None)
+
+    late = Assignment(course_id=course.id, canvas_id="cal-late", name="Late night essay", due_at=utc(day, 23, 59), status="upcoming")
+    early = Assignment(course_id=course.id, canvas_id="cal-early", name="Morning quiz", due_at=utc(day, 8), status="upcoming")
+    db.session.add_all([late, early])
+    db.session.commit()
+
+    page = client.get(f"/calendar?view=day&d={day.isoformat()}").get_data(as_text=True)
+    assert "Late night essay" in page and "Morning quiz" in page, "11:59 PM local stays on its local day"
+    assert page.index("Morning quiz") < page.index("Late night essay"), "in time order"
+    assert day.strftime("%A, %B %-d") in page and 'aria-current="page">Day' in page
+    assert f"d={(day - timedelta(days=1)).isoformat()}" in page and f"d={(day + timedelta(days=1)).isoformat()}" in page
+    assert "Late night essay" not in client.get(f"/calendar?view=day&d={(day + timedelta(days=1)).isoformat()}").get_data(as_text=True)
+
+    week = client.get(f"/calendar?view=week&d={day.isoformat()}").get_data(as_text=True)
+    sunday = day - timedelta(days=(day.weekday() + 1) % 7)
+    assert "Late night essay" in week and f"d={sunday.isoformat()}" in week
+    assert f"d={(sunday - timedelta(days=7)).isoformat()}" in week, "← goes back a week"
+
+    # The view you picked last is remembered; bad dates fall back to today.
+    assert 'aria-current="page">Week' in client.get("/calendar").get_data(as_text=True)
+    for bad in ("not-a-date", "1900-01-01", "2026-02-30"):
+        assert client.get(f"/calendar?view=day&d={bad}").status_code == 200
+    month = client.get(f"/calendar?view=month&d={day.isoformat()}").get_data(as_text=True)
+    assert day.strftime("%B %Y") in month and f"view=day&amp;d={day.isoformat()}" in month
+    assert client.get(f"/calendar?y={day.year}&m={day.month}").status_code == 200, "old month links still work"
+
+    # Marking done from the day view comes back to it.
+    r = client.post(f"/assignments/{early.id}/done", headers={"Referer": f"http://hatch.test/calendar?view=day&d={day}"})
+    assert r.status_code == 302 and "view=day" in r.headers["Location"]
+    assert "1 to do · 1 done" in client.get(f"/calendar?view=day&d={day.isoformat()}").get_data(as_text=True)
+
+
+def test_feedback_link_shows_only_when_set(app, synced_user, client):
+    assert "Suggestions &amp; bugs" not in client.get("/settings/").get_data(as_text=True)
+    app.config["FEEDBACK_URL"] = "https://forms.gle/example"
+    try:
+        assert 'href="https://forms.gle/example"' in client.get("/settings/").get_data(as_text=True)
+        assert 'href="https://forms.gle/example"' in client.get("/support").get_data(as_text=True)
+    finally:
+        app.config["FEEDBACK_URL"] = ""
+
+
+def test_connect_page_on_a_custom_domain_offers_the_render_address(app, synced_user, client):
+    assert 'id="ext-elsewhere"' not in client.get("/settings/sync").get_data(as_text=True)
+    app.config["RENDER_URL"] = "https://homeworkhatch.onrender.com"
+    try:
+        html = client.get("/settings/sync").get_data(as_text=True)
+        assert 'id="ext-elsewhere"' in html and 'href="https://homeworkhatch.onrender.com/settings/sync"' in html
+        html = client.get("/settings/sync", base_url="https://homeworkhatch.onrender.com").get_data(as_text=True)
+        assert 'id="ext-elsewhere"' not in html, "not on Render's own address"
+    finally:
+        app.config["RENDER_URL"] = ""
+
+
+def test_calendar_edge_cases_from_review(app, synced_user, client):
+    from datetime import date, datetime, timezone
+
+    from app.models import Assignment, CalendarEvent, CanvasAccount, Course
+
+    # Absurd old-style month links fall back to today instead of crashing.
+    for q in ("y=99999999999&m=1", "y=-99999999999", "m=99999999999"):
+        assert client.get(f"/calendar?{q}").status_code == 200, q
+    # An old month link opens the month even after the day view was used.
+    client.get("/calendar?view=day")
+    page = client.get("/calendar?y=2026&m=11").get_data(as_text=True)
+    assert "November 2026" in page and 'aria-current="page">Month' in page
+
+    account = db.session.scalar(select(CanvasAccount).where(CanvasAccount.user_id == synced_user.id))
+    course = db.session.scalar(select(Course).where(Course.user_id == synced_user.id))
+    utc = lambda *a: datetime(*a, tzinfo=timezone.utc).replace(tzinfo=None)  # noqa: E731
+    db.session.add_all([
+        # Canvas all-day event made by a teacher in another zone: midnight Pacific is 3 AM New York.
+        CalendarEvent(user_id=synced_user.id, account_id=account.id, canvas_id="ad1", title="No school day",
+                      start_at=utc(2026, 10, 5, 7), end_at=utc(2026, 10, 5, 7), all_day=True, all_day_date=date(2026, 10, 5)),
+        # Older row without the flag, midnight to midnight across spring-forward (23 hours).
+        CalendarEvent(user_id=synced_user.id, account_id=account.id, canvas_id="ad2", title="Spring holiday",
+                      start_at=utc(2027, 3, 14, 5), end_at=utc(2027, 3, 15, 4)),
+        # A three-day timed event.
+        CalendarEvent(user_id=synced_user.id, account_id=account.id, canvas_id="md1", title="Field trip",
+                      start_at=utc(2026, 10, 6, 13), end_at=utc(2026, 10, 8, 21)),
+        # An in-class exam: counts as to do, like on the dashboard.
+        Assignment(course_id=course.id, canvas_id="nosub1", name="In-class exam", due_at=utcnow() + timedelta(days=2),
+                   status="no_submission", points_possible=100),
+    ])
+    db.session.commit()
+
+    day = client.get("/calendar?view=day&d=2026-10-05").get_data(as_text=True)
+    assert "No school day" in day and "All day" in day
+    assert "No school day" not in client.get("/calendar?view=day&d=2026-10-04").get_data(as_text=True)
+    spring = client.get("/calendar?view=day&d=2027-03-14").get_data(as_text=True)
+    assert "Spring holiday" in spring and "All day" in spring and "12:00 AM – 12:00 AM" not in spring
+    assert "9:00 AM – Thu 5:00 PM" in client.get("/calendar?view=day&d=2026-10-06").get_data(as_text=True)
+    middle = client.get("/calendar?view=day&d=2026-10-07").get_data(as_text=True)
+    assert "Field trip" in middle and "All day" in middle
+    assert "Until 5:00 PM" in client.get("/calendar?view=day&d=2026-10-08").get_data(as_text=True)
+    assert "Field trip" in client.get("/calendar?view=week&d=2026-10-07").get_data(as_text=True)
+
+    exam_day = (utcnow() + timedelta(days=2)).replace(tzinfo=timezone.utc).astimezone(user_zone(synced_user)).date()
+    page = client.get(f"/calendar?view=day&d={exam_day.isoformat()}").get_data(as_text=True)
+    assert "In-class exam" in page and "to do" in page and "0 to do" not in page
+
+
+def test_connect_page_remembers_zip_copies_and_survives_without_the_render_note(app, synced_user, client):
+    zip_id = "abcdefghijklmnopabcdefghijklmnop"
+    r = client.post("/settings/extension-token", json={"ext": zip_id}, headers={"X-CSRFToken": "x"})
+    assert r.status_code == 200 and r.get_json()["token"].startswith("hh_")
+    client.post("/settings/extension-token", json={"ext": "not-an-id"})
+    db.session.refresh(synced_user)
+    assert synced_user.extension_ids == [zip_id], "valid IDs only"
+    html = client.get("/settings/sync").get_data(as_text=True)
+    assert zip_id in html and app.config["EXTENSION_IDS"][0] in html, "the page pings the zip copy on every address"
+    # On Render's own address the fallback note isn't rendered, and the script copes with that.
+    assert 'id="ext-elsewhere"' not in html and "if (el) el.hidden" in html

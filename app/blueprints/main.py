@@ -4,11 +4,12 @@ import calendar as cal
 import functools
 import io
 import zipfile
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required, logout_user
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from .. import queries
@@ -16,7 +17,7 @@ from ..config import BASE_DIR
 from ..extensions import db
 from ..models import Assignment, CalendarEvent, Course, User, calendar_token_hash, utcnow
 from ..services import ics, integrations
-from ..utils import local_now, log_activity, to_local
+from ..utils import local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
 
 bp = Blueprint("main", __name__)
@@ -169,37 +170,130 @@ def toggle_done(assignment_id: int):
 # ---------------------------------------------------------------- calendar
 
 
+CALENDAR_VIEWS = ("month", "week", "day")
+DONE_STATUSES = {"done", "submitted", "submitted_late", "graded"}
+
+
+def _calendar_anchor(today: date) -> date:
+    """The day the calendar is showing: ?d=YYYY-MM-DD, or the older ?y=&m= month links, else today."""
+    try:
+        if request.args.get("d"):
+            anchor = date.fromisoformat(request.args["d"])
+        elif request.args.get("y") or request.args.get("m"):
+            anchor = date(int(request.args.get("y", today.year)), int(request.args.get("m", today.month)), 1)
+        else:
+            return today
+    except (TypeError, ValueError, OverflowError):
+        return today
+    return anchor if 1970 <= anchor.year <= 2100 else today
+
+
+@dataclass
+class DayEvent:
+    """A Canvas event as one day shows it: multi-day events appear on every day they cover."""
+
+    event: CalendarEvent
+    short: str  # "All day", "9:00 AM", "Until 5:00 PM"
+    long: str  # with the end time: "9:00 AM – 5:00 PM", "9:00 AM – Thu 5:00 PM"
+
+    def __getattr__(self, name):
+        return getattr(self.event, name)
+
+
+def _event_days(e: CalendarEvent, zone) -> list[tuple[date, datetime, str, str]]:
+    """(local day, sort time in UTC, short label, long label) for each day the event covers."""
+    def utc_midnight(d):
+        return datetime.combine(d, time.min, tzinfo=zone).astimezone(timezone.utc).replace(tzinfo=None)
+
+    if e.all_day and e.all_day_date:  # Canvas's own all-day events are a date, not a moment
+        return [(e.all_day_date, utc_midnight(e.all_day_date), "All day", "All day")]
+    start = to_local(e.start_at).astimezone(zone)
+    end = to_local(e.end_at).astimezone(zone) if e.end_at and e.end_at > e.start_at else None
+    if start.time() == time.min and (end is None or (end.time() == time.min and end.date() > start.date())):
+        last = end.date() - timedelta(days=1) if end else start.date()  # midnight to midnight: all day
+        return [(start.date() + timedelta(days=i), utc_midnight(start.date() + timedelta(days=i)), "All day", "All day")
+                for i in range((last - start.date()).days + 1)]
+    t = lambda d: d.strftime("%-I:%M %p")  # noqa: E731
+    if end is None or end.date() == start.date():
+        return [(start.date(), e.start_at, t(start), f"{t(start)} – {t(end)}" if end else t(start))]
+    last = end.date() - timedelta(days=1) if end.time() == time.min else end.date()
+    days = [(start.date(), e.start_at, t(start), f"{t(start)} – {end:%a} {t(end)}")]
+    for i in range(1, (last - start.date()).days + 1):
+        d = start.date() + timedelta(days=i)
+        until = f"Until {t(end)}" if d == end.date() else "All day"
+        days.append((d, utc_midnight(d), until, until))
+    return days
+
+
+def _calendar_items(first: date, last: date) -> dict[date, list]:
+    """Assignments due and Canvas events on each local day from first to last, in time order."""
+    course_ids = [c.id for c in queries.visible_courses(current_user.id)]
+    zone = user_zone(current_user)
+    # Stored times are UTC; a day of padding each side covers every time zone, then each item is
+    # filed under its local date.
+    lo = datetime.combine(first - timedelta(days=1), time.min)
+    hi = datetime.combine(last + timedelta(days=2), time.min)
+    by_day: dict[date, list] = {}
+
+    def add(day, kind, item, when):
+        if first <= day <= last:
+            by_day.setdefault(day, []).append((kind, item, when))
+
+    if course_ids:
+        for a in db.session.scalars(select(Assignment).options(selectinload(Assignment.course)).where(
+                Assignment.course_id.in_(course_ids), Assignment.due_at >= lo, Assignment.due_at < hi)):
+            add(to_local(a.due_at).date(), "assignment", a, a.due_at)
+    # Events that overlap the window, including ones that started before it and are still going.
+    for e in db.session.scalars(select(CalendarEvent).where(
+            CalendarEvent.user_id == current_user.id, CalendarEvent.start_at < hi,
+            func.coalesce(CalendarEvent.end_at, CalendarEvent.start_at) >= lo)):
+        for day, when, short, long in _event_days(e, zone):
+            add(day, "event", DayEvent(e, short, long), when)
+    return {d: [(kind, item) for kind, item, _ in sorted(items, key=lambda x: x[2])] for d, items in by_day.items()}
+
+
 @bp.route("/calendar")
 @login_required
 def calendar_view():
     today = local_now(current_user).date()
-    try:
-        year = int(request.args.get("y", today.year))
-        month = int(request.args.get("m", today.month))
-        if not 1970 <= year <= 2100:
-            raise ValueError("year out of range")
-        first = date(year, month, 1)
-    except ValueError:
-        first = today.replace(day=1)
-    weeks = cal.Calendar(firstweekday=6).monthdatescalendar(first.year, first.month)
-    course_ids = [c.id for c in queries.visible_courses(current_user.id)]
-    start, end = weeks[0][0] - timedelta(days=1), weeks[-1][-1] + timedelta(days=2)
-    from datetime import datetime
-
-    lo, hi = datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time())
-    by_day: dict[date, list] = {}
-    if course_ids:
-        for a in db.session.scalars(select(Assignment).options(selectinload(Assignment.course)).where(Assignment.course_id.in_(course_ids),
-                                                             Assignment.due_at >= lo, Assignment.due_at < hi)):
-            by_day.setdefault(to_local(a.due_at).date(), []).append(("assignment", a))
-    for e in db.session.scalars(select(CalendarEvent).where(CalendarEvent.user_id == current_user.id,
-                                                            CalendarEvent.start_at >= lo, CalendarEvent.start_at < hi)):
-        by_day.setdefault(to_local(e.start_at).date(), []).append(("event", e))
-    prev_month = (first - timedelta(days=1)).replace(day=1)
-    next_month = (first + timedelta(days=32)).replace(day=1)
+    view = request.args.get("view")
+    if view in CALENDAR_VIEWS:
+        session["calendar_view"] = view
+    elif not request.args.get("d") and (request.args.get("y") or request.args.get("m")):
+        view = "month"  # an old month link names a month
+    else:  # the view you used last
+        view = session.get("calendar_view") if session.get("calendar_view") in CALENDAR_VIEWS else "month"
+    anchor = _calendar_anchor(today)
+    if view == "month":
+        first = anchor.replace(day=1)
+        weeks = cal.Calendar(firstweekday=6).monthdatescalendar(first.year, first.month)
+        prev, nxt = (first - timedelta(days=1)).replace(day=1), (first + timedelta(days=32)).replace(day=1)
+        title = first.strftime("%B %Y")
+    elif view == "week":
+        first = anchor - timedelta(days=(anchor.weekday() + 1) % 7)  # weeks start on Sunday, like the month grid
+        weeks = [[first + timedelta(days=i) for i in range(7)]]
+        prev, nxt = first - timedelta(days=7), first + timedelta(days=7)
+        last = weeks[0][-1]
+        title = (f"{first:%b %-d} – {last:%-d, %Y}" if first.month == last.month
+                 else f"{first:%b %-d} – {last:%b %-d, %Y}" if first.year == last.year
+                 else f"{first:%b %-d, %Y} – {last:%b %-d, %Y}")
+    else:
+        first = anchor
+        # The day's week too, for the strip of days above the list.
+        sunday = anchor - timedelta(days=(anchor.weekday() + 1) % 7)
+        weeks = [[sunday + timedelta(days=i) for i in range(7)]]
+        prev, nxt = anchor - timedelta(days=1), anchor + timedelta(days=1)
+        title = anchor.strftime("%A, %B %-d") + ("" if anchor.year == today.year else anchor.strftime(", %Y"))
+    by_day = _calendar_items(weeks[0][0], weeks[-1][-1])
+    # The counts cover what the view is about: the day, the week, or the month without its neighbours' days.
+    shown = [anchor] if view == "day" else [d for week in weeks for d in week if view == "week" or d.month == first.month]
+    assignments = [item for d in shown for kind, item in by_day.get(d, []) if kind == "assignment"]
     feed_url = url_for("main.ics_feed", token=current_user.calendar_token, _external=True)
-    return render_template("calendar.html", weeks=weeks, first=first, today=today, by_day=by_day,
-                           prev_month=prev_month, next_month=next_month, feed_url=feed_url,
+    return render_template("calendar.html", view=view, title=title, weeks=weeks, anchor=anchor, first=first,
+                           today=today, by_day=by_day, prev=prev, nxt=nxt,
+                           to_do=sum(1 for a in assignments if not a.excused and queries.still_to_do(a, utcnow())),
+                           done=sum(1 for a in assignments if a.effective_status in DONE_STATUSES),
+                           feed_url=feed_url,
                            gcal=integrations.get(current_user, "calendar") if integrations.available() else None)
 
 

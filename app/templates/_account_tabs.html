@@ -14,4 +14,5 @@
   ] if show %}
   <a href="{{ url_for(endpoint) }}" class="{{ 'active' if on }}">{{ icon(ico, 16) }} {{ label }}</a>
   {% endfor %}
+  {% if config.FEEDBACK_URL %}<a href="{{ config.FEEDBACK_URL }}" target="_blank" rel="noopener">{{ icon('chat', 16) }} Suggestions &amp; bugs ↗</a>{% endif %}
 </nav>

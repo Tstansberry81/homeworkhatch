@@ -210,3 +210,16 @@ test("a 502 from the server is retried instead of waiting for the next sync", as
   assert.deepEqual([r.uploaded, r.skipped, r.failed.length], [1, 1, 0]);
   assert.ok(progress.every((p) => p.skipped === 1), "progress says how many were already there");
 });
+
+test("one server, several addresses: linked on one counts as linked on the others", async () => {
+  const { sameServerAs } = await import("../origins.js");
+  const manifest = JSON.parse(fs.readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
+  const same = sameServerAs(manifest.externally_connectable.matches);
+  assert.equal(same("https://homeworkhatch.onrender.com", "https://homeworkhatch.com"), true);
+  assert.equal(same("https://homeworkhatch.com", "https://www.homeworkhatch.com"), true);
+  assert.equal(same("https://homeworkhatch.onrender.com/", "https://homeworkhatch.onrender.com"), true);
+  assert.equal(same("https://evil.example", "https://homeworkhatch.com"), false, "a server set by hand stays its own");
+  assert.equal(same("http://localhost:5000", "http://localhost:5000"), true, "dev servers still match themselves");
+  assert.equal(same("", "https://homeworkhatch.com"), false, "not linked yet");
+  assert.equal(same("not a url", "https://homeworkhatch.com"), false);
+});
