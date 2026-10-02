@@ -414,3 +414,11 @@ def test_no_automatic_admin_in_production(app):
     app.config["ADMIN_EMAIL"] = "boss@example.com"
     app.test_client().post("/register", data={"email": "boss@example.com", "username": "bossy", "password": "longenough", "terms": "on", **DOB})
     assert db.session.scalar(select(User).where(User.username == "bossy")).is_admin is True
+
+
+def test_connect_page_sends_people_to_the_web_store_first(app, synced_user, client):
+    html = client.get("/settings/sync").get_data(as_text=True)
+    store = f"https://chromewebstore.google.com/detail/{app.config['EXTENSION_IDS'][0]}"
+    assert f'id="ext-install" class="btn" href="{store}"' in html, "the not-installed button opens the store"
+    assert html.index(store) < html.index("/extension.zip"), "the zip is the fallback, after the store"
+    assert "still in review" not in html

@@ -41,7 +41,7 @@
       <h2>Chrome extension</h2>
       <p id="ext-status" class="muted">Looking for the extension…</p>
       <div class="btn-row">
-        <a id="ext-install" class="btn" href="{{ url_for('main.extension_zip') }}" hidden>Download the extension (.zip)</a>
+        <a id="ext-install" class="btn" href="https://chromewebstore.google.com/detail/{{ config.EXTENSION_IDS[0] }}" target="_blank" rel="noopener" hidden>Add to Chrome</a>
         <a id="ext-canvas" class="btn" target="_blank" rel="noopener" hidden>Open Canvas</a>
         <button id="ext-sync" class="btn btn-ghost" hidden>Sync now</button>
       </div>
@@ -49,19 +49,21 @@
     </div>
     <div class="card" id="install">
       <h2>Install the extension</h2>
-      <p class="small muted">It works in Google Chrome 109 or newer, on Chromebooks, Windows and Mac. Until the Chrome Web Store listing is approved, install it from the zip:</p>
-      <p><a class="btn btn-sm" href="{{ url_for('main.extension_zip') }}">Download .zip</a></p>
-      <details open>
-        <summary><strong>Chromebook</strong></summary>
+      <ol class="small">
+        <li>Open <a href="https://chromewebstore.google.com/detail/{{ config.EXTENSION_IDS[0] }}" target="_blank" rel="noopener">Homework Hatch on the Chrome Web Store</a> and click <strong>Add to Chrome</strong> &rarr; <strong>Add extension</strong>. It works in Google Chrome 109 or newer on Chromebooks, Windows and Mac.</li>
+        <li>School Chromebook or school Google account? If the button is greyed out or says it's blocked by your administrator, your school only allows extensions it has approved. Ask your school's IT to allow Homework Hatch, or use a personal Google account.</li>
+      </ol>
+      <details>
+        <summary class="small"><strong>Can't use the Chrome Web Store? Install it from a zip</strong></summary>
+        <p class="small muted">Not possible on a school-managed Chromebook (check <code>chrome://management</code>): those block extensions loaded from a zip too. A copy from the zip doesn't update itself; download the zip again for new versions.</p>
+        <p><a class="btn btn-sm" href="{{ url_for('main.extension_zip') }}">Download .zip</a></p>
+        <p class="small"><strong>Chromebook</strong></p>
         <ol class="small">
-          <li>Check <code>chrome://management</code>: if it says your Chromebook or account is <em>managed</em> by a school or Family Link, Chrome won't load extensions from a zip. Use a personal Google account or device, or wait for the Chrome Web Store listing.</li>
           <li>Open the <strong>Files</strong> app &rarr; <strong>Downloads</strong>. Right-click (two-finger tap) <code>homework-hatch-extension.zip</code> &rarr; <strong>Extract all</strong>. Don't just double-click it: that only opens it as a temporary drive, and the extension disappears after a restart.</li>
           <li>Keep the extracted folder in <em>My files</em> (not Google Drive) and don't delete it.</li>
           <li>Go to <code>chrome://extensions</code>, turn on <strong>Developer mode</strong> (top right), click <strong>Load unpacked</strong>, select the extracted <code>homework-hatch-extension</code> folder (the one with <code>manifest.json</code> inside) and click <strong>Open</strong>.</li>
         </ol>
-      </details>
-      <details>
-        <summary><strong>Windows</strong></summary>
+        <p class="small"><strong>Windows</strong></p>
         <ol class="small">
           <li>In File Explorer &rarr; <strong>Downloads</strong>, right-click <code>homework-hatch-extension.zip</code> &rarr; <strong>Extract All</strong> &rarr; <strong>Extract</strong>. Move the extracted folder somewhere you'll keep it, like <strong>Documents</strong>.</li>
           <li>Go to <code>chrome://extensions</code>, turn on <strong>Developer mode</strong> (top right), click <strong>Load unpacked</strong>, select the <code>homework-hatch-extension</code> folder (the one with <code>manifest.json</code> inside) and click <strong>Select Folder</strong>.</li>
@@ -131,7 +133,7 @@
   function render() {
     ["ext-install", "ext-canvas", "ext-sync", "ext-hint"].forEach((id) => show(id, false));
     if (!ext) {
-      $("ext-status").textContent = "Not found in this browser. Install it from the zip below (the Chrome Web Store listing is still in review). Already installed? Click the Homework Hatch icon, then \"Link to my Homework Hatch account\".";
+      $("ext-status").textContent = "Not installed in this browser. Add it from the Chrome Web Store; it links to your account on its own. Already installed? Click the Homework Hatch icon, then \"Link to my Homework Hatch account\".";
       show("ext-install");
       return;
     }
