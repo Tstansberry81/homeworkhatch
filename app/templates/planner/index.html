@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% from "_macros.html" import empty, csrf %}
+{% from "_icons.html" import icon %}
+{% block title %}Exams{% endblock %}
+{% macro kind_badge(kind) %}<span class="badge kind-{{ kind }}">{{ {"final": "Final", "midterm": "Midterm", "test": "Test", "quiz": "Quiz", "none": "Not a test"}.get(kind, kind) }}</span>{% endmacro %}
+{% block content %}
+{% include "_study_tabs.html" %}
+<div class="page-head">
+  <div>
+    <h1>Exams</h1>
+    <p class="muted">Your tests, quizzes and exams from Canvas, each with a study plan built around it. Short sessions on different days, a practice test before the real one. Free, no AI needed.</p>
+  </div>
+</div>
+
+{% for note in notes %}<p class="small muted quiet-note">{{ icon('clock', 14) }} {{ note }}</p>{% endfor %}
+
+{% if plans %}
+<section class="card" aria-labelledby="week-h">
+  <h2 id="week-h">This week</h2>
+  <div class="plan-week">
+    {% for d in week %}
+    {% set key = d.isoformat() %}
+    {% set items = by_day.get(key, []) %}
+    <div class="plan-day {{ 'today' if d == today }}">
+      <div class="plan-day-head"><span class="dow">{{ 'Today' if d == today else d.strftime('%a') }}</span> <span class="date">{{ d.day }}</span></div>
+      {% for p in test_days.get(key, []) %}<a class="plan-test" href="{{ url_for('planner.plan', plan_id=p.id) }}">{{ icon('bolt', 13) }} {{ p.title }}</a>{% endfor %}
+      {% for s in items %}
+      <a class="plan-chip {{ 'done' if s.done_at }}" href="{{ url_for('planner.session', session_id=s.id) }}" style="--c: {{ course_color(s.plan.course_id) if s.plan.course_id else 'var(--lilac)' }}">
+        <span class="t">{{ s.plan.title }}</span>
+        <span class="m">{% if s.done_at %}✓ {% endif %}{{ roles.get(s.role, (s.role,))[0] }} · {{ s.minutes }} min</span>
+      </a>
+      {% else %}{% if not test_days.get(key) %}<p class="calw-empty">Free</p>{% endif %}{% endfor %}
+      {% if load.get(key, 0) > current_user.study_minutes_per_day %}<p class="small muted">Busy day: {{ load[key] }} min planned.</p>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<div class="grid grid-main">
+  <div>
+    <section class="card" aria-labelledby="plans-h">
+      <h2 id="plans-h">Your plans</h2>
+      {% if plans %}
+      <ul class="list">
+        {% for p in plans %}
+        {% set cd = p.exam_at|countdown if p.exam_at else (none, none) %}
+        {% set r = readiness[p.id] %}
+        {% set total = p.sessions|length %}
+        {% set finished = p.sessions|selectattr('done_at')|list|length %}
+        <li>
+          <div class="grow">
+            <a class="title" href="{{ url_for('planner.plan', plan_id=p.id) }}">{{ p.title }}</a> {{ kind_badge(p.kind) }}
+            <div class="small muted">{% if p.course %}{{ p.course.course_code or p.course.name }} · {% endif %}{% if p.exam_at %}{{ p.exam_at|dt }}{% else %}no date yet{% endif %} · {{ total }} session{{ 's' if total != 1 }}{% if finished %}, {{ finished }} done{% endif %}{% if r.percent is not none %} · {{ r.percent }}% ready{% endif %}</div>
+            {% if total %}<div class="progress mt-xs" role="img" aria-label="{{ finished }} of {{ total }} sessions done"><span style="width: {{ (100 * finished / total)|round|int }}%"></span></div>{% endif %}
+          </div>
+          {% if cd[0] %}<span class="countdown {{ cd[1] }}">{{ cd[0] }}</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      {{ empty("🗓️", "No plans yet. Pick a test on the right, or add one by hand.") }}
+      {% endif %}
+    </section>
+    {% if past %}
+    <details class="card">
+      <summary><strong>Past tests</strong></summary>
+      <ul class="list mt">{% for p in past %}<li><div class="grow"><a class="title" href="{{ url_for('planner.plan', plan_id=p.id) }}">{{ p.title }}</a>
+        <div class="small muted">{{ p.exam_at|dt('date') if p.exam_at }} · {{ p.sessions|selectattr('done_at')|list|length }} of {{ p.sessions|length }} sessions done</div></div></li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </div>
+
+  <div>
+    <section class="card" aria-labelledby="found-h">
+      <h2 id="found-h">Found in Canvas</h2>
+      {% if sure or ask %}
+      {% if sure %}
+      <ul class="list">
+        {% for f in sure %}
+        {% set cd = f.when|countdown if f.when else (none, none) %}
+        <li>
+          <div class="grow">
+            <span class="title">{{ f.title }}</span> {{ kind_badge(f.kind) }}
+            <div class="small muted" title="Why: {{ why(f) }}">{{ f.course.course_code or f.course.name }} · {{ f.when|dt if f.when else 'no date in Canvas' }}{% if f.share %} · {{ (100 * f.share)|round(1) }}% of the grade{% endif %}</div>
+          </div>
+          <div class="btn-col">
+            <form method="post" action="{{ url_for('planner.create') }}" class="inline">{{ csrf() }}<input type="hidden" name="item" value="{{ f.key }}"><button class="btn btn-sm">Plan it</button></form>
+            <form method="post" action="{{ url_for('planner.choice') }}" class="inline">{{ csrf() }}<input type="hidden" name="item" value="{{ f.key }}"><input type="hidden" name="kind" value="none"><button class="linklike small">Not a test</button></form>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if sure|length > 1 %}
+      <form method="post" action="{{ url_for('planner.create_all') }}" class="mt">{{ csrf() }}<button class="btn btn-ghost btn-block">Plan all {{ sure|length }}</button></form>
+      {% endif %}
+      {% endif %}
+      {% if ask %}
+      <h3 class="mt">Is this a test?</h3>
+      <ul class="list">
+        {% for f in ask %}
+        <li>
+          <div class="grow">
+            <span class="title">{{ f.title }}</span>
+            <div class="small muted" title="Why we're asking: {{ why(f) }}">{{ f.course.course_code or f.course.name }} · {{ f.when|dt if f.when else 'no date' }}</div>
+            <form method="post" action="{{ url_for('planner.choice') }}" class="ask-row">{{ csrf() }}
+              <input type="hidden" name="item" value="{{ f.key }}">
+              <label class="small"><input type="checkbox" name="scope" value="family"> and everything like it</label>
+              <span class="btn-row">
+                <button class="btn btn-sm" name="kind" value="{{ f.kind }}" onclick="this.form.plan.value='1'">Yes, plan it</button>
+                <button class="btn btn-ghost btn-sm" name="kind" value="none">No</button>
+              </span>
+              <input type="hidden" name="plan" value="">
+            </form>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% else %}
+      <p class="small muted">Nothing new in the next 60 days. Tests appear here after your Canvas syncs; anything we miss, add by hand below.</p>
+      {% endif %}
+    </section>
+
+    <details class="card" {% if not plans and not sure and not ask %}open{% endif %}>
+      <summary><strong>Add a test by hand</strong></summary>
+      <form method="post" action="{{ url_for('planner.create') }}" class="mt">{{ csrf() }}
+        <label for="t-title">Name</label><input id="t-title" name="title" maxlength="200" placeholder="Bio midterm 2" required>
+        <div class="grid grid-2">
+          <div><label for="t-date">Date</label><input id="t-date" name="date" type="date" required min="{{ today.isoformat() }}"></div>
+          <div><label for="t-time">Time</label><input id="t-time" name="time" type="time" value="09:00"></div>
+        </div>
+        <div class="grid grid-2">
+          <div><label for="t-kind">Kind</label><select id="t-kind" name="kind"><option value="quiz">Quiz</option><option value="test" selected>Test</option><option value="midterm">Midterm</option><option value="final">Final</option></select></div>
+          <div><label for="t-course">Class</label><select id="t-course" name="course_id"><option value="">None</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.course_code or c.name }}</option>{% endfor %}</select></div>
+        </div>
+        <button class="btn btn-block mt">Make a plan</button>
+      </form>
+    </details>
+
+    <form method="post" action="{{ url_for('planner.settings') }}" class="card">{{ csrf() }}
+      <h2>Daily limit</h2>
+      <p class="small muted">The most study time to plan on one day, across every test. Extra sessions move to an earlier free day.</p>
+      <div class="btn-row">
+        <select name="minutes" aria-label="Minutes a day">{% for m in [30, 45, 60, 90, 120, 150, 180, 240] %}<option value="{{ m }}" {{ 'selected' if m == current_user.study_minutes_per_day }}>{{ m if m < 60 else (m // 60) ~ (' h ' ~ (m % 60) ~ ' min' if m % 60 else (' hours' if m > 60 else ' hour')) }}</option>{% endfor %}</select>
+        <button class="btn btn-ghost btn-sm">Save</button>
+      </div>
+    </form>
+
+    {% if nope %}
+    <details class="card">
+      <summary><strong>Things you said aren't tests</strong> <span class="muted small">({{ nope|length }})</span></summary>
+      <ul class="list mt">{% for c in nope %}<li><div class="grow small">{{ nope_titles[c.id] }}</div>
+        <form method="post" action="{{ url_for('planner.undo_choice', choice_id=c.id) }}" class="inline">{{ csrf() }}<button class="linklike small">Undo</button></form></li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -19,6 +19,14 @@
     </form>
     {% endif %}
   </div>
+{% elif kind == 'study' %}
+  <div class="cal-entry study{{ ' wide' if wide }}{{ ' done' if item.done_at }}" style="--c: {{ course_color(item.plan.course_id) if item.plan.course_id else 'var(--lilac)' }}">
+    <span class="when">Study · {{ item.minutes }} min</span>
+    <div class="what">
+      <a href="{{ url_for('planner.session', session_id=item.id) }}">{{ item.plan.title }}</a>
+      <div class="meta">{{ study_roles.get(item.role, (item.role,))[0] }}{% if item.done_at %} · done{% endif %}</div>
+    </div>
+  </div>
 {% else %}
   <div class="cal-entry event{{ ' wide' if wide }}">
     <span class="when">{{ item.long if wide else item.short }}</span>
@@ -60,6 +68,8 @@
           {% for kind, item in by_day.get(day, []) %}
             {% if kind == 'assignment' %}
               <a class="item {{ item.effective_status }}" style="--c: {{ course_color(item.course_id) }}" href="{{ url_for('courses.assignment', assignment_id=item.id) }}" title="{{ item.name }} — {{ item.course.name }} ({{ item.due_at|dt('time') }})">{{ item.name }}</a>
+            {% elif kind == 'study' %}
+              <a class="item study {{ 'done' if item.done_at }}" style="--c: {{ course_color(item.plan.course_id) if item.plan.course_id else 'var(--lilac)' }}" href="{{ url_for('planner.session', session_id=item.id) }}" title="Study for {{ item.plan.title }}: {{ study_roles.get(item.role, (item.role,))[0] }}, {{ item.minutes }} min">Study: {{ item.plan.title }}</a>
             {% else %}
               <span class="item event" title="{{ item.title }} ({{ item.long }}){% if item.location %} @ {{ item.location }}{% endif %}">{{ item.title }}</span>
             {% endif %}
@@ -92,7 +102,7 @@
      {% if d == anchor %}aria-current="page"{% endif %} title="{{ items|length }} on {{ d.strftime('%A') }}">
     <span class="dow">{{ 'Today' if d == today else d.strftime('%a') }}</span>
     <span class="date">{{ d.day }}</span>
-    <span class="dots">{% for kind, item in items[:8] %}<i style="--c: {{ course_color(item.course_id) if kind == 'assignment' else 'var(--lilac)' }}"></i>{% endfor %}</span>
+    <span class="dots">{% for kind, item in items[:8] if kind != 'study' %}<i style="--c: {{ course_color(item.course_id) if kind == 'assignment' else 'var(--lilac)' }}"></i>{% endfor %}</span>
   </a>
   {% endfor %}
 </div>

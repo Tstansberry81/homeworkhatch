@@ -12,8 +12,8 @@ from sqlalchemy import delete, func, select
 
 from .. import queries
 from ..extensions import db
-from ..models import (ApiToken, ChatMessage, CoinTransaction, Course, Deck, LivePlayer, PracticeQuiz, SyncRun,
-                      TutorConversation, User, utcnow)
+from ..models import (ApiToken, ChatMessage, CoinTransaction, Course, Deck, DeckTest, LivePlayer, PracticeQuiz,
+                      StudyPlan, SyncRun, TutorConversation, User, utcnow)
 from ..services import gcal, integrations
 from ..services.storage import get_storage
 from .api import hash_token
@@ -198,6 +198,14 @@ def export():
                   for d in db.session.scalars(select(Deck).where(Deck.user_id == u.id))],
         "quizzes": [{"title": q.title, "questions": q.questions}
                     for q in db.session.scalars(select(PracticeQuiz).where(PracticeQuiz.user_id == u.id))],
+        "study_plans": [{
+            "title": p.title, "kind": p.kind, "exam_at": p.exam_at.isoformat() if p.exam_at else None, "method": p.method,
+            "pacing": p.pacing, "status": p.status, "scope": p.scope,
+            "sessions": [{"day": x.day, "role": x.role, "minutes": x.minutes, "minutes_done": x.minutes_done,
+                          "done": x.done_at is not None, "notes": x.notes} for x in p.sessions],
+        } for p in db.session.scalars(select(StudyPlan).where(StudyPlan.user_id == u.id))],
+        "practice_tests": [{"score": t.score, "total": t.total, "at": t.created_at.isoformat()}
+                           for t in db.session.scalars(select(DeckTest).where(DeckTest.user_id == u.id))],
         "tutor": [{"title": t.title, "messages": [{"role": m.role, "content": m.content} for m in t.messages]}
                   for t in db.session.scalars(select(TutorConversation).where(TutorConversation.user_id == u.id))],
         "chat_messages": [{"body": m.body, "at": m.created_at.isoformat()}

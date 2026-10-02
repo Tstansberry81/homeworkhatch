@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ role[0] }} · {{ plan.title }}{% endblock %}
+{% block content %}
+{% include "_study_tabs.html" %}
+{% set needs_page = s.role in ('blurt', 'explain') or (not tools.get('learn') and s.role in ('learn', 'pretest', 'misses', 'cram', 'review')) %}
+<div class="page-head">
+  <div>
+    <p class="kicker"><a href="{{ plan_url }}">{{ plan.title }}</a> · {{ day_label(s.day) }} · {{ s.minutes }} min</p>
+    <h1>{{ role[0] }}</h1>
+    <p class="muted">{{ role[1] }}</p>
+  </div>
+  {% if s.done_at %}<span class="badge done">Done</span>{% endif %}
+</div>
+
+<div class="grid grid-main">
+  <div>
+    <section class="card" aria-labelledby="do-h">
+      <h2 id="do-h">What to do</h2>
+      {% if s.role == 'practice_test' %}
+        <p>Phone away, notes closed, timer on. Answer everything you can, then check.</p>
+        <div class="btn-row">
+          {% if tools.test %}<a class="btn" href="{{ tools.test }}">Start the practice test</a>{% endif %}
+          {% if tools.quiz %}<a class="btn {{ 'btn-ghost' if tools.test }}" href="{{ tools.quiz }}">Take your practice quiz</a>{% endif %}
+        </div>
+        {% if not tools.test and not tools.quiz %}<p class="small muted">No cards or quiz linked yet. Add some on the <a href="{{ plan_url }}#materials">plan page</a>, or write out answers to last year's questions or the end-of-chapter problems below, timed.</p>{% endif %}
+      {% elif s.role == 'pretest' %}
+        <p>First, about 10 minutes: a quick check across every topic. Not graded, and guessing is fine. Then spend the rest of the session on what you missed.</p>
+        <div class="btn-row">{% if tools.pretest %}<a class="btn" href="{{ tools.pretest }}">1. Quick check</a>{% endif %}{% if tools.learn %}<a class="btn btn-ghost" href="{{ tools.learn }}">2. Recall</a>{% endif %}</div>
+      {% elif s.role in ('learn', 'cram') %}
+        <p>Cover the answer, say or type it, then check. The ones you miss come back until you get them.</p>
+        {% if tools.learn %}<div class="btn-row"><a class="btn" href="{{ tools.learn }}">Start recall</a></div>{% endif %}
+      {% elif s.role in ('review', 'misses') %}
+        <p>{{ 'Go back over every miss from your practice test.' if s.role == 'review' else 'A short, light pass. Stop early tonight and sleep: the week of sleep before matters more than the last hours of studying.' }}</p>
+        {% if tools.learn %}<div class="btn-row"><a class="btn" href="{{ tools.learn_starred }}">Study your starred misses</a><a class="btn btn-ghost" href="{{ tools.learn }}">Everything</a></div>{% endif %}
+      {% elif s.role == 'mixed' %}
+        <p>Mix problems from different topics so you have to choose the method each time. Expect it to feel slower: that's the point.</p>
+        <div class="btn-row">{% if tools.learn %}<a class="btn" href="{{ tools.learn }}">Shuffled recall</a>{% endif %}</div>
+        <details class="mt" open>
+          <summary><strong>Shuffle your problem list</strong></summary>
+          <p class="small muted">Type the problems you'll do, one per line (like "4.2 #12"). We'll mix the order so you can't tell what's coming next.</p>
+          <textarea id="problems" rows="4" placeholder="4.2 #12&#10;4.3 #7&#10;5.1 #3&#10;5.2 #20"></textarea>
+          <div class="btn-row mt"><button type="button" class="btn btn-ghost btn-sm" id="shuffle">Shuffle</button></div>
+          <ol id="shuffled" class="mt"></ol>
+        </details>
+      {% elif s.role == 'explain' %}
+        <p>Pick one concept. Without notes, explain it in plain words below as if to a friend who missed class. Then check your notes and fix every spot you went vague.</p>
+      {% elif s.role == 'blurt' %}
+        <p>Pick one topic. Close everything and write all you remember below for about 10 minutes: words, formulas, sketches in words. Then open your notes and add what you missed.</p>
+      {% endif %}
+      {% if not tools.get('learn') and s.role in ('learn', 'pretest', 'misses', 'cram', 'review', 'mixed') %}
+        <p class="small muted mt">No flashcards linked to this test yet. <a href="{{ plan_url }}#materials">Add or import some</a>, or use the blank page below: writing out what you remember is retrieval practice too.</p>
+      {% endif %}
+    </section>
+
+    {% if needs_page %}
+    <section class="card" aria-labelledby="page-h">
+      <h2 id="page-h">{{ 'Explain it' if s.role == 'explain' else 'Blank page' }}</h2>
+      <label class="small muted" for="page">{{ 'Concept, then your explanation. Where would a friend get lost?' if s.role == 'explain' else 'Topic, then everything you remember.' }}</label>
+      <textarea id="page" rows="12" data-save="{{ url_for('planner.notes', session_id=s.id) }}" placeholder="{{ 'Photosynthesis: plants take in light and…' if s.role == 'explain' else 'Cell respiration: glycolysis → …' }}">{{ s.notes or '' }}</textarea>
+      <p class="small muted" id="saved" aria-live="polite"></p>
+      <details class="mt">
+        <summary><strong>Now check it</strong></summary>
+        <ol class="small">
+          <li>Open your notes{% if plan.course %} or the <a href="{{ url_for('courses.detail', course_id=plan.course_id) }}" target="_blank" rel="noopener">class materials</a>{% endif %}.</li>
+          <li>Add what you missed in a different way (caps, or a "MISSED:" line), and fix anything wrong.</li>
+          <li>Next session, start with those gaps.</li>
+        </ol>
+        <p class="small muted">Checking is the step that makes this work: without it, mistakes stick.</p>
+      </details>
+    </section>
+    {% endif %}
+  </div>
+
+  <div>
+    <section class="card timer-card" aria-labelledby="timer-h" id="timer"
+             data-pacing="{{ pacing_key }}" data-work="{{ pacing[1] }}" data-rest="{{ pacing[2] }}" data-planned="{{ s.minutes }}"
+             data-start="{{ url_for('planner.start', session_id=s.id) }}" data-done="{{ url_for('planner.done', session_id=s.id) }}">
+      <h2 id="timer-h">{{ pacing[0] }}</h2>
+      <div class="timer-face" aria-live="off"><span id="clock">{{ pacing[1] or 0 }}:00</span><span class="small muted" id="phase">{{ 'Ready when you are' }}</span></div>
+      <div class="progress" aria-hidden="true"><span id="bar" style="width:0%"></span></div>
+      <p class="small muted mt" id="tiny">Just start: five minutes counts.</p>
+      <div class="btn-row mt">
+        <button type="button" class="btn" id="go">{{ 'Start' if not s.started_at else 'Resume' }}</button>
+        <button type="button" class="btn btn-ghost" id="pause" hidden>Pause</button>
+        <button type="button" class="btn btn-ghost" id="more" hidden>Keep going +5</button>
+        <button type="button" class="btn btn-ghost" id="rest" hidden>Take a break</button>
+      </div>
+      <p class="small muted mt" id="elapsed" aria-live="polite">0 min studied</p>
+      <form method="post" action="{{ url_for('planner.done', session_id=s.id) }}" class="mt" id="done-form">{{ csrf() }}
+        <input type="hidden" name="minutes" id="done-minutes" value="{{ s.minutes_done or 0 }}">
+        {% if s.done_at %}<input type="hidden" name="undo" value="1"><button class="linklike small">Mark as not done</button>
+        {% else %}<button class="btn btn-block">I'm done</button>{% endif %}
+      </form>
+      <details class="mt"><summary class="small">Timer style</summary>
+        <form method="post" action="{{ plan_url }}" class="chip-row mt">{{ csrf() }}<input type="hidden" name="action" value="pacing">
+          {% for key, p in pacings.items() %}<label class="chip-radio {{ 'on' if pacing_key == key }}"><input type="radio" name="pacing" value="{{ key }}" {{ 'checked' if pacing_key == key }} onchange="this.form.submit()"> {{ p[0] }}</label>{% endfor %}
+        </form>
+      </details>
+    </section>
+    <section class="card">
+      <h2>This plan</h2>
+      <p class="small"><strong>{{ method.name }}.</strong> {{ method.blurb }}</p>
+      <p class="small muted">{{ method.evidence }}</p>
+      <a class="small" href="{{ plan_url }}#method">Change method</a>
+    </section>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/session.js') }}"></script>{% endblock %}

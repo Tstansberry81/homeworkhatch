@@ -15,8 +15,8 @@ from sqlalchemy.orm import selectinload
 from .. import queries
 from ..config import BASE_DIR
 from ..extensions import db
-from ..models import Assignment, CalendarEvent, Course, User, calendar_token_hash, utcnow
-from ..services import ics, integrations
+from ..models import Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, calendar_token_hash, utcnow
+from ..services import ics, integrations, planner
 from ..utils import local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
 
@@ -123,6 +123,7 @@ def onboarding():
 def dashboard():
     if not current_user.onboarded:
         return redirect(url_for("main.onboarding"))
+    planner.refresh(current_user)
     courses = queries.visible_courses(current_user.id)
     upcoming = queries.upcoming(current_user.id)
     today = local_now(current_user).date()
@@ -139,8 +140,12 @@ def dashboard():
         agenda.append((label, by_day[d]))
     accounts = queries.accounts(current_user.id)
     last_sync = accounts[0].last_sync_at if accounts else None
+    soon = [p for p in planner.active_plans(current_user.id) if p.exam_at and p.exam_at <= utcnow() + timedelta(days=21)]
+    today_iso = today.isoformat()
     return render_template(
         "dashboard.html", week=week, agenda=agenda, upcoming=upcoming, today=local_now(current_user),
+        exam_plans=soon, study_today={p.id: [s for s in p.sessions if s.day == today_iso] for p in soon},
+        roles=planner.ROLES,
         missing=queries.missing(current_user.id), classes=queries.class_rows(courses),
         announcements=queries.recent_announcements(current_user.id), accounts=accounts,
         stale=last_sync is None or (utcnow() - last_sync) > timedelta(hours=3),
@@ -249,6 +254,13 @@ def _calendar_items(first: date, last: date) -> dict[date, list]:
             func.coalesce(CalendarEvent.end_at, CalendarEvent.start_at) >= lo)):
         for day, when, short, long in _event_days(e, zone):
             add(day, "event", DayEvent(e, short, long), when)
+    # Planned study sessions, first thing on their day.
+    for s in db.session.scalars(select(StudySession).join(StudyPlan).options(selectinload(StudySession.plan)).where(
+            StudySession.user_id == current_user.id, StudyPlan.status == "active",
+            StudySession.day >= first.isoformat(), StudySession.day <= last.isoformat())):
+        day = date.fromisoformat(s.day)
+        start = datetime.combine(day, time.min, tzinfo=zone).astimezone(timezone.utc).replace(tzinfo=None)
+        add(day, "study", s, start - timedelta(seconds=1) + timedelta(microseconds=s.position))
     return {d: [(kind, item) for kind, item, _ in sorted(items, key=lambda x: x[2])] for d, items in by_day.items()}
 
 
@@ -293,7 +305,7 @@ def calendar_view():
                            today=today, by_day=by_day, prev=prev, nxt=nxt,
                            to_do=sum(1 for a in assignments if not a.excused and queries.still_to_do(a, utcnow())),
                            done=sum(1 for a in assignments if a.effective_status in DONE_STATUSES),
-                           feed_url=feed_url,
+                           feed_url=feed_url, study_roles=planner.ROLES,
                            gcal=integrations.get(current_user, "calendar") if integrations.available() else None)
 
 

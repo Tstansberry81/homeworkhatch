@@ -54,6 +54,25 @@
 
 <div class="grid grid-main">
   <div>
+    {% if exam_plans %}
+    <div class="card">
+      <h2>Exams coming up <a href="{{ url_for('planner.index') }}">Exams {{ icon('arrow', 14) }}</a></h2>
+      {% for p in exam_plans %}
+      {% set cd = p.exam_at|countdown %}
+      <div class="task" style="--c: {{ course_color(p.course_id) if p.course_id else 'var(--lilac)' }}">
+        <span class="bar"></span>
+        <div>
+          <a class="title" href="{{ url_for('planner.plan', plan_id=p.id) }}">{{ p.title }}</a>
+          <div class="meta">{% if p.course %}{{ p.course.course_code or p.course.name }} · {% endif %}{{ p.exam_at|dt }}{% for s in study_today[p.id] %} · today: {{ roles.get(s.role, (s.role,))[0] }} {{ s.minutes }} min{% if s.done_at %} ✓{% endif %}{% endfor %}</div>
+        </div>
+        <div class="btn-row">
+          {% if cd[0] %}<span class="countdown {{ cd[1] }}">{{ cd[0] }}</span>{% endif %}
+          {% for s in study_today[p.id] if not s.done_at %}<a class="btn btn-sm" href="{{ url_for('planner.session', session_id=s.id) }}">Start</a>{% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
     <div class="card">
       <h2>Up next <a href="{{ url_for('main.calendar_view') }}">Calendar {{ icon('arrow', 14) }}</a></h2>
       {% if agenda %}

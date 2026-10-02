@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ plan.title }} · Exams{% endblock %}
+{% block content %}
+{% include "_study_tabs.html" %}
+{% set cd = plan.exam_at|countdown if plan.exam_at else (none, none) %}
+<div class="page-head">
+  <div>
+    <p class="kicker"><a href="{{ url_for('planner.index') }}">Exams</a> · {{ kinds.get(plan.kind, plan.kind) }}{% if plan.course %} · {{ plan.course.course_code or plan.course.name }}{% endif %}</p>
+    <h1>{{ plan.title }}</h1>
+    <p class="muted">{% if plan.exam_at %}{{ plan.exam_at|dt('long') }}{% else %}No date yet: set one below to get a schedule.{% endif %}</p>
+  </div>
+  {% if cd[0] %}<span class="countdown big {{ cd[1] }}">{{ cd[0] }}</span>{% endif %}
+</div>
+
+<div class="chip-row mb">
+  {% if plan.share %}<span class="chip">Worth {{ (100 * plan.share)|round(1) }}% of your grade</span>{% endif %}
+  {% if needed %}
+    {% if needed.needed is not none %}<span class="chip">Keep your {{ needed.current }}%: you need about {{ needed.needed }}% on this</span>
+    {% else %}<span class="chip">Your {{ needed.current }}% stays out of reach on this one test alone. Every point still counts.</span>{% endif %}
+  {% endif %}
+  {% if readiness.percent is not none %}<span class="chip">{{ readiness.percent }}% ready ({{ readiness.source }})</span>{% endif %}
+  <span class="chip">{{ tiers.get(plan.tier, plan.tier) }} plan</span>
+</div>
+
+<div class="grid grid-main">
+  <div>
+    <section class="card" aria-labelledby="sched-h">
+      <h2 id="sched-h">Your sessions</h2>
+      {% if plan.sessions %}
+      <ol class="plan-sessions">
+        {% for s in plan.sessions %}
+        {% set d = s.day %}
+        {% set role = roles.get(s.role, (s.role, '')) %}
+        <li class="{{ 'done' if s.done_at }} {{ 'today' if d == today.isoformat() }}">
+          <div class="when">{{ day_label(d) }}</div>
+          <div class="grow">
+            <strong>{{ role[0] }}</strong> <span class="muted small">· {{ s.minutes }} min{% if s.done_at and s.minutes_done %} · did {{ s.minutes_done }}{% endif %}</span>
+            <div class="small muted">{{ role[1] }}</div>
+          </div>
+          {% if s.done_at %}<span class="badge done">Done</span>
+          {% else %}<a class="btn btn-sm {{ '' if d <= today.isoformat() else 'btn-ghost' }}" href="{{ url_for('planner.session', session_id=s.id) }}">{{ 'Start' if d <= today.isoformat() else 'Open' }}</a>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      <p class="small muted mt">Missed one? It slides into your next session on its own. Nothing piles up.</p>
+      {% elif plan.exam_at %}
+      <p class="muted">This test has passed.</p>
+      {% else %}
+      <p class="muted">Set the date below and the sessions appear here.</p>
+      {% endif %}
+    </section>
+
+    <section class="card" id="method" aria-labelledby="method-h">
+      <h2 id="method-h">How you'll study</h2>
+      <p class="small muted">Every method here is backed by learning research. Pick what fits the class; you can switch anytime.</p>
+      <form method="post" class="method-grid">{{ csrf() }}<input type="hidden" name="action" value="method"><input type="hidden" name="anchor" value="#method">
+        {% for key, m in methods.items() %}
+        <label class="method {{ 'on' if plan.method == key }}">
+          <input type="radio" name="method" value="{{ key }}" {{ 'checked' if plan.method == key }} onchange="this.form.submit()">
+          <span class="name">{{ m.name }}{% if key == recommended %} <span class="badge upcoming">Suggested</span>{% endif %}</span>
+          <span class="small">{{ m.blurb }}</span>
+          <span class="small muted">Why: {{ m.evidence }}</span>
+          <span class="small muted">Best for: {{ m.best_for }}</span>
+        </label>
+        {% endfor %}
+        <noscript><button class="btn btn-sm mt">Save</button></noscript>
+      </form>
+    </section>
+  </div>
+
+  <div>
+    <section class="card" id="pacing" aria-labelledby="pacing-h">
+      <h2 id="pacing-h">Timer</h2>
+      <p class="small muted">Breaks keep you fresh; no timer has been shown to raise grades, so pick what feels right. A gentle chime, never a hard stop.</p>
+      <form method="post" class="chip-row">{{ csrf() }}<input type="hidden" name="action" value="pacing"><input type="hidden" name="anchor" value="#pacing">
+        {% for key, p in pacings.items() %}
+        <label class="chip-radio {{ 'on' if plan.pacing == key }}"><input type="radio" name="pacing" value="{{ key }}" {{ 'checked' if plan.pacing == key }} onchange="this.form.submit()"> {{ p[0] }}</label>
+        {% endfor %}
+        <noscript><button class="btn btn-sm">Save</button></noscript>
+      </form>
+    </section>
+
+    <section class="card" id="materials" aria-labelledby="mat-h">
+      <h2 id="mat-h">What you'll study with</h2>
+      {% if materials.decks or materials.quizzes %}
+      <ul class="list">
+        {% for d in materials.decks %}<li><div class="grow"><a class="title" href="{{ url_for('study.deck', deck_id=d.id) }}">{{ d.title }}</a><div class="small muted">{{ d.cards|length }} cards</div></div>
+          <form method="post" class="inline">{{ csrf() }}<input type="hidden" name="action" value="unlink_deck"><input type="hidden" name="deck_id" value="{{ d.id }}"><input type="hidden" name="anchor" value="#materials"><button class="linklike small">Remove</button></form></li>{% endfor %}
+        {% for q in materials.quizzes %}<li><div class="grow"><a class="title" href="{{ url_for('study.take_quiz', quiz_id=q.id) }}">{{ q.title }}</a><div class="small muted">{{ q.questions|length }} questions</div></div>
+          <form method="post" class="inline">{{ csrf() }}<input type="hidden" name="action" value="unlink_quiz"><input type="hidden" name="quiz_id" value="{{ q.id }}"><input type="hidden" name="anchor" value="#materials"><button class="linklike small">Remove</button></form></li>{% endfor %}
+      </ul>
+      {% else %}
+      <p class="small muted">Recall sessions and practice tests use flashcards linked to this test. No cards? Blank-page recall needs none.</p>
+      {% endif %}
+      {% if materials.other_decks or materials.other_quizzes %}
+      <form method="post" class="btn-row mt">{{ csrf() }}<input type="hidden" name="anchor" value="#materials">
+        <select name="deck_id" aria-label="A deck from this class">{% for d in materials.other_decks %}<option value="{{ d.id }}">{{ d.title }}</option>{% endfor %}</select>
+        <button class="btn btn-ghost btn-sm" name="action" value="link_deck" {{ 'disabled' if not materials.other_decks }}>Add deck</button>
+      </form>
+      {% if materials.other_quizzes %}
+      <form method="post" class="btn-row mt">{{ csrf() }}<input type="hidden" name="anchor" value="#materials">
+        <select name="quiz_id" aria-label="A practice quiz from this class">{% for q in materials.other_quizzes %}<option value="{{ q.id }}">{{ q.title }}</option>{% endfor %}</select>
+        <button class="btn btn-ghost btn-sm" name="action" value="link_quiz">Add quiz</button>
+      </form>
+      {% endif %}
+      {% endif %}
+      <div class="btn-row mt">
+        {% if import_url %}<a class="btn btn-ghost btn-sm" href="{{ import_url }}?plan={{ plan.id }}">Import from Quizlet or Anki</a>{% endif %}
+        {% if new_deck_url %}<a class="btn btn-ghost btn-sm" href="{{ new_deck_url }}">Write cards</a>{% endif %}
+        {% if generate_deck %}<a class="btn btn-ghost btn-sm" href="{{ generate_deck }}" title="Uses 1 AI action">Make cards with AI</a>{% endif %}
+      </div>
+    </section>
+
+    <form method="post" class="card" id="scope">{{ csrf() }}<input type="hidden" name="action" value="scope"><input type="hidden" name="anchor" value="#scope">
+      <h2>What's on it?</h2>
+      <textarea name="scope" rows="3" maxlength="2000" placeholder="Chapters 4-6, lectures 8-12, the lab practical">{{ plan.scope or '' }}</textarea>
+      <button class="btn btn-ghost btn-sm mt">Save</button>
+    </form>
+
+    <details class="card" {% if not plan.exam_at %}open{% endif %}>
+      <summary><strong>Change the date or size</strong></summary>
+      <form method="post" class="mt">{{ csrf() }}<input type="hidden" name="action" value="date">
+        <div class="grid grid-2">
+          <div><label for="p-date">Date</label><input id="p-date" name="date" type="date" value="{{ exam_local.date().isoformat() if exam_local }}" required></div>
+          <div><label for="p-time">Time</label><input id="p-time" name="time" type="time" value="{{ exam_local.strftime('%H:%M') if exam_local else '09:00' }}"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm mt">Save date</button>
+      </form>
+      <form method="post" class="mt">{{ csrf() }}<input type="hidden" name="action" value="tier">
+        <label for="p-tier">How big is it?</label>
+        <div class="btn-row"><select id="p-tier" name="tier">{% for key, label in tiers.items() %}<option value="{{ key }}" {{ 'selected' if plan.tier == key }}>{{ label }}</option>{% endfor %}</select>
+        <button class="btn btn-ghost btn-sm">Save</button></div>
+        <p class="small muted">Bigger means more sessions starting earlier.</p>
+      </form>
+      <form method="post" action="{{ url_for('planner.delete', plan_id=plan.id) }}" class="mt" data-confirm="Remove this plan? Your cards and quizzes stay.">{{ csrf() }}<button class="linklike small">Remove this plan</button></form>
+    </details>
+  </div>
+</div>
+{% endblock %}

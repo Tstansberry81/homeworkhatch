@@ -1,0 +1,32 @@
+from .cases import A, E
+Q = dict(types=["online_quiz"], quiz=True, pts=10, group="Quizzes", share=0.02)
+X = dict(types=["none"], pts=100, group="Exams", share=0.2)
+TOPICS = [
+    ("topic: Introduction", A("Quiz 2: Introduction to Cells", **Q), "quiz/high"),
+    ("topic: Informed Consent", A("Quiz 4: Informed Consent", **Q), "quiz/high"),
+    ("topic: Opinion Polls", A("Quiz 5: Public Opinion Polls", **Q), "quiz/high"),
+    ("topic: Participation", A("Exam 2: Political Participation", **X), "test/high"),
+    ("topic: Survey Research", A("Quiz 3: Survey Research Methods", **Q), "quiz/high"),
+    ("topic: Syllabus+Ch1", A("Quiz 1: Syllabus and Chapter 1", **Q), "quiz/high"),
+    ("topic: Diagnostic Imaging", A("Quiz 6: Diagnostic Imaging", **Q), "quiz/high"),
+    ("topic: Product Placement", A("Quiz 7: Product Placement", **Q), "quiz/high"),
+    ("topic: Evidence-Based Practice", A("Exam 2: Evidence-Based Practice", **X), "test/high"),
+    ("topic: Professional Practice", A("Quiz 4: Professional Practice", **Q), "quiz/high"),
+    ("topic: Reflection and Refraction", A("Exam 2: Reflection and Refraction", **X), "test/high"),
+    ("topic: Corrections Systems", A("Quiz 5: Corrections Systems", **Q), "quiz/high"),
+    ("topic: Wrapper Classes", A("Quiz 4: Wrapper Classes", **Q), "quiz/high"),
+    ("topic: Hypothesis Testing", A("Unit 5 Test: Hypothesis Testing", **X), "test/high"),
+    ("topic: Project Management", A("Quiz 3: Project Management Basics", **Q), "quiz/high"),
+    ("topic: Information Systems", A("Quiz 3: Information Systems", **Q), "quiz/high"),
+    ("topic: HTTP Requests", A("Quiz 2: HTTP Requests", **Q), "quiz/high"),
+    ("topic: Sexual Orientation", A("Quiz 3: Sexual Orientation and Identity", **Q), "quiz/high"),
+    ("topic: Peer Review in Science", A("Exam 1 (Peer Review, Replication)", **X), "test/high"),
+    ("label: Exam 1: Corrections", A("Exam 1: Corrections", ["online_upload"], pts=10, group="Homework"), "none"),
+    ("label: Midterm 2 - Study Guide", A("Midterm 2 - Study Guide", ["online_upload"], pts=5, group="Homework"), "none"),
+    ("label: Exam 2 (Review)", A("Exam 2 (Review)", ["none"], pts=0, grading="not_graded"), "none"),
+    ("label: Final Exam - Practice", A("Final Exam - Practice", ["online_quiz"], quiz=True, pts=0), "none"),
+    ("label: Quiz 3: Survey", A("Quiz 3: Survey", ["online_quiz"], quiz=True, pts=1), "none"),
+    ("label: Exam 1 - Sign-up", A("Exam 1 - Sign-up", ["online_text_entry"], pts=0), "none"),
+    ("label: Final (Project)", A("Final (Project)", ["online_upload"], pts=100, group="Projects", share=0.2), "none"),
+    ("EV label: Exam 1 - Review Session", E("Exam 1 - Review Session", 90), "none"),
+]

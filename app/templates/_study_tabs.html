@@ -1,8 +1,9 @@
-{# The Study area: your sets, making new ones, live quizzes and citations. #}
+{# The Study area: exam plans, your sets, making new ones, live quizzes and citations. #}
 {% from "_icons.html" import icon %}
 {% set ep = request.endpoint or '' %}
 <nav class="tabs" aria-label="Study">
   {% for endpoint, label, ico, on in [
+    ("planner.index", "Exams", "calendar", ep.startswith("planner.")),
     ("study.index", "Sets", "study", ep.startswith("study.") and ep != "study.generate"),
     ("study.generate", "Make new", "plus", ep == "study.generate"),
     ("live.join", "Live quiz", "bolt", ep.startswith("live.")),

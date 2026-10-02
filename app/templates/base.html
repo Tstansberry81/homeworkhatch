@@ -31,7 +31,7 @@
         ("main.dashboard", "Home", "home", ep == "main.dashboard"),
         ("courses.index", "Classes", "classes", ep.startswith("courses.") or ep.startswith("chat.")),
         ("main.calendar_view", "Calendar", "calendar", ep == "main.calendar_view"),
-        ("study.index", "Study", "study", ep.startswith("study.") or ep.startswith("live.") or ep.startswith("tools.") or ep == "coins.lab"),
+        ("study.index", "Study", "study", ep.startswith("study.") or ep.startswith("planner.") or ep.startswith("live.") or ep.startswith("tools.") or ep == "coins.lab"),
         ("tutor.index", "Tutor", "tutor", ep.startswith("tutor.")),
         ("uploads.index", "Files", "files", ep.startswith("uploads.")),
       ] %}

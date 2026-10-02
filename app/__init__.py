@@ -66,10 +66,10 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
     login_manager.init_app(app)
     csrf.init_app(app)
 
-    from .blueprints import (admin, api, auth, billing, chat, coins, courses, live, main, settings, study, tools, tutor,
-                             uploads)
+    from .blueprints import (admin, api, auth, billing, chat, coins, courses, live, main, planner, settings, study, tools,
+                             tutor, uploads)
 
-    for bp in (main.bp, auth.bp, courses.bp, api.bp, study.bp, live.bp, tutor.bp, chat.bp, coins.bp, tools.bp,
+    for bp in (main.bp, auth.bp, courses.bp, api.bp, study.bp, planner.bp, live.bp, tutor.bp, chat.bp, coins.bp, tools.bp,
                billing.bp, settings.bp, admin.bp, uploads.bp):
         app.register_blueprint(bp)
     # Token-authenticated / signature-verified endpoints don't use browser CSRF tokens.

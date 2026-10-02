@@ -72,7 +72,7 @@ def upgrade():
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('course_id', sa.Integer(), nullable=True),
-        sa.Column('item', sa.String(length=40), nullable=False),
+        sa.Column('item', sa.String(length=200), nullable=False),
         sa.Column('kind', sa.String(length=10), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(['user_id'], ['user.id'], ondelete='CASCADE'),

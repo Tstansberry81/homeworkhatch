@@ -767,7 +767,7 @@ class AssessmentChoice(db.Model):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="CASCADE"))
-    item: Mapped[str] = mapped_column(String(40))  # "a:<assignment id>", "e:<event id>" or "family:<key>"
+    item: Mapped[str] = mapped_column(String(200))  # "a:<assignment id>", "e:<event id>" or "family:<key>"
     kind: Mapped[str] = mapped_column(String(10))  # none / final / midterm / test / quiz
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
