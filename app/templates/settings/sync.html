@@ -70,7 +70,7 @@
           <li>If Chrome says <em>Manifest file is missing</em>, you picked the wrong folder: pick the one that has <code>manifest.json</code> directly inside.</li>
         </ol>
       </details>
-      <p class="small">Then: pin it from the puzzle-piece menu, open your school's Canvas, click the Homework Hatch icon &rarr; <strong>Agree and connect</strong>. It opens this page and links itself to your account; if it doesn't, click the icon &rarr; <strong>Link to my Homework Hatch account</strong>.</p>
+      <p class="small">Then: pin it from the puzzle-piece menu, open your school's Canvas, click the Homework Hatch icon &rarr; <strong>Agree and connect</strong>. It opens this page and links itself to your account while you're signed in here; nothing to copy or paste.</p>
       <details class="small mt">
         <summary>Link it by hand instead</summary>
         <p>In the extension's <em>Settings</em>, the server is <code id="server">{{ server_url }}</code> <button class="btn btn-ghost btn-sm" data-copy="#server">Copy</button>; paste a <em>server token</em> from the box on the right, click <em>Save</em>, then <em>Sync now</em>.</p>
@@ -133,7 +133,7 @@
   function render() {
     ["ext-install", "ext-canvas", "ext-sync", "ext-hint"].forEach((id) => show(id, false));
     if (!ext) {
-      $("ext-status").textContent = "Not installed in this browser. Add it from the Chrome Web Store; it links to your account on its own. Already installed? Click the Homework Hatch icon, then \"Link to my Homework Hatch account\".";
+      $("ext-status").textContent = "Not installed in this browser. Add it from the Chrome Web Store; it links to your account on its own. Installed it from a zip? Click the Homework Hatch icon, then \"Link to my Homework Hatch account\".";
       show("ext-install");
       return;
     }
