@@ -70,6 +70,8 @@ class User(UserMixin, db.Model):
     # IDs of extension copies loaded from the zip (each install gets its own), so the Connect Canvas
     # page finds them on every address the site has. The Web Store copy's ID is in config.
     extension_ids: Mapped[list | None] = mapped_column(JSON)
+    # Exam planner: the most study time to schedule on one day, across every plan.
+    study_minutes_per_day: Mapped[int] = mapped_column(Integer, default=120, server_default="120")
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -452,8 +454,10 @@ class Deck(db.Model):
     course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="SET NULL"))
     title: Mapped[str] = mapped_column(String(200))
     description: Mapped[str | None] = mapped_column(String(1000))
-    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual / ai
+    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual / ai / import
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # The exam this deck is for (SET NULL: plans are deleted when the student drops them).
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("study_plan.id", ondelete="SET NULL"), index=True)
 
     course: Mapped[Course | None] = relationship()
     cards: Mapped[list[Card]] = relationship(back_populates="deck", cascade="all, delete-orphan", order_by="Card.position")
@@ -473,6 +477,7 @@ class Card(db.Model):
     review_count: Mapped[int] = mapped_column(Integer, default=0)
     due_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    starred: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     deck: Mapped[Deck] = relationship(back_populates="cards")
 
@@ -490,6 +495,7 @@ class PracticeQuiz(db.Model):
     from_course_files: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     seconds_per_question: Mapped[int] = mapped_column(Integer, default=20)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("study_plan.id", ondelete="SET NULL"), index=True)
 
     course: Mapped[Course | None] = relationship()
 
@@ -696,6 +702,76 @@ class CalendarPush(db.Model):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "assignment_id"),)
+
+
+class StudyPlan(db.Model):
+    """A plan to study for one test, quiz or exam. Canvas rows are SET NULL (sync deletes rows it
+    no longer receives), so the title and date are copied; a plan can also be added by hand."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="SET NULL"))
+    assignment_id: Mapped[int | None] = mapped_column(ForeignKey("assignment.id", ondelete="SET NULL"), index=True)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("calendar_event.id", ondelete="SET NULL"), index=True)
+    title: Mapped[str] = mapped_column(String(500))
+    kind: Mapped[str] = mapped_column(String(10), default="test")  # final / midterm / test / quiz
+    exam_at: Mapped[datetime | None] = mapped_column(DateTime)  # naive UTC
+    tier: Mapped[str] = mapped_column(String(10), default="medium")  # micro / low / medium / high / major / final
+    share: Mapped[float | None] = mapped_column(Float)  # fraction of the course grade, when known
+    method: Mapped[str] = mapped_column(String(20), default="spaced")
+    pacing: Mapped[str] = mapped_column(String(12), default="25_5")
+    status: Mapped[str] = mapped_column(String(10), default="active")  # active / done
+    # What's on it, in the student's words ("chapters 4-6, lectures 8-12").
+    scope: Mapped[str | None] = mapped_column(EncryptedText("study_plan.scope"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    course: Mapped[Course | None] = relationship()
+    sessions: Mapped[list[StudySession]] = relationship(back_populates="plan", cascade="all, delete-orphan",
+                                                        order_by="StudySession.day, StudySession.position")
+
+
+class StudySession(db.Model):
+    """One scheduled study block of a plan, on a local day."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("study_plan.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)  # local "YYYY-MM-DD", like User.last_active_date
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    role: Mapped[str] = mapped_column(String(20))  # pretest / learn / blurt / explain / mixed / practice_test / review / misses / warmup
+    minutes: Mapped[int] = mapped_column(Integer, default=30)
+    minutes_done: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # What the student wrote in a blank-page or explain-it session (their own coursework).
+    notes: Mapped[str | None] = mapped_column(EncryptedText("study_session.notes"))
+
+    plan: Mapped[StudyPlan] = relationship(back_populates="sessions")
+
+
+class DeckTest(db.Model):
+    """A scored practice test taken in Test mode over one or more decks (the planner's readiness)."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("study_plan.id", ondelete="SET NULL"), index=True)
+    score: Mapped[int] = mapped_column(Integer)
+    total: Mapped[int] = mapped_column(Integer)
+    seconds: Mapped[int | None] = mapped_column(Integer)
+    # [{card_id, kind: mc|typed|tf, correct: bool, given: str}]: the student's own answers.
+    answers: Mapped[list | None] = mapped_column(EncryptedJSON("deck_test.answers"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AssessmentChoice(db.Model):
+    """The student's answer to "is this a test?": for one item, or (item_id None) for every item in
+    the course with the same family key ("quiz #"), so one tap fixes a whole series."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="CASCADE"))
+    item: Mapped[str] = mapped_column(String(40))  # "a:<assignment id>", "e:<event id>" or "family:<key>"
+    kind: Mapped[str] = mapped_column(String(10))  # none / final / midterm / test / quiz
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "course_id", "item"),)
 
 
 Index("ix_chunk_course_source", ContentChunk.course_id, ContentChunk.source_type, ContentChunk.source_id)
