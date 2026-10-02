@@ -88,6 +88,19 @@
     }
   });
 
+  // A set pasted on the public /free-learn page before signing up waits in sessionStorage
+  // until the import page picks it up; until then, offer it on every page.
+  const pending = document.getElementById("pending-import");
+  if (pending) {
+    try {
+      if (sessionStorage.getItem("hh_import_text")) pending.hidden = false;
+    } catch { /* storage blocked */ }
+    pending.querySelector("[data-dismiss-import]")?.addEventListener("click", () => {
+      try { sessionStorage.removeItem("hh_import_text"); } catch { /* fine */ }
+      pending.hidden = true;
+    });
+  }
+
   // Render any math already on the page once KaTeX loads.
   window.addEventListener("load", () => document.querySelectorAll("[data-math]").forEach((el) => hh.renderMath(el)));
 })();

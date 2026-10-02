@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Test · {{ sset.title }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="small muted">
+      {% if session_url %}<a href="{{ session_url }}">← Back to your study session</a> · {% endif %}
+      {% if sset.deck %}<a href="{{ url_for('study.deck', deck_id=sset.deck.id) }}">{{ sset.deck.title }}</a>{% else %}<a href="{{ url_for('study.index') }}">Flashcards</a>{% endif %}
+    </div>
+    <h1>Practice test</h1>
+    <p class="muted">{{ sset.title }} · {{ questions|length }} question{{ 's' if questions|length != 1 }}{% if minutes %} · {{ minutes }} minute{{ 's' if minutes != 1 }}{% endif %}. You'll see your score and every miss when you hand it in.</p>
+  </div>
+  {% include "study/_exam_ring.html" %}
+</div>
+<form method="post" action="{{ url_for('study.test_mode') }}" id="test-form" class="test">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="token" value="{{ token }}">
+  {% for key, value in sset.params.items() %}{% for v in (value if value is iterable and value is not string else [value]) %}<input type="hidden" name="{{ key }}" value="{{ v }}">{% endfor %}{% endfor %}
+  {% if session_id %}<input type="hidden" name="session" value="{{ session_id }}">{% endif %}
+  <div class="test-bar card" role="status">
+    <span><strong id="answered">0</strong> of {{ questions|length }} answered</span>
+    {% if minutes %}<span class="timer" id="timer" data-seconds="{{ minutes * 60 }}" aria-label="Time left">{{ minutes }}:00</span>{% endif %}
+  </div>
+  {% for q in questions %}
+  {% set qi = loop.index0 %}
+  <fieldset class="card test-q" data-q="{{ qi }}">
+    <legend class="kicker">{{ loop.index }} · {% if q.kind == 'mc' %}Multiple choice{% elif q.kind == 'tf' %}True or false{% else %}Type the answer{% endif %}</legend>
+    <div class="prose test-prompt">{{ q.prompt|safe }}</div>
+    {% if q.kind == 'mc' %}
+      {% for opt in q.options %}
+      <label class="choice"><input type="radio" name="a{{ qi }}" value="{{ loop.index0 }}"><span class="prose">{{ opt|safe }}</span></label>
+      {% endfor %}
+    {% elif q.kind == 'tf' %}
+      <div class="tf-shown"><span class="kicker">{{ 'Term' if answer_with == 'term' else 'Definition' }}</span><div class="prose">{{ q.shown|safe }}</div></div>
+      <div class="btn-row tf-choices">
+        <label class="choice"><input type="radio" name="a{{ qi }}" value="true"> True</label>
+        <label class="choice"><input type="radio" name="a{{ qi }}" value="false"> False</label>
+      </div>
+    {% else %}
+      <label class="sr-only" for="a{{ qi }}">Your answer to question {{ loop.index }}</label>
+      <input type="text" id="a{{ qi }}" name="a{{ qi }}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type the {{ 'term' if answer_with == 'term' else 'definition' }}">
+    {% endif %}
+  </fieldset>
+  {% endfor %}
+  <div class="btn-row mt" style="justify-content:center"><button class="btn" type="submit" id="submit-test">Hand it in</button></div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const form = document.getElementById("test-form");
+  const total = {{ questions|length }};
+  let submitting = false;
+  const count = () => {
+    const done = [...form.querySelectorAll(".test-q")].filter((q) =>
+      q.querySelector("input[type=radio]:checked") || (q.querySelector("input[type=text]")?.value.trim())).length;
+    document.getElementById("answered").textContent = done;
+    return done;
+  };
+  form.addEventListener("input", count);
+  form.addEventListener("change", count);
+  // Enter in a typed answer moves to the next question instead of handing the test in early.
+  form.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !e.target.matches("input[type=text]")) return;
+    e.preventDefault();
+    const next = e.target.closest(".test-q").nextElementSibling?.querySelector("input");
+    if (next && next.closest(".test-q")) next.focus(); else document.getElementById("submit-test").focus();
+  });
+  form.addEventListener("submit", (e) => {
+    if (submitting) return;
+    const left = total - count();
+    if (left > 0 && !form.dataset.timeUp && !window.confirm(`${left} question${left === 1 ? "" : "s"} unanswered. Hand it in anyway?`)) {
+      e.preventDefault();
+      return;
+    }
+    submitting = true;
+  });
+  window.addEventListener("load", () => hh.renderMath(form));
+  const timer = document.getElementById("timer");
+  if (timer) {
+    const end = Date.now() + Number(timer.dataset.seconds) * 1000;
+    const tick = () => {
+      const left = Math.max(0, Math.round((end - Date.now()) / 1000));
+      timer.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+      if (left <= 60) timer.classList.add("urgent");
+      if (left === 0) {
+        form.dataset.timeUp = "1";
+        if (!submitting) { submitting = true; form.submit(); }
+        return;
+      }
+      setTimeout(tick, 1000);
+    };
+    tick();
+  }
+})();
+</script>
+{% endblock %}

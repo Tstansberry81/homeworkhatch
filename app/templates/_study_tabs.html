@@ -1,10 +1,11 @@
-{# The Study area: your sets, making new ones, live quizzes and citations. #}
+{# The Study area: your sets, making new ones, importing from Quizlet/Anki, live quizzes and citations. #}
 {% from "_icons.html" import icon %}
 {% set ep = request.endpoint or '' %}
 <nav class="tabs" aria-label="Study">
   {% for endpoint, label, ico, on in [
-    ("study.index", "Sets", "study", ep.startswith("study.") and ep != "study.generate"),
+    ("study.index", "Sets", "study", ep.startswith("study.") and ep not in ("study.generate", "study.import_deck")),
     ("study.generate", "Make new", "plus", ep == "study.generate"),
+    ("study.import_deck", "Import", "download", ep == "study.import_deck"),
     ("live.join", "Live quiz", "bolt", ep.startswith("live.")),
     ("tools.citation_generator", "Citations", "quote", ep.startswith("tools.")),
   ] %}

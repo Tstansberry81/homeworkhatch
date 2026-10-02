@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}Quizlet's Learn mode, free{% endblock %}
+{% block public %}
+<nav class="landing-nav">
+  <a class="brand" href="/"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""><span>Homework Hatch</span></a>
+  <div class="btn-row"><a class="btn btn-ghost" href="{{ url_for('auth.login', next=url_for('study.import_deck')) }}" data-keep-text>Sign in</a><a class="btn" href="{{ url_for('auth.register') }}" data-keep-text>Get started</a></div>
+</nav>
+<main class="free-learn">
+  <section class="free-hero">
+    <span class="sticker">Free on every plan</span>
+    <h1 class="mt">Quizlet's Learn mode, free. <span class="hl">Bring your own sets.</span></h1>
+    <p class="lead">Paste a set you made on Quizlet or Anki and study it the way that works: multiple choice first, then typing the answer, until you've got it. Then take a timed practice test. No paywall on any of it.</p>
+    <ul class="free-points">
+      <li>{{ icon('check', 16) }} <strong>Learn</strong>: rounds of 7, multiple choice then typed answers, misses come back</li>
+      <li>{{ icon('check', 16) }} <strong>Test</strong>: multiple choice, typed and true/false, with a timer if you want one</li>
+      <li>{{ icon('check', 16) }} <strong>Spaced repetition</strong> with a daily cap, so missed days never turn into a pile</li>
+      <li>{{ icon('check', 16) }} Typo-friendly checking (or strict spelling), stars, and an "I was right" button</li>
+      <li>{{ icon('check', 16) }} <strong>No lock-in</strong>: download any deck as CSV or for Anki whenever you like</li>
+    </ul>
+  </section>
+
+  <section class="free-section">
+    <h2>1. Get your set out</h2>
+    {% with with_file=false %}{% include "study/_export_help.html" %}{% endwith %}
+  </section>
+
+  <section class="free-section">
+    <h2>2. Paste it here to check it</h2>
+    <div class="card" data-import data-preview-url="{{ url_for('main.free_learn_preview') }}">
+      {% with with_file=false, form=none %}{% include "study/_import_fields.html" %}{% endwith %}
+      <p class="small muted">Nothing is saved until you sign up: this preview just reads the text.</p>
+    </div>
+  </section>
+
+  <section class="free-section center">
+    <h2>3. Save it and start learning</h2>
+    <p class="muted">Your pasted set comes with you through sign-up.</p>
+    <div class="btn-row" style="justify-content:center">
+      <a class="btn" href="{{ url_for('auth.register') }}" data-keep-text>Sign up to save and study it free {{ icon('arrow', 16) }}</a>
+      <a class="btn btn-ghost" href="{{ url_for('auth.login', next=url_for('study.import_deck')) }}" data-keep-text>I have an account</a>
+    </div>
+  </section>
+  <p class="center small muted mt"><a href="/">Homework Hatch</a> · <a href="{{ url_for('main.terms') }}">Terms</a> · <a href="{{ url_for('main.privacy') }}">Privacy</a> · <a href="{{ url_for('main.support') }}">Support</a></p>
+  <p class="center small muted">Quizlet and Anki are trademarks of their owners. Homework Hatch isn't affiliated with either; export only sets you have the right to use.</p>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/import.js') }}"></script>{% endblock %}

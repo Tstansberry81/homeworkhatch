@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Import flashcards{% endblock %}
+{% block content %}
+{% include "_study_tabs.html" %}
+<div class="page-head"><div><h1>Import a set</h1>
+  <p class="muted">Bring your flashcards from Quizlet or Anki (or a spreadsheet). Learn, Test and spaced repetition are free on every plan, and you can download your cards again anytime.</p></div></div>
+<p class="flash info" id="restored-note" hidden>We kept the set you pasted before signing in. Give it a title and save it.</p>
+{% with with_file=true %}{% include "study/_export_help.html" %}{% endwith %}
+<form method="post" class="card mt" data-import data-restore data-preview-url="{{ url_for('study.import_preview') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% with with_file=true %}{% include "study/_import_fields.html" %}{% endwith %}
+  <div class="form-row">
+    <div><label for="title">Deck title</label><input id="title" name="title" type="text" maxlength="200" value="{{ form.title or '' }}" required></div>
+    <div><label for="course_id">Class <span class="hint">(optional)</span></label>
+      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if form.course_id|string == c.id|string }}>{{ c.label }}</option>{% endfor %}</select></div>
+    {% if plans %}
+    <div><label for="plan_id">Which exam is this for? <span class="hint">(optional)</span></label>
+      <select id="plan_id" name="plan_id"><option value="">Not for a particular exam</option>{% for p in plans %}<option value="{{ p.id }}" {{ 'selected' if form.plan_id|string == p.id|string }}>{{ p.title }}{% if p.exam_at %} · {{ p.exam_at|dt('date') }}{% endif %}</option>{% endfor %}</select></div>
+    {% endif %}
+  </div>
+  <button class="btn mt" type="submit">Save deck</button>
+</form>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/import.js') }}"></script>{% endblock %}

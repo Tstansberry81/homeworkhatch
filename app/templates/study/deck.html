@@ -1,30 +1,38 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ deck.title }}{% endblock %}
 {% block content %}
+{% set starred = deck.cards|selectattr('starred')|list|length %}
 <div class="page-head">
-  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · {{ deck.course.name }}{% endif %}</div><h1>{{ deck.title }}</h1>
+  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · {{ deck.course.name }}{% endif %}{% if deck.source == 'import' %} · imported{% endif %}</div><h1>{{ deck.title }}</h1>
     {% if deck.description %}<p class="muted">{{ deck.description }}</p>{% endif %}</div>
   <div class="btn-row">
-    {% if deck.cards %}<a class="btn" href="{{ url_for('study.review', deck_id=deck.id) }}">Study</a>{% endif %}
+    {% if deck.cards %}
+    <a class="btn" href="{{ url_for('study.learn', deck=deck.id) }}">Learn</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.review', deck_id=deck.id) }}">Flip</a>
+    {% if deck.cards|length >= 2 %}<a class="btn btn-ghost" href="{{ url_for('study.test_mode', deck=deck.id) }}">Test</a>{% endif %}
+    {% endif %}
   </div>
 </div>
 <div class="card">
-  <h2>{{ deck.cards|length }} cards</h2>
+  <h2>{{ deck.cards|length }} cards
+    {% if starred %}<a href="{{ url_for('study.learn', deck=deck.id, starred=1) }}">Learn the {{ starred }} starred</a>{% endif %}</h2>
   <div class="table-wrap">
   <table class="table">
-    <thead><tr><th style="width:40%">Front</th><th>Back</th><th></th></tr></thead>
+    <thead><tr><th class="star-col"><span class="sr-only">Star</span></th><th style="width:40%">Front</th><th>Back</th><th></th></tr></thead>
     <tbody>
     {% for c in deck.cards %}
       <tr>
+        <td class="star-col"><button type="button" class="star-btn" data-star-url="{{ url_for('study.star_card', card_id=c.id) }}" aria-pressed="{{ 'true' if c.starred else 'false' }}" aria-label="{{ 'Unstar' if c.starred else 'Star' }} card {{ loop.index }}">{{ '★' if c.starred else '☆' }}</button></td>
         <td colspan="2">
           <form method="post" class="form-row" style="grid-template-columns:1fr 1.4fr auto;align-items:start">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="card_id" value="{{ c.id }}">
-            <textarea name="front" style="min-height:44px">{{ c.front }}</textarea>
-            <textarea name="back" style="min-height:44px">{{ c.back }}</textarea>
+            <textarea name="front" style="min-height:44px" aria-label="Front of card {{ loop.index }}">{{ c.front }}</textarea>
+            <textarea name="back" style="min-height:44px" aria-label="Back of card {{ loop.index }}">{{ c.back }}</textarea>
             <button class="btn btn-ghost btn-sm" title="Save">Save</button>
           </form>
         </td>
-        <td class="right"><form method="post" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="delete_card"><input type="hidden" name="card_id" value="{{ c.id }}"><button class="linklike small" title="Delete card">✕</button></form></td>
+        <td class="right"><form method="post" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="delete_card"><input type="hidden" name="card_id" value="{{ c.id }}"><button class="linklike small" title="Delete card" aria-label="Delete card {{ loop.index }}">✕</button></form></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -35,14 +43,47 @@
   <form method="post" class="card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="add">
     <h2>Add cards</h2>
-    <textarea name="cards" placeholder="front :: back (one per line)"></textarea>
+    <textarea name="cards" placeholder="front :: back (one per line)" aria-label="New cards"></textarea>
+    <p class="help">One per line as <code>front :: back</code>, or paste a Quizlet / Anki export. Bigger sets: <a href="{{ url_for('study.import_deck') }}">Import</a>.</p>
     <button class="btn mt">Add</button>
   </form>
   <div class="card">
     <h2>Deck settings</h2>
     <form method="post" class="btn-row"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="rename">
-      <input name="title" type="text" value="{{ deck.title }}" style="flex:1"><button class="btn btn-ghost">Rename</button></form>
+      <input name="title" type="text" value="{{ deck.title }}" style="flex:1" aria-label="Deck title"><button class="btn btn-ghost">Rename</button></form>
+    {% if plans %}
+    <form method="post" class="mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="plan">
+      <label for="plan_id">Which exam is this for?</label>
+      <div class="btn-row">
+        <select id="plan_id" name="plan_id" style="flex:1"><option value="">Not for a particular exam</option>
+          {% for p in plans %}<option value="{{ p.id }}" {{ 'selected' if deck.plan_id == p.id }}>{{ p.title }}{% if p.exam_at %} · {{ p.exam_at|dt('date') }}{% endif %}</option>{% endfor %}</select>
+        <button class="btn btn-ghost">Save</button>
+      </div>
+    </form>
+    {% endif %}
+    <div class="mt">
+      <label>Download</label>
+      <div class="btn-row">
+        <a class="btn btn-ghost btn-sm" href="{{ url_for('study.export_deck', deck_id=deck.id, fmt='csv') }}" download>{{ icon('download', 15) }} CSV</a>
+        <a class="btn btn-ghost btn-sm" href="{{ url_for('study.export_deck', deck_id=deck.id, fmt='txt') }}" download>{{ icon('download', 15) }} Anki (.txt)</a>
+      </div>
+      <p class="help">Your cards are yours: open the CSV in any spreadsheet, or in Anki use File → Import.</p>
+    </div>
     <form method="post" action="{{ url_for('study.delete_deck', deck_id=deck.id) }}" class="mt" data-confirm="Delete this deck and all its cards?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-danger">Delete deck</button></form>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll("[data-star-url]").forEach((btn) => btn.addEventListener("click", async () => {
+  btn.disabled = true;
+  try {
+    const { starred } = await hh.post(btn.dataset.starUrl);
+    btn.textContent = starred ? "★" : "☆";
+    btn.setAttribute("aria-pressed", String(starred));
+    btn.setAttribute("aria-label", btn.getAttribute("aria-label").replace(/^(Unstar|Star)/, starred ? "Unstar" : "Star"));
+  } catch { /* leave it as it was */ }
+  btn.disabled = false;
+}));
+</script>
 {% endblock %}

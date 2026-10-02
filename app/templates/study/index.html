@@ -8,6 +8,7 @@
   <div class="btn-row">
     {% if ai_available %}<a class="btn" href="{{ url_for('study.generate') }}">Generate from my materials</a>{% endif %}
     <a class="btn btn-ghost" href="{{ url_for('study.new_deck') }}">+ Deck</a>
+    <a class="btn btn-ghost" href="{{ url_for('study.import_deck') }}">Import</a>
     <a class="btn btn-ghost" href="{{ url_for('study.new_quiz') }}">+ Quiz</a>
   </div>
 </div>
@@ -18,8 +19,8 @@
     <ul class="list">
       {% for d in decks %}
       <li><div class="grow"><a class="title" href="{{ url_for('study.deck', deck_id=d.id) }}">{{ d.title }}</a>
-        <div class="small muted">{{ card_counts.get(d.id, 0) }} cards{% if d.course %} · {{ d.course.name }}{% endif %}{% if d.source == 'ai' %} · AI-made{% endif %}</div></div>
-        {% if card_counts.get(d.id) %}<a class="btn btn-sm" href="{{ url_for('study.review', deck_id=d.id) }}">Study</a>{% endif %}</li>
+        <div class="small muted">{{ card_counts.get(d.id, 0) }} cards{% if d.course %} · {{ d.course.name }}{% endif %}{% if d.source == 'ai' %} · AI-made{% elif d.source == 'import' %} · imported{% endif %}</div></div>
+        {% if card_counts.get(d.id) %}<div class="btn-row"><a class="btn btn-ghost btn-sm" href="{{ url_for('study.review', deck_id=d.id) }}">Flip</a><a class="btn btn-sm" href="{{ url_for('study.learn', deck=d.id) }}">Learn</a></div>{% endif %}</li>
       {% endfor %}
     </ul>
     {% else %}{{ empty("", "No decks yet.") }}{% endif %}

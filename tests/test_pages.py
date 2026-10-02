@@ -20,7 +20,7 @@ DOB = {"birth_month": "3", "birth_year": "2005"}
 
 
 def test_public_pages(client):
-    for path in ("/", "/login", "/register", "/terms", "/privacy", "/copyright", "/support", "/health"):
+    for path in ("/", "/login", "/register", "/terms", "/privacy", "/copyright", "/support", "/health", "/free-learn"):
         r = client.get(path)
         assert r.status_code == 200, path
     assert client.get("/dashboard").status_code == 302, "login required"
@@ -39,7 +39,8 @@ def test_every_student_page_renders(app, synced_user, client):
     db.session.commit()
     paths = ["/dashboard", "/welcome", "/courses/", "/calendar", "/calendar?y=2026&m=2", "/study/",
              "/study/generate", "/study/decks/new", f"/study/decks/{deck.id}", f"/study/decks/{deck.id}/review",
-             "/study/quizzes/new", f"/study/quizzes/{quiz.id}",
+             "/study/quizzes/new", f"/study/quizzes/{quiz.id}", "/study/decks/import", f"/study/learn?deck={deck.id}",
+             f"/study/learn?deck={deck.id}&starred=1",
              f"/study/quizzes/{quiz.id}/edit", "/tutor/", "/chat/", f"/chat/course/{course.id}", "/coins", "/tools/citations", "/billing/",
              "/settings/", "/settings/sync", "/settings/data", f"/courses/assignments/{a.id}", f"/courses/pages/{page.id}",
              f"/courses/files/{f.id}", "/live/join"]

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Test results{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+{% set pct = (100 * test.score / test.total)|round|int if test.total else 0 %}
+{% set sel = dict(selection, session=session_id or None) %}
+<div class="page-head">
+  <div>
+    <div class="small muted">{% if session_url %}<a href="{{ session_url }}">← Back to your study session</a> · {% endif %}<a href="{{ url_for('study.index') }}">Flashcards</a></div>
+    <h1>{{ test.score }} / {{ test.total }} <span class="muted">({{ pct }}%)</span></h1>
+    <p class="muted">{% if test.seconds %}Took {% if test.seconds >= 60 %}{{ test.seconds // 60 }} min {% endif %}{{ test.seconds % 60 }} s. {% endif %}{% if not misses %}Every answer right!{% else %}{{ misses|length }} to go over below.{% endif %}</p>
+  </div>
+  {% include "study/_exam_ring.html" %}
+</div>
+<div class="btn-row mb">
+  {% if session_url %}<a class="btn" href="{{ session_url }}">Back to your study session</a>{% endif %}
+  {% if missed_ids %}
+  <form method="post" action="{{ url_for('study.star_missed', test_id=test.id) }}" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% for key, value in sel.items() if value %}{% for v in (value if value is iterable and value is not string else [value]) %}<input type="hidden" name="{{ key }}" value="{{ v }}">{% endfor %}{% endfor %}
+    {% if answer_with == 'term' %}<input type="hidden" name="answer_with" value="term">{% endif %}
+    <button class="btn{{ ' btn-ghost' if session_url }}" type="submit">★ Star the ones I missed</button>
+  </form>
+  <a class="btn btn-ghost" href="{{ url_for('study.learn', card=missed_ids, session=session_id or None, answer_with='term' if answer_with == 'term' else None) }}">Learn the ones I missed</a>
+  {% endif %}
+  {% if selection %}<a class="btn btn-ghost" href="{{ url_for('study.test_mode', **sel) }}">Take another test</a>{% endif %}
+</div>
+{% if misses %}
+<div class="card">
+  <h2>What you missed</h2>
+  <ul class="list test-misses">
+    {% for m in misses %}
+    <li>
+      <div class="grow">
+        <div class="prose title">{{ m.prompt|safe }}</div>
+        <div class="miss-row"><span class="kicker">Answer</span><div class="prose">{{ m.expected|safe }}</div></div>
+        <div class="miss-row muted"><span class="kicker">You said</span><div>{% if m.given %}{{ m.given }}{% else %}<em>(no answer)</em>{% endif %}</div></div>
+      </div>
+      {% if m.starred %}<span class="badge accent" title="Starred">★</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

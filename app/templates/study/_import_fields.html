@@ -1,0 +1,31 @@
+{# The paste box, separator pickers and preview area shared by the import page and /free-learn.
+   The surrounding element needs data-import and data-preview-url. #}
+<label for="import-text">Your set <span class="hint">— paste Quizlet's "Copy text", Anki's plain-text notes, or a CSV</span></label>
+<textarea id="import-text" name="text" rows="10" spellcheck="false" placeholder="el gato&#9;the cat&#10;la manzana&#9;the apple">{{ form.text if form and form.text }}</textarea>
+<div class="btn-row small import-tools">
+  <span class="muted">Try an example:</span>
+  <button type="button" class="linklike" data-example="quizlet">Quizlet</button>
+  <button type="button" class="linklike" data-example="anki">Anki (with a cloze)</button>
+  <button type="button" class="linklike" data-example="csv">CSV</button>
+  {% if with_file %}<label class="linklike file-pick">Or open a .txt / .csv file<input type="file" accept=".txt,.csv,.tsv,text/plain,text/csv" data-file class="sr-only"></label>{% endif %}
+</div>
+<details class="import-seps"{% if form and ((form.term_sep or 'auto') != 'auto' or (form.card_sep or 'auto') != 'auto') %} open{% endif %}>
+  <summary>Separators <span class="hint">(we figure these out on our own; pick them if the preview looks wrong)</span></summary>
+  <div class="form-row">
+    <div>
+      <label for="term_sep">Between term and definition</label>
+      <select id="term_sep" name="term_sep">
+        {% for v, l in [("auto", "Figure it out"), ("tab", "Tab"), ("comma", "Comma"), ("custom", "Custom…")] %}<option value="{{ v }}" {{ 'selected' if form and form.term_sep == v }}>{{ l }}</option>{% endfor %}
+      </select>
+      <input type="text" name="term_sep_custom" aria-label="Custom separator between term and definition" placeholder="e.g. -  or  ::" value="{{ form.term_sep_custom if form and form.term_sep_custom }}" hidden>
+    </div>
+    <div>
+      <label for="card_sep">Between cards</label>
+      <select id="card_sep" name="card_sep">
+        {% for v, l in [("auto", "Figure it out"), ("newline", "New line"), ("semicolon", "Semicolon"), ("custom", "Custom…")] %}<option value="{{ v }}" {{ 'selected' if form and form.card_sep == v }}>{{ l }}</option>{% endfor %}
+      </select>
+      <input type="text" name="card_sep_custom" aria-label="Custom separator between cards" placeholder="e.g. ##" value="{{ form.card_sep_custom if form and form.card_sep_custom }}" hidden>
+    </div>
+  </div>
+</details>
+<div id="import-preview" class="import-preview" aria-live="polite"></div>
