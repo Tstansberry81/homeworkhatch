@@ -1,9 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Study · {{ deck.title }}{% endblock %}
+{% block title %}Flip · {{ deck.title }}{% endblock %}
 {% block head %}{% include "_katex.html" %}{% endblock %}
 {% block content %}
-<div class="page-head"><div><div class="small muted"><a href="{{ url_for('study.deck', deck_id=deck.id) }}">{{ deck.title }}</a></div><h1>Study</h1></div></div>
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('study.deck', deck_id=deck.id) }}">{{ deck.title }}</a></div><h1>Flip</h1></div>
+  {% if cards %}<div class="btn-row"><a class="btn btn-ghost btn-sm" href="{{ url_for('study.learn', deck=deck.id) }}">Learn instead</a></div>{% endif %}</div>
 {% if cards %}
+<p class="center"><label class="check sort-toggle"><input type="checkbox" id="sort-mode"> Sort as I go: <em>know it</em> or <em>still learning</em></label></p>
+<div id="flip-area">
 <div class="viewer">
   <button type="button" class="nav-arrow" id="prev" aria-label="Previous card">‹</button>
   <div class="flashcard" id="card" tabindex="0" aria-label="Flashcard. Press space to flip.">
@@ -12,8 +15,26 @@
   <button type="button" class="nav-arrow" id="next" aria-label="Next card">›</button>
 </div>
 <p class="center viewer-pos" id="pos" aria-live="polite"></p>
-<div class="btn-row" style="justify-content:center"><button type="button" class="btn" id="flip">Flip card</button></div>
-<p class="center small muted mt keys-hint">Keys: <kbd>Space</kbd> flip · <kbd>←</kbd> <kbd>→</kbd> previous / next</p>
+<div class="btn-row sort-buttons" style="justify-content:center">
+  <button type="button" class="btn btn-ghost sort-only sort-no" id="mark-no" hidden>✗ Still learning</button>
+  <button type="button" class="btn" id="flip">Flip card</button>
+  <button type="button" class="btn btn-ghost sort-only sort-yes" id="mark-yes" hidden>✓ Know it</button>
+</div>
+<p class="center small muted mt keys-hint" id="keys-plain">Keys: <kbd>Space</kbd> flip · <kbd>←</kbd> <kbd>→</kbd> previous / next</p>
+<p class="center small muted mt keys-hint" id="keys-sort" hidden>Keys: <kbd>Space</kbd> flip · <kbd>←</kbd> still learning · <kbd>→</kbd> know it · <kbd>Backspace</kbd> undo</p>
+<p class="center small muted" id="swipe-hint" hidden>Swipe right if you know it, left if you're still learning.</p>
+</div>
+<div class="card center sort-done" id="sort-done" hidden tabindex="-1">
+  <h2 id="sort-summary"></h2>
+  <div class="btn-row" style="justify-content:center">
+    <button type="button" class="btn" id="learn-unknown"><span>Study the <span id="unknown-count"></span> you don't know</span></button>
+    <button type="button" class="btn btn-ghost" id="resort-unknown">Sort just those again</button>
+    <button type="button" class="btn btn-ghost" id="restart">Start over</button>
+  </div>
+</div>
+<form method="post" action="{{ url_for('study.learn') }}" id="learn-form" hidden>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="deck" value="{{ deck.id }}">
+</form>
 {% else %}
 <div class="card empty"><div class="big">🃏</div><p>This deck has no cards yet.</p>
   <div class="btn-row" style="justify-content:center"><a class="btn" href="{{ url_for('study.deck', deck_id=deck.id) }}">Add cards</a></div></div>
@@ -24,39 +45,118 @@
 <script>
 (() => {
   // Card text is sanitized HTML (study.render_markdown), so code and math are formatted.
-  const cards = {{ cards|tojson }}, card = document.getElementById("card");
-  let i = 0, reachedEnd = false;
+  const all = {{ cards|tojson }}, card = document.getElementById("card");
+  const learnUrl = {{ url_for('study.learn', deck=deck.id)|tojson }};
+  let cards = all, i = 0, reachedEnd = false;
+  let sorting = false, marks = [];  // marks: [{i, known}] in the order they were made
+  try { sorting = localStorage.getItem("hh_flip_sort") === "1"; } catch { /* storage blocked */ }
+  const $ = (id) => document.getElementById(id);
+  $("sort-mode").checked = sorting;
+
+  const unknown = () => marks.filter((m) => !m.known).map((m) => cards[m.i]);
   const show = () => {
     card.classList.remove("flipped");
-    document.getElementById("front").innerHTML = cards[i].front;
-    document.getElementById("back").innerHTML = cards[i].back;
-    document.getElementById("pos").textContent = `${i + 1} / ${cards.length}`;
+    $("front").innerHTML = cards[i].front;
+    $("back").innerHTML = cards[i].back;
+    const known = marks.filter((m) => m.known).length;
+    $("pos").textContent = sorting
+      ? `${i + 1} / ${cards.length} · Still learning ${marks.length - known} · Know ${known}`
+      : `${i + 1} / ${cards.length}`;
     hh.renderMath(card);
-    if (i === cards.length - 1 && !reachedEnd) {  // got through the deck: today's study coins
+    if (i === cards.length - 1 && !reachedEnd && cards === all) {  // got through the deck: today's study coins
       reachedEnd = true;
       hh.post("{{ url_for('study.studied', deck_id=deck.id) }}").catch(() => {});
     }
   };
+  const setMode = () => {
+    document.querySelectorAll(".sort-only").forEach((b) => { b.hidden = !sorting; });
+    $("next").hidden = sorting;
+    $("prev").setAttribute("aria-label", sorting ? "Undo the last card" : "Previous card");
+    $("keys-plain").hidden = sorting;
+    $("keys-sort").hidden = !sorting;
+    $("swipe-hint").hidden = !sorting;
+    show();
+  };
   const flip = () => card.classList.toggle("flipped");
   const go = (step) => { i = (i + step + cards.length) % cards.length; show(); };
+  const mark = (known) => {
+    marks.push({ i, known });
+    if (i === cards.length - 1) return done();
+    i += 1;
+    show();
+  };
+  const undo = () => {
+    const last = marks.pop();
+    if (!last) return;
+    i = last.i;
+    $("flip-area").hidden = false;
+    $("sort-done").hidden = true;
+    show();
+  };
+  const done = () => {
+    const missing = unknown().length;
+    $("flip-area").hidden = true;
+    $("sort-done").hidden = false;
+    $("sort-summary").textContent = missing
+      ? `You know ${cards.length - missing} of ${cards.length}.`
+      : `You know all ${cards.length}! Nice.`;
+    $("unknown-count").textContent = missing;
+    $("learn-unknown").hidden = $("resort-unknown").hidden = !missing;
+    $("sort-done").focus();
+  };
+  const restart = (subset) => {
+    cards = subset || all;
+    marks = [];
+    i = 0;
+    $("flip-area").hidden = false;
+    $("sort-done").hidden = true;
+    show();
+    card.focus();
+  };
+  $("learn-unknown").addEventListener("click", () => {
+    const ids = unknown().map((c) => c.id);
+    if (ids.length <= 150) {
+      window.location = learnUrl + ids.map((id) => `&card=${id}`).join("");
+      return;
+    }
+    const form = $("learn-form");  // too many for a URL: same page by POST
+    ids.forEach((id) => form.append(Object.assign(document.createElement("input"), { type: "hidden", name: "card", value: id })));
+    form.submit();
+  });
+  $("resort-unknown").addEventListener("click", () => restart(unknown()));
+  $("restart").addEventListener("click", () => restart());
+  $("sort-mode").addEventListener("change", (e) => {
+    sorting = e.target.checked;
+    try { localStorage.setItem("hh_flip_sort", sorting ? "1" : "0"); } catch { /* fine */ }
+    restart();
+    setMode();
+  });
+
   card.addEventListener("click", flip);
-  document.getElementById("flip").addEventListener("click", flip);
-  document.getElementById("prev").addEventListener("click", () => go(-1));
-  document.getElementById("next").addEventListener("click", () => go(1));
+  $("flip").addEventListener("click", flip);
+  $("mark-yes").addEventListener("click", () => mark(true));
+  $("mark-no").addEventListener("click", () => mark(false));
+  $("prev").addEventListener("click", () => (sorting ? undo() : go(-1)));
+  $("next").addEventListener("click", () => go(1));
   document.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea")) return;
+    if (e.target.closest("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!$("sort-done").hidden) return;
     if (e.key === " ") { e.preventDefault(); flip(); }
-    if (e.key === "ArrowRight") go(1);
-    if (e.key === "ArrowLeft") go(-1);
+    if (e.key === "ArrowRight") sorting ? mark(true) : go(1);
+    if (e.key === "ArrowLeft") sorting ? mark(false) : go(-1);
+    if (sorting && (e.key === "Backspace" || e.key === "z")) { e.preventDefault(); undo(); }
   });
   let startX = null;  // swipe on phones
   card.addEventListener("touchstart", (e) => { startX = e.touches[0].clientX; }, { passive: true });
   card.addEventListener("touchend", (e) => {
     const dx = e.changedTouches[0].clientX - (startX ?? e.changedTouches[0].clientX);
-    if (Math.abs(dx) > 50) { e.preventDefault(); go(dx < 0 ? 1 : -1); }
+    if (Math.abs(dx) > 50) {
+      e.preventDefault();
+      if (sorting) mark(dx > 0); else go(dx < 0 ? 1 : -1);
+    }
   });
   window.addEventListener("load", () => hh.renderMath(card));
-  show();
+  setMode();
 })();
 </script>
 {% endif %}

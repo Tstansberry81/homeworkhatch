@@ -1,0 +1,21 @@
+{# How to get your OWN set out of Quizlet or Anki. #}
+<div class="grid grid-2 export-help">
+  <div class="card-flat">
+    <h3>From Quizlet</h3>
+    <ol class="steps">
+      <li>On the Quizlet website, open a set you made.</li>
+      <li>Click <strong>•••</strong> (more), then <strong>Export</strong>.</li>
+      <li>Click <strong>Copy text</strong> and paste it here.</li>
+    </ol>
+    <p class="small muted">Leave Quizlet's separators on Tab and New line. Definitions that run over several lines come through fine.</p>
+  </div>
+  <div class="card-flat">
+    <h3>From Anki</h3>
+    <ol class="steps">
+      <li>In Anki, <strong>File → Export</strong>.</li>
+      <li>Pick <strong>Notes in Plain Text (.txt)</strong> and the deck.</li>
+      <li>Open the file and copy everything{% if with_file %}, or choose the file below{% endif %}.</li>
+    </ol>
+    <p class="small muted">Tags are left out and formatting becomes plain text. Each cloze blank becomes its own card.</p>
+  </div>
+</div>

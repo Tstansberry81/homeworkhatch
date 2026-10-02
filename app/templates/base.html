@@ -56,6 +56,8 @@
   <main class="main">
     <div class="container">
       {% include "_flashes.html" %}
+      {% if ep != "study.import_deck" %}<div class="flash info" id="pending-import" role="status" hidden>You pasted a flashcard set before signing in.
+        <a href="{{ url_for('study.import_deck') }}"><strong>Import it now</strong></a> · <button type="button" class="linklike" data-dismiss-import>Dismiss</button></div>{% endif %}
       {% block content %}{% endblock %}
     </div>
   </main>

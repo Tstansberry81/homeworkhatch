@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Learn · {{ sset.title }}{% endblock %}
+{% block head %}{% include "_katex.html" %}{% endblock %}
+{% block content %}
+{% set sel = dict(sset.params, session=session_id or None) %}
+<div class="page-head">
+  <div>
+    <div class="small muted">
+      {% if session_url %}<a href="{{ session_url }}">← Back to your study session</a> · {% endif %}
+      {% if sset.deck %}<a href="{{ url_for('study.deck', deck_id=sset.deck.id) }}">{{ sset.deck.title }}</a>{% else %}<a href="{{ url_for('study.index') }}">Flashcards</a>{% endif %}
+    </div>
+    <h1>Learn</h1>
+    <p class="muted">{{ sset.title }}{% if sset.subset == 'starred' %} · starred cards{% elif sset.subset == 'picked' %} · {{ sset.cards|length }} picked card{{ 's' if sset.cards|length != 1 }}{% endif %}
+      {% if not sset.subset and data.cards %} · {{ data.today }} for today{% endif %}</p>
+  </div>
+  {% include "study/_exam_ring.html" %}
+</div>
+{% if not data.cards %}
+<div class="card empty"><div class="big">🃏</div>
+  <p>{% if sset.subset == 'starred' %}No starred cards here yet. Star cards on the deck page or while you study.{% else %}There are no cards to learn here yet.{% endif %}</p>
+  <div class="btn-row" style="justify-content:center">
+    {% if sset.deck %}<a class="btn" href="{{ url_for('study.deck', deck_id=sset.deck.id) }}">Back to the deck</a>{% else %}<a class="btn" href="{{ url_for('study.index') }}">Your sets</a>{% endif %}
+  </div>
+</div>
+{% else %}
+<div class="learn" id="learn">
+  <div class="learn-top">
+    <div class="learn-progress" id="learn-progress" role="img" aria-label="Progress">
+      <span class="seg seg-mastered" id="bar-mastered"></span><span class="seg seg-learning" id="bar-learning"></span><span class="seg seg-new" id="bar-new"></span>
+    </div>
+    <p class="learn-legend small">
+      <span><i class="dot dot-mastered" aria-hidden="true"></i>Mastered <strong id="count-mastered">0</strong></span>
+      <span><i class="dot dot-learning" aria-hidden="true"></i>Learning <strong id="count-learning">0</strong></span>
+      <span><i class="dot dot-new" aria-hidden="true"></i>Not studied <strong id="count-new">0</strong></span>
+    </p>
+    <details class="learn-options">
+      <summary>Options</summary>
+      <fieldset>
+        <legend class="small">Answer with</legend>
+        <label class="check"><input type="radio" name="answer_with" value="definition" {{ 'checked' if answer_with != 'term' }}> Definition</label>
+        <label class="check"><input type="radio" name="answer_with" value="term" {{ 'checked' if answer_with == 'term' }}> Term</label>
+      </fieldset>
+      <label class="check"><input type="checkbox" id="opt-starred"> Starred cards only</label>
+      <label class="check"><input type="checkbox" id="opt-strict"> Strict spelling <span class="hint">(off: case, spaces, punctuation and accents don't count)</span></label>
+    </details>
+  </div>
+  <div class="flash" id="learn-note" role="status" hidden></div>
+  <div id="learn-stage" aria-live="polite"></div>
+  <p class="center small muted mt keys-hint">Keys: <kbd>1</kbd>–<kbd>4</kbd> pick an answer · <kbd>Enter</kbd> submit / continue</p>
+</div>
+<template id="learn-after">
+  {% if session_url %}<a class="btn" href="{{ session_url }}">Back to your study session</a>{% endif %}
+  {% if data.total >= 2 %}<a class="btn btn-ghost" href="{{ url_for('study.test_mode', **sel) }}">Test yourself</a>{% endif %}
+  {% if sset.deck %}<a class="btn btn-ghost" href="{{ url_for('study.deck', deck_id=sset.deck.id) }}">Back to the deck</a>{% else %}<a class="btn btn-ghost" href="{{ url_for('study.index') }}">Your sets</a>{% endif %}
+</template>
+<script type="application/json" id="learn-data">{{ data|tojson }}</script>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% if data.cards %}<script src="{{ url_for('static', filename='js/learn.js') }}"></script>{% endif %}{% endblock %}

@@ -3,20 +3,22 @@ from __future__ import annotations
 import calendar as cal
 import functools
 import io
+import json
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_file, session, url_for
+from flask import (Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, send_file,
+                   session, url_for)
 from flask_login import current_user, login_required, logout_user
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from .. import queries
 from ..config import BASE_DIR
-from ..extensions import db
+from ..extensions import csrf, db
 from ..models import Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, calendar_token_hash, utcnow
-from ..services import ics, integrations, planner
+from ..services import cards_io, ics, integrations, planner
 from ..utils import local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
 
@@ -60,6 +62,35 @@ def terms():
 @bp.route("/privacy")
 def privacy():
     return render_template("legal/privacy.html")
+
+
+FREE_PREVIEW_MAX_BYTES = 200 * 1024
+
+
+@bp.route("/free-learn")
+def free_learn():
+    """Public page: Learn mode free, with your own Quizlet or Anki sets (paste, preview, sign up)."""
+    if current_user.is_authenticated:
+        return redirect(url_for("study.import_deck"))
+    return render_template("free_learn.html")
+
+
+@bp.route("/free-learn/preview", methods=["POST"])
+@csrf.exempt  # read-only: parses the posted text and answers; no session, account or storage involved
+def free_learn_preview():
+    """Parse pasted cards for the public page. Nothing is stored; at most 200 KB in, 50 cards out."""
+    if (request.content_length or 0) > FREE_PREVIEW_MAX_BYTES:
+        return jsonify({"error": "That's a big set! Sign up to import all of it."}), 413
+    raw = request.stream.read(FREE_PREVIEW_MAX_BYTES + 1)
+    if len(raw) > FREE_PREVIEW_MAX_BYTES:
+        return jsonify({"error": "That's a big set! Sign up to import all of it."}), 413
+    try:
+        data = json.loads(raw.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, ValueError):
+        return jsonify({"error": "Send JSON with a text field."}), 400
+    if not isinstance(data, dict):
+        return jsonify({"error": "Send JSON with a text field."}), 400
+    return jsonify(cards_io.preview(data, show=50))
 
 
 @bp.route("/support")
