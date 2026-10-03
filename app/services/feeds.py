@@ -2,16 +2,20 @@
 Schoology, or anything else with an iCal feed).
 
 The student pastes the personal calendar link their LMS gives them. The server fetches it about
-hourly (refresh_due, from the pages where the student looks at their work), reads it, and turns it
-into a Canvas-shaped snapshot that goes through the same ingest as the extension's syncs, under an
-account of its own (CanvasAccount.lms == "ics", canvas_user_id "feed-<id>"). Deletions, change
-detection, the exam planner, Google Calendar and the ICS export then work as they do for Canvas.
+hourly, reads it, and turns it into a Canvas-shaped snapshot that goes through the same ingest as the
+extension's syncs, under an account of its own (CanvasAccount.lms == "ics", canvas_user_id
+"feed-<id>"). Deletions, change detection, the exam planner, Google Calendar and the ICS export then
+work as they do for Canvas. Two things start a refresh: the pages where the student looks at their
+work (refresh_due), and a sweep of the stalest links of all students (tick, from /health, which the
+keep-alive job pings every 5 minutes), so dates reach Google Calendar without anyone opening a page.
 
 The link carries a secret token that opens the student's calendar: it's stored encrypted, never
-shown back in full, and never logged (only its host is). Fetching is server-side, so it's guarded
-against reaching private networks (SSRF): every address the host resolves to must be public, the
-connection goes to the address we checked (no second lookup), redirects are followed by hand and
-re-checked, and the body is capped. No AI is involved; the cost is one small GET an hour.
+shown back in full, and never logged (only its host is; urllib3's own log lines are kept out, see
+_NoLinksInLogs). Fetching is server-side, so it's guarded against reaching private networks (SSRF):
+every address the host resolves to must be public, the connection goes to the address we checked (no
+second lookup), redirects are followed by hand and re-checked, and the body is capped. A fetch has
+one wall-clock limit over every phase (_Deadline) and at most MAX_CONCURRENT_FETCHES run at once, so
+a slow site can't tie up the web server's threads. No AI is involved; the cost is one small GET an hour.
 
 What each LMS's feed looks like was researched from real feeds published on GitHub, vendor help
 pages and the LMS's own source (Moodle). The sources are cited next to the rules they support.
@@ -19,21 +23,27 @@ pages and the LMS's own source (Moodle). The sources are cited next to the rules
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import html
 import ipaddress
+import logging
+import os
 import re
 import socket
 import threading
 import time
 import warnings
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from datetime import time as dtime
 from urllib.parse import parse_qs, quote, urljoin, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
-from flask import current_app, has_app_context
+import click
+from flask import current_app, has_app_context, has_request_context, request
+from flask.cli import AppGroup
 from sqlalchemy import or_, select, update
 
 from ..extensions import db
@@ -44,24 +54,55 @@ MAX_URL_LENGTH = 2000
 MAX_BYTES = 5 * 1024 * 1024
 MAX_REDIRECTS = 3
 CONNECT_TIMEOUT, READ_TIMEOUT = 5, 15
-TOTAL_SECONDS = 40  # the read timeout is per read; this stops a server that trickles bytes forever
+# One limit for the whole fetch: DNS, connect, TLS, headers, every redirect hop and the body. The
+# read timeout is per read, so on its own a server sending a byte every 14 s would never be cut off.
+TOTAL_SECONDS = 40
+# Fetches running at once in this process. One more doesn't wait for a slot: it's told to try again
+# in a minute, so however many links point at slow servers, they can't use up the request threads.
+MAX_CONCURRENT_FETCHES = 2
 MAX_EVENTS = 3000  # VEVENTs kept from one calendar
-MAX_OCCURRENCES = 500  # repeats of recurring events, all series together
+MAX_OCCURRENCES = 500  # repeats of recurring events, all series together (each series gets a fair share)
+MIN_OCCURRENCES_PER_SERIES = 10
 LOOKBACK, LOOKAHEAD = timedelta(days=14), timedelta(days=120)  # where repeats are expanded
 EXPAND_SECONDS = 3.0  # time budget for expanding repeats (a hostile RRULE can be slow to evaluate)
 STALE_AFTER = timedelta(minutes=60)
 MANUAL_REFRESH_GAP = timedelta(seconds=30)  # "Refresh now" can't be used to hammer a site
 FULL_REFRESH_AFTER = timedelta(hours=24)  # without If-None-Match: repeats roll forward, statuses move
+TICK_EVERY = 300  # seconds: /health starts at most one sweep of stale links per process this often
+TICK_BATCH = 5  # links refreshed per sweep (the stalest first)
+REMOVE_WAIT = 30  # seconds remove() waits for a refresh that's importing the same student's link
 USER_AGENT = "HomeworkHatch-CalendarLink/1.0 (+https://homeworkhatch.onrender.com)"
+# Our own addresses, besides PUBLIC_URL, RENDER_URL and the one in use: a link to any of them is our
+# own calendar export, which would import every due date back as a new one (and again every hour).
+OWN_HOSTS = ("homeworkhatch.com", "www.homeworkhatch.com", "homeworkhatch.onrender.com")
 
 LMS_NAMES = {"brightspace": "Brightspace", "blackboard": "Blackboard", "moodle": "Moodle", "schoology": "Schoology"}
 
-_running: set[int] = set()
+BUSY = "Lots of calendar links are being read right now."
+OWN_LINK = ("That's a Homework Hatch calendar, not your school's: adding it would copy your due dates into "
+            "themselves. Paste the calendar link from your school's site instead.")
+
+_running: set[int] = set()  # students whose links a background run is refreshing
 _lock = threading.Lock()
+_user_locks: dict[int, threading.RLock] = {}  # a refresh's import and remove() of one student's links
+_fetch_slots = threading.BoundedSemaphore(MAX_CONCURRENT_FETCHES)
+_local = threading.local()  # .deadline: the fetch running on this thread, if any
 
 
 class FeedError(Exception):
-    """Something the student should read: short, human, and never containing the link."""
+    """Something the student should read: short, human, and never containing the link. A `transient`
+    problem (the site is down or slow) goes away by itself; the others need the student to act."""
+
+    def __init__(self, message: str, transient: bool = False):
+        super().__init__(message)
+        self.transient = transient
+
+
+class FeedBusy(FeedError):
+    """Every fetch slot is taken, so nothing was tried."""
+
+    def __init__(self):
+        super().__init__(BUSY, transient=True)
 
 
 def lms_name(lms: str | None) -> str | None:
@@ -123,6 +164,7 @@ def normalize(url: str) -> str:
     if "://" not in url:
         raise FeedError("Use the full calendar link, starting with https:// or webcal://.")
     scheme, host, port, _target = _parts(url, pasted=True)
+    _refuse_own(host)
     parts = urlsplit(url)
     netloc = f"[{host}]" if ":" in host else host  # an IPv6 address keeps its brackets
     netloc = netloc if port == (443 if scheme == "https" else 80) else f"{netloc}:{port}"
@@ -137,6 +179,26 @@ def normalize(url: str) -> str:
 
 
 _ASCII = "".join(chr(c) for c in range(33, 127))
+
+
+def our_hosts() -> set[str]:
+    """Every address Homework Hatch answers on that we know of: the fixed ones, PUBLIC_URL, Render's
+    address, the configured server name and the address of the request being served."""
+    candidates = [os.environ.get("RENDER_EXTERNAL_HOSTNAME")]
+    if has_app_context():
+        cfg = current_app.config
+        candidates += [urlsplit(cfg.get("PUBLIC_URL") or "").hostname, urlsplit(cfg.get("RENDER_URL") or "").hostname,
+                       urlsplit("//" + (cfg.get("SERVER_NAME") or "")).hostname]
+    if has_request_context():
+        candidates.append(urlsplit("//" + request.host).hostname)
+    hosts = set(OWN_HOSTS)
+    hosts.update(h.rstrip(".").lower() for h in candidates if h)
+    return hosts
+
+
+def _refuse_own(host: str) -> None:
+    if host.rstrip(".").lower() in our_hosts():
+        raise FeedError(OWN_LINK)
 
 
 def url_hash(normalized_url: str) -> str:
@@ -214,12 +276,126 @@ class Fetched:
     etag: str | None = None
 
 
+class _Deadline:
+    """One fetch's wall-clock limit, over every phase: DNS, connect, TLS, headers, each redirect hop
+    and the body. Socket timeouts only bound a single read (a server that sends a byte just before each
+    one would never time out), so a timer shuts each connection's socket down when the time is up and
+    the read that's waiting on it fails at once."""
+
+    def __init__(self, seconds: float):
+        self.deadline = time.monotonic() + seconds
+        self.fired = False
+        self._done = False
+        self._guard = threading.Lock()
+        self._timers: list[threading.Timer] = []
+        self._killers: list[socket.socket] = []
+        self._conns: list = []
+
+    def remaining(self) -> float:
+        return max(0.0, self.deadline - time.monotonic())
+
+    def expired(self) -> bool:
+        return self.fired or time.monotonic() >= self.deadline
+
+    def watch(self, conn, sock: socket.socket) -> None:
+        """Called with each new connection's socket, before TLS. The timer works on a duplicate: TLS
+        takes the original socket object over (detaches it), but shutting the duplicate down ends the
+        same connection, so the handshake is covered too."""
+        try:
+            killer = sock.dup()
+        except OSError:  # pragma: no cover - out of file descriptors; the original still works for http
+            killer = sock
+
+        def fire():
+            with self._guard:
+                if self._done:
+                    return
+                self.fired = True
+                try:
+                    killer.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+        timer = threading.Timer(self.remaining(), fire)
+        timer.daemon = True
+        with self._guard:
+            if self._done:  # pragma: no cover - the fetch already ended
+                return
+            self._timers.append(timer)
+            self._conns.append(conn)
+            if killer is not sock:
+                self._killers.append(killer)
+        timer.start()
+
+    def stop(self) -> None:
+        """The fetch is over: no timer fires after this, and its connections are closed."""
+        with self._guard:
+            self._done = True
+            timers, killers, conns = self._timers, self._killers, self._conns
+            self._timers, self._killers, self._conns = [], [], []
+        for timer in timers:
+            timer.cancel()
+        for killer in killers:
+            try:
+                killer.close()
+            except OSError:  # pragma: no cover
+                pass
+        for conn in conns:
+            try:
+                conn.close()
+            except Exception:  # pragma: no cover - closing is best effort
+                pass
+
+
+@functools.lru_cache(maxsize=None)
+def _connection_classes():
+    """urllib3's connection classes, with every new socket put under the current fetch's deadline."""
+    from urllib3.connection import HTTPConnection, HTTPSConnection
+
+    class Watched:
+        def _new_conn(self):
+            sock = super()._new_conn()
+            deadline = getattr(_local, "deadline", None)
+            if deadline is not None:
+                deadline.watch(self, sock)
+            return sock
+
+    class WatchedHTTP(Watched, HTTPConnection):
+        pass
+
+    class WatchedHTTPS(Watched, HTTPSConnection):
+        pass
+
+    return WatchedHTTP, WatchedHTTPS
+
+
+def _too_long() -> FeedError:
+    return FeedError("The calendar took too long to download.", transient=True)
+
+
 def _resolve(host: str, port: int) -> list[str]:
-    try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except (socket.gaierror, UnicodeError, OSError):
-        raise FeedError("We couldn't find that website. Check the link.") from None
-    return list(dict.fromkeys(info[4][0] for info in infos))
+    """The host's addresses. The lookup runs on a helper thread so the fetch's deadline covers it too
+    (a slow name server could otherwise hold the request for the resolver's own timeouts)."""
+    found: dict = {}
+
+    def lookup():
+        try:
+            found["infos"] = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except Exception as exc:
+            found["error"] = exc
+
+    deadline = getattr(_local, "deadline", None)
+    if deadline is None:
+        lookup()
+    else:
+        worker = threading.Thread(target=lookup, name="calendar-link-dns", daemon=True)
+        worker.start()
+        worker.join(deadline.remaining())
+        if worker.is_alive():
+            raise _too_long()
+    if "infos" not in found:
+        raise FeedError("We couldn't find that website. Check the link.")
+    return list(dict.fromkeys(info[4][0] for info in found["infos"]))
 
 
 def _public(address: str) -> bool:
@@ -256,10 +432,14 @@ def _safe_address(host: str, port: int) -> str:
 def _open(scheme: str, address: str, port: int, host: str, target: str, headers: dict):
     """One GET to an address we already checked: the connection goes to `address` (no second DNS
     lookup that could return something else), while TLS still verifies the certificate for `host`.
-    Returns a urllib3 response that hasn't been read yet."""
+    The connection is watched by the current fetch's deadline. Returns a urllib3 response that hasn't
+    been read yet."""
     import urllib3
 
-    timeout = urllib3.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT)
+    deadline = getattr(_local, "deadline", None)
+    connect = min(CONNECT_TIMEOUT, deadline.remaining()) if deadline is not None else CONNECT_TIMEOUT
+    timeout = urllib3.Timeout(connect=max(connect, 0.01), read=READ_TIMEOUT)
+    plain, tls = _connection_classes()
     if scheme == "https":
         try:
             import certifi
@@ -270,22 +450,24 @@ def _open(scheme: str, address: str, port: int, host: str, target: str, headers:
         pool = urllib3.HTTPSConnectionPool(address, port=port, timeout=timeout, retries=False, maxsize=1,
                                            server_hostname=host, assert_hostname=host,
                                            cert_reqs="CERT_REQUIRED", ca_certs=ca)
+        pool.ConnectionCls = tls
     else:
         pool = urllib3.HTTPConnectionPool(address, port=port, timeout=timeout, retries=False, maxsize=1)
+        pool.ConnectionCls = plain
     host_header = f"[{host}]" if ":" in host else host
     return pool.urlopen("GET", target, headers={**headers, "Host": host_header}, redirect=False, retries=False,
                         preload_content=False, decode_content=True)
 
 
-def _status_message(status: int, lms: str | None) -> str:
+def _status_error(status: int, lms: str | None) -> FeedError:
     where = _where(lms)
     if status in (401, 403):
-        return f"{where} refused the link ({status}). Copy a fresh calendar link from {where}."
+        return FeedError(f"{where} refused the link ({status}). Copy a fresh calendar link from {where}.")
     if status in (404, 410):
-        return f"The link stopped working ({status}). Copy a fresh link from {where}."
+        return FeedError(f"The link stopped working ({status}). Copy a fresh link from {where}.")
     if status == 429 or status >= 500:
-        return f"{where} didn't answer properly ({status}). We'll try again later."
-    return f"The link didn't work ({status}). Copy a fresh calendar link from {where}."
+        return FeedError(f"{where} didn't answer properly ({status}).", transient=True)
+    return FeedError(f"The link didn't work ({status}). Copy a fresh calendar link from {where}.")
 
 
 def _read(resp, deadline: float) -> bytes:
@@ -298,7 +480,7 @@ def _read(resp, deadline: float) -> bytes:
         if size > MAX_BYTES:  # counted after decompression, so a zip bomb stops here too
             raise FeedError("That calendar is bigger than 5 MB, too big to read.")
         if time.monotonic() > deadline:
-            raise FeedError("The calendar took too long to download. We'll try again later.")
+            raise _too_long()
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -308,29 +490,50 @@ def _looks_like_calendar(body: bytes) -> bool:
 
 
 def fetch_url(url: str, etag: str | None = None, lms: str | None = None, log_ref: str = "") -> Fetched:
-    """GET a calendar link with the SSRF guards. Raises FeedError (the message is for the student)."""
+    """GET a calendar link with the SSRF guards, in TOTAL_SECONDS at most from start to finish. Raises
+    FeedError (the message is for the student), or FeedBusy at once when MAX_CONCURRENT_FETCHES are
+    already running: a request never waits for a slot."""
+    if not _fetch_slots.acquire(blocking=False):
+        raise FeedBusy()
+    deadline = _Deadline(TOTAL_SECONDS)
+    _local.deadline = deadline
+    try:
+        return _fetch(url, etag, lms, log_ref, deadline)
+    finally:
+        _local.deadline = None
+        deadline.stop()
+        _fetch_slots.release()
+
+
+def _fetch(url: str, etag: str | None, lms: str | None, log_ref: str, deadline: _Deadline) -> Fetched:
     import urllib3
 
     headers = {"User-Agent": USER_AGENT, "Accept": "text/calendar, text/plain;q=0.8, */*;q=0.5",
                "Accept-Encoding": "gzip, deflate"}
     if etag:
         headers["If-None-Match"] = etag
-    deadline = time.monotonic() + TOTAL_SECONDS
     current = url
     for _hop in range(MAX_REDIRECTS + 1):
+        if deadline.expired():
+            raise _too_long()
         scheme, host, port, target = _parts(current)
+        _refuse_own(host)  # after a redirect too: a shortened link can lead to our own export
         address = _safe_address(host, port)
         try:
             resp = _open(scheme, address, port, host, target, headers)
-        except urllib3.exceptions.SSLError:
-            raise FeedError(f"We couldn't open a secure connection to {host}. We'll try again later.") from None
-        except (urllib3.exceptions.HTTPError, OSError, ValueError):
-            raise FeedError(f"We couldn't reach {host}. We'll try again later.") from None
+        except FeedError:
+            raise
+        except Exception as exc:  # never passed on as is: urllib3's errors can quote the link
+            if deadline.expired():
+                raise _too_long() from None
+            if isinstance(exc, urllib3.exceptions.SSLError):
+                raise FeedError(f"We couldn't open a secure connection to {host}.", transient=True) from None
+            raise FeedError(f"We couldn't reach {host}.", transient=True) from None
         try:
             if resp.status in (301, 302, 303, 307, 308):
                 location = resp.headers.get("Location")
                 if not location:
-                    raise FeedError(_status_message(resp.status, lms))
+                    raise _status_error(resp.status, lms)
                 current = urljoin(current, location)  # checked like the first hop on the next turn
                 continue
             if resp.status == 304 and etag:
@@ -338,11 +541,17 @@ def fetch_url(url: str, etag: str | None = None, lms: str | None = None, log_ref
                 return Fetched(304, etag=etag)
             if resp.status != 200:
                 _log(f"status {resp.status}", log_ref, host)
-                raise FeedError(_status_message(resp.status, lms))
+                raise _status_error(resp.status, lms)
             try:
-                body = _read(resp, deadline)
-            except (urllib3.exceptions.HTTPError, OSError):
-                raise FeedError(f"The download from {host} broke off. We'll try again later.") from None
+                body = _read(resp, deadline.deadline)
+            except FeedError:
+                raise
+            except Exception:
+                if deadline.expired():
+                    raise _too_long() from None
+                raise FeedError(f"The download from {host} broke off.", transient=True) from None
+            if deadline.fired:  # cut off mid-download: a body without a length can look complete
+                raise _too_long()
             if not _looks_like_calendar(body):
                 _log("not a calendar", log_ref, host)
                 # Moodle answers 200 with plain text when the token stopped matching (it changes with the
@@ -370,6 +579,48 @@ def _log(what: str, ref: str, host: str) -> None:
     """Host only: the full link opens the student's calendar."""
     if has_app_context():
         current_app.logger.info("calendar link %s on %s: %s", ref or "-", host, what)
+
+
+class _NoLinksInLogs(logging.Filter):
+    """urllib3 writes the request's URL into some of its log lines ("Failed to parse headers (url=...)"
+    when a server sends a malformed header, the DEBUG request line, retries). While a calendar link is
+    being fetched on this thread none of urllib3's lines get through; elsewhere, URLs in its lines lose
+    their path and query (presigned storage links keep secrets there too)."""
+
+    URL = re.compile(r"\b([a-z][a-z0-9+.-]*://[^/\s\"'<>?#]+)[^\s\"'<>]*", re.I)
+    REQUEST_LINE = re.compile(r"\"([A-Z]+) /[^\s\"]*")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if getattr(_local, "deadline", None) is not None:
+            return False
+        try:
+            message = record.getMessage()
+        except Exception:  # a malformed record: logging reports it as it would anyway
+            return True
+        clean = self.REQUEST_LINE.sub('"\\1 /…', self.URL.sub("\\1/…", message))
+        if clean != message:
+            record.msg, record.args = clean, None
+        return True
+
+
+URLLIB3_LOGGERS = ("urllib3", "urllib3.connection", "urllib3.connectionpool", "urllib3.response",
+                   "urllib3.poolmanager", "urllib3.util.retry", "urllib3.contrib.pyopenssl",
+                   "urllib3.http2.connection", "urllib3.contrib.emscripten.response")
+
+
+def _guard_logs() -> None:
+    """A logger's filters only see the records logged on that logger (not those its children pass up),
+    so every urllib3 logger gets the filter."""
+    import urllib3  # noqa: F401 - its modules create their loggers when imported
+
+    names = set(URLLIB3_LOGGERS) | {n for n in logging.Logger.manager.loggerDict if n.startswith("urllib3.")}
+    for name in names:
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, _NoLinksInLogs) for f in logger.filters):
+            logger.addFilter(_NoLinksInLogs())
+
+
+_guard_logs()
 
 
 def fetch(feed: CalendarFeed, etag: str | None = None) -> Fetched:
@@ -470,10 +721,12 @@ def _stable_uid(uid: str) -> str:
     return m.group(0) if m else uid
 
 
-def _occurrence_starts(comp, start, floating: ZoneInfo, lo: datetime, hi: datetime, budget: list[int],
-                       deadline: float) -> list | None:
-    """Starts of a repeating entry's occurrences between lo and hi (aware UTC), at most budget[0] of
-    them all together. None when the rule can't be read (the entry then counts once)."""
+def _occurrence_starts(comp, start, floating: ZoneInfo, lo: datetime, hi: datetime, now: datetime, cap: int,
+                       deadline: float) -> tuple[list, bool] | None:
+    """Starts of a repeating entry's occurrences between lo and hi (aware UTC), at most `cap` of them:
+    the upcoming ones first (from now), then the most recent past ones. Also says whether the series
+    was cut short (by the cap or the time budget). None when the rule can't be read (the entry then
+    counts once)."""
     from dateutil.rrule import rruleset, rrulestr
 
     rules = comp.get("RRULE")
@@ -497,6 +750,7 @@ def _occurrence_starts(comp, start, floating: ZoneInfo, lo: datetime, hi: dateti
     zone = tz or floating
     lo_w = lo.astimezone(zone).replace(tzinfo=None) - (timedelta(days=1) if is_date else timedelta(0))
     hi_w = hi.astimezone(zone).replace(tzinfo=None)
+    now_w = now.astimezone(zone).replace(tzinfo=None)
     rset = rruleset()
     try:
         for rule in rules:
@@ -529,21 +783,50 @@ def _occurrence_starts(comp, start, floating: ZoneInfo, lo: datetime, hi: dateti
                         add(w)
     except Exception:
         return None
-    out = []
+    upcoming: list[datetime] = []
+    past: deque = deque(maxlen=cap)  # the most recent ones, as the walk goes on
+    cut = False
     for occ in rset:
-        if occ > hi_w or budget[0] <= 0 or time.monotonic() > deadline:
+        if occ > hi_w:
+            break
+        if time.monotonic() > deadline or len(upcoming) >= cap:
+            cut = True  # one more in the window that won't be kept
             break
         if occ < lo_w:
             continue
-        out.append(occ.date() if is_date else occ.replace(tzinfo=tz))
-        budget[0] -= 1
-    return out
+        if occ >= now_w:
+            upcoming.append(occ)
+        else:
+            cut = cut or len(past) == cap
+            past.append(occ)
+    room = cap - len(upcoming)
+    if len(past) > room:
+        cut = True
+    out = list(past)[len(past) - room:] + upcoming if room > 0 else upcoming
+    return [o.date() if is_date else o.replace(tzinfo=tz) for o in out], cut
+
+
+def _looks_due(comp) -> bool:
+    """Whether a repeating entry looks like a due date, by the markers classify() reads (a weekly
+    problem set): those series are kept before plain repeats when the budget runs short."""
+    title = html.unescape(_text(comp.get("SUMMARY")))
+    return (any(p.search(title) for p in (BRIGHTSPACE_DUE, BRIGHTSPACE_ENDS, MOODLE_DUE, MOODLE_ASSESS_DUE, MOODLE_SOFT,
+                                          GENERIC_DUE))
+            or bool(BLACKBOARD_DUE_UID.search(_text(comp.get("UID")))))
+
+
+def _instant(value, floating: ZoneInfo) -> datetime:
+    """An occurrence's start as naive UTC (a date: its midnight in the calendar's zone)."""
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return _local_midnight(value, floating)
 
 
 def parse(body: bytes, tz: ZoneInfo, now: datetime | None = None) -> Parsed:
     """Read a calendar into Items. Cancelled entries are skipped; repeats are expanded from LOOKBACK
-    to LOOKAHEAD around now (at most MAX_OCCURRENCES); at most MAX_EVENTS entries are kept, the
-    upcoming and recent ones first. Raises FeedError when it isn't a calendar we can read."""
+    to LOOKAHEAD around now (at most MAX_OCCURRENCES, shared fairly between the series); at most
+    MAX_EVENTS entries are kept, the upcoming and recent ones first. Raises FeedError when it isn't a
+    calendar we can read, or when it's Homework Hatch's own export."""
     from icalendar import Calendar
 
     now = now or utcnow()
@@ -556,6 +839,8 @@ def parse(body: bytes, tz: ZoneInfo, now: datetime | None = None) -> Parsed:
     first = calendars[0]
     name = _text(first.get("X-WR-CALNAME"))
     prodid = _text(first.get("PRODID"))
+    if prodid.lower().startswith("-//homework hatch//"):  # our own export (app/services/ics.py), wherever it's served
+        raise FeedError(OWN_LINK)
     floating = _zone(_text(first.get("X-WR-TIMEZONE"))) or tz
     shape: dict = {"prodid": prodid[:100], "calendar_name": bool(name), "vevents": 0, "props": {}, "x_props": {},
                    "times": {"utc": 0, "zoned": 0, "floating": 0, "all_day": 0, "unreadable": 0},
@@ -596,28 +881,47 @@ def parse(body: bytes, tz: ZoneInfo, now: datetime | None = None) -> Parsed:
             singles.append((uid, "", comp, start))
 
     lo, hi = (now - LOOKBACK).replace(tzinfo=timezone.utc), (now + LOOKAHEAD).replace(tzinfo=timezone.utc)
-    budget, deadline = [MAX_OCCURRENCES], time.monotonic() + EXPAND_SECONDS
-    occurrences = []
-    for uid, (comp, start) in masters.items():
+    now_aware = now.replace(tzinfo=timezone.utc)
+    deadline = time.monotonic() + EXPAND_SECONDS
+    # The budget is shared fairly: each series gets its slice (nearest to now first); series that look
+    # like due dates are expanded first and share the whole budget among themselves; and if the slices
+    # still add up to too many, the occurrences closest to now are kept (due dates and upcoming ones
+    # before the rest). A few daily routines can't crowd out a weekly problem set.
+    due_series = {uid for uid, (comp, _s) in masters.items() if _looks_due(comp)}
+    cap = max(MIN_OCCURRENCES_PER_SERIES, MAX_OCCURRENCES // max(1, len(masters)))
+    due_cap = max(MIN_OCCURRENCES_PER_SERIES, MAX_OCCURRENCES // max(1, len(due_series)))
+    candidates, capped = [], False
+    for uid, (comp, start) in sorted(masters.items(), key=lambda kv: kv[0] not in due_series):
         shape["recurring"] += 1
-        starts = _occurrence_starts(comp, start, floating, lo, hi, budget, deadline)
-        if starts is None:
+        got = _occurrence_starts(comp, start, floating, lo, hi, now_aware, due_cap if uid in due_series else cap,
+                                 deadline)
+        if got is None:
             singles.append((uid, "", comp, start))
             continue
+        starts, cut = got
+        capped = capped or cut
         for occ in starts:
-            key = _rid_key(occ, floating)
-            override = overrides.pop((uid, key), None)
-            if override is not None:
-                shape["overrides"] += 1
-                o_comp, o_start, o_cancelled = override
-                if o_cancelled:
-                    shape["cancelled"] += 1
-                    continue
-                occurrences.append((uid, key, o_comp, o_start, None))
-            else:
-                occurrences.append((uid, key, comp, occ, occ))
+            when = _instant(occ, floating)
+            candidates.append(((uid not in due_series, when < now, abs((when - now).total_seconds())), uid, occ))
+    if len(candidates) > MAX_OCCURRENCES:
+        candidates.sort(key=lambda c: c[0])
+        candidates, capped = candidates[:MAX_OCCURRENCES], True
+    occurrences = []
+    for _key, uid, occ in candidates:
+        comp = masters[uid][0]
+        key = _rid_key(occ, floating)
+        override = overrides.pop((uid, key), None)
+        if override is not None:
+            shape["overrides"] += 1
+            o_comp, o_start, o_cancelled = override
+            if o_cancelled:
+                shape["cancelled"] += 1
+                continue
+            occurrences.append((uid, key, o_comp, o_start, None))
+        else:
+            occurrences.append((uid, key, comp, occ, occ))
     shape["occurrences"] = len(occurrences)
-    shape["occurrences_capped"] = budget[0] <= 0 or time.monotonic() > deadline
+    shape["occurrences_capped"] = capped
     for (uid, key), (comp, start, cancelled) in overrides.items():  # an override whose series we didn't expand
         if cancelled:
             shape["cancelled"] += 1
@@ -910,19 +1214,42 @@ def _id(*parts: str) -> str:
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:40]
 
 
+# Our ICS export names its entries "assignment-<id>@<our host>" / "event-<id>@<our host>"
+# (app/services/ics.py); a calendar app that re-publishes a subscription can keep those UIDs.
+OWN_UID = re.compile(r"^(?:assignment|event)-\d+@(\S+)$", re.I)
+
+
+def _made_by_us(item: Item, ours: set[str]) -> bool:
+    """An entry Homework Hatch put there: from our ICS export, or one of the due dates we push to
+    Google Calendar (app/services/gcal.py: 'Open in Homework Hatch' and a link to the assignment in the
+    description), when the student pastes that Google Calendar's link. Imported, each would come back
+    as a new due date, pushed out and imported again on every refresh."""
+    m = OWN_UID.match(item.uid)
+    if m and (urlsplit("//" + m.group(1)).hostname or "").rstrip(".") in ours:
+        return True
+    text = f"{item.description}\n{item.url}".lower()
+    return "open in homework hatch" in text or any(f"{h}/courses/assignments/" in text for h in ours)
+
+
 def build_snapshot(feed: CalendarFeed, parsed: Parsed, tz: ZoneInfo, now: datetime | None = None) -> tuple[dict, dict]:
     """The calendar as a Canvas-shaped snapshot for ingest.ingest_snapshot (the contract in
     tests/conftest.py BASE_SNAPSHOT), plus counts. Lists the feed can't supply are null ("keep");
     assignments and events are the feed's to decide, so they're always lists."""
     now = now or utcnow()
     lms = feed.lms
-    entries = [classify(i, lms, feed.host) for i in parsed.items]
+    ours = our_hosts()
+    entries = [classify(i, lms, feed.host) for i in parsed.items if not _made_by_us(i, ours)]
     group_courses(entries, lms, parsed.name)
     # "Availability Ends" / "should be completed" is the deadline only when the item has no due date.
+    # When it has one, the soft date stays on the calendar but out of its class (like an opening
+    # below): Brightspace's End Date often comes days after the Due Date, and the exam planner would
+    # otherwise find the quiz twice, the second time as a test on the day the late window closes.
     hard = {(e.course, k) for e in entries if e.kind == "due" for k in e.keys}
     for e in entries:
         if e.kind == "soft_due":
-            e.kind = "event" if any((e.course, k) in hard for k in e.keys) else "due"
+            demoted = any((e.course, k) in hard for k in e.keys)
+            e.kind = "event" if demoted else "due"
+            e.unfiled = demoted
     # An item's "opens"/"Available" marker stays on the calendar but out of its class, so the exam
     # planner sees the quiz once (at its deadline), not also as a second test on the day it opens.
     deadlines = {(e.course, k) for e in entries if e.kind == "due" for k in e.keys}
@@ -967,11 +1294,15 @@ def build_snapshot(feed: CalendarFeed, parsed: Parsed, tz: ZoneInfo, now: dateti
         else:
             # Events without a class stay unfiled, unless the feed names no classes at all.
             cid = None if e.unfiled else course_for(e.course) if (e.course or not any_course) else None
+            # A one-day entry is a date, filed under that day. A longer one (a break, exam week) sends
+            # no date: its start and end, local midnight to midnight, put it on every day it covers
+            # (main._event_days), and it's still marked all day for the exam planner.
+            one_day = item.all_day and item.first_day is not None and item.first_day == (item.last_day or item.first_day)
             events.append({
                 "id": _id(item.uid, item.rid), "title": item.summary[:500] or "Event", "start_at": _iso(item.start),
                 "end_at": _iso(item.end), "course_id": cid, "location": item.location[:300] or None,
                 "html_url": e.html_url, "all_day": item.all_day,
-                "all_day_date": item.first_day.isoformat() if item.all_day and item.first_day else None,
+                "all_day_date": item.first_day.isoformat() if one_day else None,
             })
     for c in courses.values():
         c["assignments"].sort(key=lambda a: (a["due_at"] or "", a["id"]))
@@ -1018,48 +1349,158 @@ def _mark_passed(account: CanvasAccount, now: datetime) -> None:
                        .values(status="past_due"))
 
 
+@dataclass
+class Outcome:
+    """How one refresh went."""
+
+    counts: dict | None = None  # what was found, when it worked
+    error: str | None = None  # why not, for the student
+    transient: bool = False  # the site was down or slow: that fixes itself
+    busy: bool = False  # no fetch slot was free, so nothing was tried
+    removed: bool = False  # the link was removed while it was being read
+
+    @property
+    def message(self) -> str | None:
+        """For a link that's kept: its status on the Connect page, and after "Refresh now"."""
+        if self.busy:
+            return f"{BUSY} Try again in a minute."
+        if self.error is None:
+            return None
+        return self.error + (" We'll try again later." if self.transient else "")
+
+    @property
+    def not_added(self) -> str:
+        """For a link that was just pasted and couldn't be read: it isn't kept, so nothing will retry it."""
+        if self.busy:
+            return f"{BUSY} Try adding it again in a minute. The link wasn't added."
+        error = self.error or "We couldn't read that calendar."
+        return error + (" Try adding it again in a few minutes." if self.transient else "") + " The link wasn't added."
+
+
+_UNSET = object()
+
+
+def _user_lock(user_id: int) -> threading.RLock:
+    with _lock:
+        return _user_locks.setdefault(user_id, threading.RLock())
+
+
+def _live_feed(feed_id: int) -> CalendarFeed | None:
+    """The link's row as the database has it now (None once removed), locked against a remove() in
+    another worker until the next commit (Postgres; SQLite has a single writer anyway)."""
+    return db.session.scalar(select(CalendarFeed).where(CalendarFeed.id == feed_id).with_for_update()
+                             .execution_options(populate_existing=True))
+
+
+def _link_accounts(user_id: int, feed_id: int) -> list[CanvasAccount]:
+    """The account(s) a link's imports go into: its own identity, whether or not the link records it yet."""
+    return list(db.session.scalars(select(CanvasAccount).where(CanvasAccount.user_id == user_id,
+                                                               CanvasAccount.canvas_user_id == f"feed-{feed_id}")))
+
+
+def _vanished(user_id: int, feed_id: int) -> Outcome:
+    """The link was removed while it was being read: whatever the read imported goes too."""
+    from . import gcal, integrations
+
+    db.session.rollback()
+    accounts = _link_accounts(user_id, feed_id)
+    for account in accounts:
+        db.session.delete(account)
+    db.session.commit()
+    user = db.session.get(User, user_id)
+    if accounts and user is not None and integrations.available() and gcal.enabled(user):
+        gcal.kick(user.id)
+    return Outcome(removed=True, error="This calendar link was removed.")
+
+
+def _ensure_account(user: User, snapshot: dict) -> None:
+    """Create the link's account before the import, marked as a calendar link's from the start
+    (ingest would create it as a Canvas account, marked only afterwards): if the link is removed
+    mid-import, what's left is recognisably the link's, never a "Canvas" account nobody can remove."""
+    base_url = snapshot["base_url"]
+    host, canvas_user_id = urlsplit(base_url).netloc.lower(), snapshot["user"]["id"]
+    rows = db.session.scalars(select(CanvasAccount).where(CanvasAccount.host == host,
+                                                          CanvasAccount.canvas_user_id == canvas_user_id)).all()
+    mine = [a for a in rows if a.user_id == user.id]
+    if mine:
+        mine[0].lms = "ics"
+    elif not rows:  # another student's is for ingest to refuse
+        db.session.add(CanvasAccount(user_id=user.id, host=host, base_url=base_url, canvas_user_id=canvas_user_id,
+                                     lms="ics"))
+    db.session.commit()
+
+
 def refresh(feed: CalendarFeed, force: bool = False) -> dict | None:
     """Fetch one link now and bring its classes up to date. Returns counts, or None when it failed
     (feed.last_error says why, in words for the student). Never raises."""
+    return refresh_outcome(feed, force).counts
+
+
+def refresh_outcome(feed: CalendarFeed, force: bool = False, *, previous=_UNSET) -> Outcome:
+    """refresh(), saying how it went (for messages). `previous`: when the link was checked before the
+    caller claimed it; if no fetch slot is free, the link goes back to that, so it's due again at once.
+    The import takes turns with remove() of the same student's links, and checks the link is still
+    there before and after importing; if it was removed meanwhile, the import is deleted too."""
     from . import gcal, ingest, integrations
 
-    feed_id, host = feed.id, feed.host
+    feed_id, host, user_id = feed.id, feed.host, feed.user_id
+    previous = feed.last_fetched_at if previous is _UNSET else previous
     now = utcnow()
     try:
-        user = db.session.get(User, feed.user_id)
+        user = db.session.get(User, user_id)
+        tz = _user_zone(user)
         account = _account(feed)
+        account_id = account.id if account is not None else None
+        etag = None if force else _send_etag(feed, account, now)
         # An attempt counts as a check, so a broken link isn't retried on every page view.
         feed.last_fetched_at = now
         db.session.commit()
-        got = fetch(feed, None if force else _send_etag(feed, account, now))
-        if got.status == 304 and account is not None:
-            account.last_sync_at = now
-            _mark_passed(account, now)
+        got = fetch(feed, etag)
+        parsed = None if got.status == 304 and account_id is not None else parse(got.body, tz, now)
+        with _user_lock(user_id):
+            feed = _live_feed(feed_id)
+            if feed is None:
+                return _vanished(user_id, feed_id)
+            if parsed is None:  # not modified since the last import
+                account = db.session.get(CanvasAccount, account_id)
+                if account is None:
+                    raise FeedError("Something went wrong reading this calendar.", transient=True)
+                account.last_sync_at = now
+                _mark_passed(account, now)
+                feed.last_error = None
+                db.session.commit()
+                return Outcome(counts={"unchanged": True, "due": None, "events": None, "courses": None})
+            if feed.lms == "other":
+                feed.lms = lms_from_calendar(parsed.prodid, [i.uid for i in parsed.items]) or "other"
+            snapshot, counts = build_snapshot(feed, parsed, tz, now)
+            _ensure_account(user, snapshot)
+            run, _needed = ingest.ingest_snapshot(user, snapshot, [])
+            feed = _live_feed(feed_id)
+            if feed is None:  # removed by another worker during the import
+                return _vanished(user_id, feed_id)
+            account = db.session.get(CanvasAccount, run.account_id)
+            account.lms = "ics"
+            feed.account_id = account.id
+            feed.etag = got.etag
+            feed.event_count = counts["due"] + counts["events"]
             feed.last_error = None
+            # What the calendar is made of, for building better rules (counts and property names, no text).
+            run.stats = {**(run.stats or {}), "calendar_link": feed_id, "lms": feed.lms,
+                         "shape": {**parsed.shape, **counts}}
             db.session.commit()
-            return {"unchanged": True, "due": None, "events": None, "courses": None}
-        parsed = parse(got.body, _user_zone(user), now)
-        if feed.lms == "other":
-            feed.lms = lms_from_calendar(parsed.prodid, [i.uid for i in parsed.items]) or "other"
-        snapshot, counts = build_snapshot(feed, parsed, _user_zone(user), now)
-        run, _needed = ingest.ingest_snapshot(user, snapshot, [])
-        feed = db.session.get(CalendarFeed, feed_id)
-        account = db.session.get(CanvasAccount, run.account_id)
-        account.lms = "ics"
-        feed.account_id = account.id
-        feed.etag = got.etag
-        feed.event_count = counts["due"] + counts["events"]
-        feed.last_error = None
-        # What the calendar is made of, for building better rules (counts and property names, no text).
-        run.stats = {**(run.stats or {}), "calendar_link": feed_id, "lms": feed.lms,
-                     "shape": {**parsed.shape, **counts}}
-        db.session.commit()
-        unchanged = bool((run.stats or {}).get("unchanged"))
+            unchanged = bool((run.stats or {}).get("unchanged"))
+    except FeedBusy:
+        db.session.rollback()
+        row = db.session.get(CalendarFeed, feed_id)
+        if row is not None:
+            row.last_fetched_at = previous  # nothing was tried
+            db.session.commit()
+        return Outcome(busy=True)
     except FeedError as exc:
-        message = str(exc)
+        outcome = Outcome(error=str(exc), transient=exc.transient)
     except Exception as exc:  # never the link in the log: nothing below this point was given it
         current_app.logger.exception("calendar link %s on %s failed: %s", feed_id, host, type(exc).__name__)
-        message = "Something went wrong reading this calendar. We'll try again later."
+        outcome = Outcome(error="Something went wrong reading this calendar.", transient=True)
     else:
         try:
             if integrations.available() and gcal.enabled(user) and (not unchanged or gcal.due_for_refresh(user)):
@@ -1067,13 +1508,14 @@ def refresh(feed: CalendarFeed, force: bool = False) -> dict | None:
         except Exception as exc:  # the import worked; Google Calendar records its own errors
             db.session.rollback()
             current_app.logger.error("google calendar after calendar link %s failed: %s", feed_id, type(exc).__name__)
-        return {**counts, "unchanged": unchanged}
+        return Outcome(counts={**counts, "unchanged": unchanged})
     db.session.rollback()
     row = db.session.get(CalendarFeed, feed_id)
-    if row is not None:
-        row.last_error = message[:500]
-        db.session.commit()
-    return None
+    if row is None:
+        return _vanished(user_id, feed_id)
+    row.last_error = outcome.message[:500]
+    db.session.commit()
+    return outcome
 
 
 def refresh_due(user) -> bool:
@@ -1120,33 +1562,149 @@ def kick(user_id: int) -> None:
     threading.Thread(target=work, name="calendar-links", daemon=True).start()
 
 
+def _claim_and_refresh(feed_id: int) -> Outcome | None:
+    """Refresh a link if it's still stale, claiming it first, so it's read once even with several
+    workers, tabs or sweeps at the same time. None when it wasn't stale (any more)."""
+    now = utcnow()
+    previous = db.session.scalar(select(CalendarFeed.last_fetched_at).where(CalendarFeed.id == feed_id))
+    claimed = db.session.execute(update(CalendarFeed).where(
+        CalendarFeed.id == feed_id,
+        or_(CalendarFeed.last_fetched_at.is_(None), CalendarFeed.last_fetched_at < now - STALE_AFTER))
+        .values(last_fetched_at=now)).rowcount
+    db.session.commit()
+    if not claimed:
+        return None
+    feed = db.session.get(CalendarFeed, feed_id)
+    return refresh_outcome(feed, previous=previous) if feed is not None else None
+
+
 def _run(user_id: int) -> None:
     for feed_id in db.session.scalars(select(CalendarFeed.id).where(CalendarFeed.user_id == user_id)
                                       .order_by(CalendarFeed.id)).all():
-        now = utcnow()
-        # Claim it: only one refresh per link even with several workers or tabs.
-        claimed = db.session.execute(update(CalendarFeed).where(
-            CalendarFeed.id == feed_id,
-            or_(CalendarFeed.last_fetched_at.is_(None), CalendarFeed.last_fetched_at < now - STALE_AFTER))
-            .values(last_fetched_at=now)).rowcount
-        db.session.commit()
-        if claimed:
-            feed = db.session.get(CalendarFeed, feed_id)
-            if feed is not None:
-                refresh(feed)
+        outcome = _claim_and_refresh(feed_id)
+        if outcome is not None and outcome.busy:
+            break  # the rest wait for the next page view or sweep
+
+
+def refresh_stale(limit: int = TICK_BATCH) -> int:
+    """Refresh up to `limit` links not checked for an hour or more, the stalest first, whoever's they
+    are (active accounts only), one after another. A student whose links are being refreshed already
+    is skipped; the sweep stops when no fetch slot is free. Returns how many links were tried."""
+    cutoff = utcnow() - STALE_AFTER
+    rows = db.session.execute(
+        select(CalendarFeed.id, CalendarFeed.user_id).join(User, User.id == CalendarFeed.user_id)
+        .where(User.active.is_(True),
+               or_(CalendarFeed.last_fetched_at.is_(None), CalendarFeed.last_fetched_at < cutoff))
+        .order_by(CalendarFeed.last_fetched_at.is_(None).desc(), CalendarFeed.last_fetched_at, CalendarFeed.id)
+        .limit(max(limit, 0) * 4)).all()
+    tried = 0
+    for feed_id, user_id in rows:
+        if tried >= limit:
+            break
+        with _lock:
+            if user_id in _running:
+                continue
+            _running.add(user_id)
+        try:
+            outcome = _claim_and_refresh(feed_id)
+        finally:
+            with _lock:
+                _running.discard(user_id)
+        if outcome is None:
+            continue
+        if outcome.busy:
+            break
+        tried += 1
+    return tried
+
+
+def tick(app) -> bool:
+    """From /health, which the keep-alive job pings every 5 minutes: at most once every TICK_EVERY
+    seconds per process, refresh up to TICK_BATCH of the stalest links of all students, on one
+    background thread (inline in tests). So links refresh about hourly, and their dates reach Google
+    Calendar, even when nobody opens a page. Returns at once (whether a sweep started); never raises."""
+    try:
+        started = time.monotonic()
+        with _lock:
+            state = app.extensions.setdefault("hh_feeds_tick", {"last": None, "running": False})
+            if state["running"] or (state["last"] is not None and started - state["last"] < TICK_EVERY):
+                return False
+            state["last"], state["running"] = started, True
+
+        def sweep():
+            try:
+                refresh_stale(TICK_BATCH)
+            except Exception as exc:
+                db.session.rollback()
+                app.logger.error("calendar link sweep failed: %s", type(exc).__name__)
+            finally:
+                with _lock:
+                    state["running"] = False
+
+        if app.config.get("EXTRACT_INLINE"):  # tests: run inline
+            sweep()
+            return True
+
+        def work():
+            with app.app_context():
+                try:
+                    sweep()
+                finally:
+                    db.session.remove()
+
+        threading.Thread(target=work, name="calendar-links-sweep", daemon=True).start()
+        return True
+    except Exception as exc:  # pragma: no cover - /health must answer whatever happens here
+        try:
+            app.logger.error("calendar link sweep didn't start: %s", type(exc).__name__)
+        except Exception:
+            pass
+        return False
+
+
+def register_cli(app) -> None:
+    group = AppGroup("feeds", help="Calendar links from Brightspace, Blackboard, Moodle, Schoology...")
+
+    @group.command("refresh-stale")
+    @click.option("--limit", default=50, show_default=True, help="The most links to refresh in this run.")
+    def refresh_stale_command(limit: int) -> None:
+        """Refresh the calendar links not checked for an hour or more, the stalest first."""
+        count = refresh_stale(limit)
+        # Google Calendar is updated on background threads; let them finish before this process ends.
+        for thread in threading.enumerate():
+            if thread.name == "gcal-sync":
+                thread.join(timeout=120)
+        click.echo(f"Refreshed {count} calendar link{'s' if count != 1 else ''}.")
+
+    app.cli.add_command(group)
 
 
 def remove(feed: CalendarFeed) -> None:
     """Delete a link and everything it brought in: its account's classes, due dates and events go with
-    the account (ON DELETE CASCADE). Google Calendar then drops the events of the removed due dates."""
+    the account (ON DELETE CASCADE). Google Calendar then drops the events of the removed due dates.
+    If a refresh is importing this student's links, it finishes first (or, in another worker, finds the
+    link gone and deletes its import itself)."""
     from . import gcal, integrations
 
-    user = db.session.get(User, feed.user_id)
-    account = _account(feed)
-    if account is not None and account.lms == "ics":
-        db.session.delete(account)
-    db.session.delete(feed)
-    db.session.commit()
+    feed_id, user_id = feed.id, feed.user_id
+    lock = _user_lock(user_id)
+    locked = lock.acquire(timeout=REMOVE_WAIT)
+    try:
+        row = _live_feed(feed_id)
+        accounts = {a.id: a for a in _link_accounts(user_id, feed_id)}
+        if row is not None and row.account_id and row.account_id not in accounts:
+            account = db.session.get(CanvasAccount, row.account_id)
+            if account is not None and account.user_id == user_id and account.lms == "ics":
+                accounts[account.id] = account
+        for account in accounts.values():
+            db.session.delete(account)
+        if row is not None:
+            db.session.delete(row)
+        db.session.commit()
+    finally:
+        if locked:
+            lock.release()
+    user = db.session.get(User, user_id)
     if user is not None and integrations.available() and gcal.enabled(user):
         gcal.kick(user.id)
 

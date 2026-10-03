@@ -34,18 +34,24 @@ def landing():
 
 @bp.route("/health")
 def health():
-    """Render's health check: fast, and reports the deployed commit (no database call)."""
+    """Render's health check and the keep-alive ping (every 5 minutes): fast, and reports the deployed
+    commit (no database call). It also starts the sweep that keeps calendar links fresh for students
+    who don't open a page (feeds.tick: at most every 5 minutes, on its own thread; returns at once and
+    never raises)."""
     from ..services import crypto
 
+    feeds.tick(current_app._get_current_object())
     return {"ok": True, "commit": current_app.config.get("GIT_COMMIT"),
             "encryption": "on" if crypto.keyring() else "off"}
 
 
 @bp.route("/health/db")
 def health_db():
-    """Confirms the database answers. Reports the backend, never credentials."""
+    """Confirms the database answers. Reports the backend, never credentials. The backup keep-alive
+    (GitHub Actions) pings this one, so it starts the calendar-link sweep too (see health)."""
     from sqlalchemy import text
 
+    feeds.tick(current_app._get_current_object())
     try:
         db.session.execute(text("SELECT 1"))
     except Exception as exc:  # report, don't crash the probe

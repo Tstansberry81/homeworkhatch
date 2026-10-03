@@ -7,9 +7,15 @@ feeds.py for the real feeds the shapes come from). No network: DNS and HTTP are 
 
 from __future__ import annotations
 
+import html
 import ipaddress
 import json
+import logging
 import socket
+import ssl
+import threading
+import time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -314,7 +320,8 @@ def test_brightspace_suffixes_courses_and_quizzes():
     assert a["Quiz 3"]["course"] == "Fall 2026 CHEM 1010-001 LEC" and a["Essay 1"]["course"] == "Fall 2026 HIST 2200-003 LEC"
     assert {c["course_code"] for c in snap["courses"]} == {"CHEM 1010-001", "HIST 2200-003"}
     # "Availability Ends" is the deadline only without a "Due": Lab Report 2 has none, Essay 1 has one.
-    assert "Essay 1 - Availability Ends" in e and e["Essay 1 - Availability Ends"]["course"] == "Fall 2026 HIST 2200-003 LEC"
+    # Essay 1's stays on the calendar, outside the class (the planner sees the item once).
+    assert "Essay 1 - Availability Ends" in e and e["Essay 1 - Availability Ends"]["course"] is None
     assert "Lab Report 2 - Availability Ends" not in e
     # The quiz's opening stays on the calendar, outside the class (the planner sees the quiz once).
     assert e["Quiz 3 - Available"]["course"] is None
@@ -761,3 +768,544 @@ def test_past_items_from_a_calendar_link_drop_off_instead_of_piling_up(app):
     ])
     db.session.commit()
     assert [a.name for a in queries.upcoming(user.id)] == ["Quiz 3"]
+
+
+# ---------------------------------------------------------------- real sockets: the deadline and urllib3's logs
+
+
+D2L = "PRODID:-//D2L//NONSGML v1.0//EN\r\nX-WR-CALNAME:All Courses - Example University\r\n"
+HTTP_URL = f"http://learn.example.edu/d2l/le/calendar/feed/user/feed.ics?token={TOKEN}"  # plain http: tests only
+
+
+@pytest.fixture
+def local_server(monkeypatch):
+    """A real server on 127.0.0.1, for what the fake network can't show (socket timeouts, urllib3's own
+    logging). start(script, tls=None) serves one connection with script(conn, stop); every link, whatever
+    its host, reaches it (the address check and the port are bypassed; nothing else is)."""
+    servers = []
+    real_open = feeds._open
+
+    def start(script, tls: ssl.SSLContext | None = None) -> int:
+        srv = socket.socket()
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(5)
+        stop = threading.Event()
+
+        def run():
+            try:
+                conn, _ = srv.accept()
+                conn.settimeout(15)
+                if tls is not None:
+                    conn = tls.wrap_socket(conn, server_side=True)
+                with conn:
+                    conn.recv(65536)
+                    script(conn, stop)
+            except OSError:
+                pass
+
+        threading.Thread(target=run, daemon=True).start()
+        servers.append((srv, stop))
+        port = srv.getsockname()[1]
+        monkeypatch.setattr(feeds, "_safe_address", lambda host, _port: "127.0.0.1")
+        monkeypatch.setattr(feeds, "_open", lambda scheme, address, _port, host, target, headers:
+                            real_open(scheme, address, port, host, target, headers))
+        return port
+
+    yield start
+    for srv, stop in servers:
+        stop.set()
+        srv.close()
+
+
+def trickle(head: bytes, data: bytes, gap: float = 0.2):
+    """Send `head`, then `data` one byte per `gap` seconds: each read gets something well within its timeout."""
+    def script(conn, stop):
+        if head:
+            conn.sendall(head)
+        for i in range(len(data)):
+            if stop.wait(gap):
+                return
+            conn.sendall(data[i:i + 1])
+    return script
+
+
+def tls_context(tmp_path, monkeypatch) -> ssl.SSLContext:
+    """A server certificate for learn.example.edu that the fetch trusts (as certifi's bundle)."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "learn.example.edu")])
+    now = datetime.now(timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(days=1))
+            .not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName("learn.example.edu")]), critical=False)
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256()))
+    cert_path, key_path = tmp_path / "cert.pem", tmp_path / "key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                           serialization.NoEncryption()))
+    import certifi
+
+    monkeypatch.setattr(certifi, "where", lambda: str(cert_path))
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cert_path, key_path)
+    return ctx
+
+
+@pytest.mark.parametrize("mode", ["headers", "body", "body without a length", "headers over tls"])
+def test_a_server_that_trickles_bytes_is_cut_off_at_the_deadline(app, local_server, monkeypatch, tmp_path, mode):
+    """Review 3, security#0: the deadline used to be checked only between 64 KiB chunks, so a byte every
+    few seconds (headers or body) held a request thread for days. Now one wall-clock limit covers
+    every phase. Over TLS the socket timer must work on a duplicate: TLS detaches the original."""
+    monkeypatch.setattr(feeds, "TOTAL_SECONDS", 1.0)
+    monkeypatch.setattr(feeds, "READ_TIMEOUT", 5)
+    url = HTTP_URL
+    if mode == "headers":
+        local_server(trickle(b"", b"HTTP/1.1 200 OK\r\nX-Slow: " + b"a" * 400))
+    elif mode == "body":
+        local_server(trickle(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\nBEGIN:VCALENDAR\r\n", b"X" * 400))
+    elif mode == "body without a length":  # cut off, it would look complete: it mustn't be imported
+        local_server(trickle(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n" + cal(ev("a", "A - Due", z(at(2)))),
+                             b"X" * 400))
+    else:
+        local_server(trickle(b"", b"HTTP/1.1 200 OK\r\nX-Slow: " + b"a" * 400), tls=tls_context(tmp_path, monkeypatch))
+        url = BS_URL
+    started = time.monotonic()
+    with pytest.raises(feeds.FeedError, match="took too long") as raised:
+        feeds.fetch_url(url)
+    assert time.monotonic() - started < 3, "stopped at the deadline, not after READ_TIMEOUT per byte"
+    assert raised.value.transient
+
+
+def test_adding_a_link_to_a_slow_server_frees_the_request_at_the_deadline(app, client, student, local_server,
+                                                                          monkeypatch):
+    monkeypatch.setattr(feeds, "TOTAL_SECONDS", 1.0)
+    local_server(trickle(b"", b"HTTP/1.1 200 OK\r\nX-Slow: " + b"a" * 400))
+    started = time.monotonic()
+    page = html.unescape(add_feed(client, HTTP_URL).get_data(as_text=True))
+    assert time.monotonic() - started < 3
+    assert "The calendar took too long to download. Try adding it again in a few minutes. The link wasn't added." in page
+    assert db.session.scalar(select(func.count(CalendarFeed.id))) == 0
+
+
+def test_a_slow_name_server_counts_against_the_deadline(app, monkeypatch):
+    release = threading.Event()
+
+    def slow_lookup(*args, **kwargs):
+        release.wait(5)
+        raise socket.gaierror("too late anyway")
+
+    monkeypatch.setattr(feeds, "TOTAL_SECONDS", 0.5)
+    monkeypatch.setattr(socket, "getaddrinfo", slow_lookup)
+    started = time.monotonic()
+    try:
+        with pytest.raises(feeds.FeedError, match="took too long"):
+            feeds.fetch_url("https://slow-dns.example/cal.ics")
+    finally:
+        release.set()
+    assert time.monotonic() - started < 2
+
+
+def test_fetches_past_the_limit_are_turned_away_not_queued(app, client, student, net):
+    """Review 3, security#0: at most MAX_CONCURRENT_FETCHES run at once in a process; one more is
+    refused at once (no thread waits), with a friendly message, and a background refresh that found no
+    slot is due again right away."""
+    net.serve(BS_URL, FakeResponse(200, brightspace_ics()))
+    add_feed(client, BS_URL)
+    feed = db.session.scalar(select(CalendarFeed))
+    calls = len(net.calls)
+    held = 0
+    try:
+        while feeds._fetch_slots.acquire(blocking=False):  # every slot busy with slow sites
+            held += 1
+        assert held == feeds.MAX_CONCURRENT_FETCHES
+        started = time.monotonic()
+        with pytest.raises(feeds.FeedBusy):
+            feeds.fetch_url(BS_URL)
+        assert time.monotonic() - started < 0.5, "refused, not queued"
+
+        url = "https://cal.example/other.ics?token=x"
+        page = html.unescape(add_feed(client, url).get_data(as_text=True))
+        assert ("Lots of calendar links are being read right now. Try adding it again in a minute. "
+                "The link wasn't added.") in page
+        assert db.session.scalar(select(func.count(CalendarFeed.id))) == 1
+
+        stale = utcnow() - timedelta(hours=2)
+        feed.last_fetched_at = stale
+        db.session.commit()
+        assert client.get("/dashboard").status_code == 200  # the page-view refresh finds no slot
+        db.session.expire_all()
+        feed = db.session.get(CalendarFeed, feed.id)
+        assert feed.last_fetched_at == stale and feed.last_error is None, "nothing was tried: still due"
+        page = html.unescape(client.post(f"/settings/feeds/{feed.id}/refresh", follow_redirects=True)
+                             .get_data(as_text=True))
+        assert "Lots of calendar links are being read right now. Try again in a minute." in page
+        assert len(net.calls) == calls
+    finally:
+        for _ in range(held):
+            feeds._fetch_slots.release()
+    assert client.get("/dashboard").status_code == 200
+    assert len(net.calls) == calls + 1, "with a slot free, the stale link is read on the next page view"
+
+
+def test_urllib3_never_writes_the_link_to_the_logs(app, local_server, caplog):
+    """Review 3, security#2: on a malformed header line urllib3 logs 'Failed to parse headers (url=...)'
+    with the whole link, and its DEBUG request line has the path and query. While a link is fetched,
+    none of urllib3's lines get through; elsewhere its URLs lose their path and query."""
+    body = cal(ev("a", "A - Due", z(at(2))))
+    local_server(lambda conn, stop: conn.sendall(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/calendar\r\nX-Broken header line\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode() + body))
+    caplog.set_level(logging.DEBUG)
+    got = feeds.fetch_url(HTTP_URL)
+    assert got.status == 200 and got.body == body
+    assert TOKEN not in caplog.text and "feed.ics" not in caplog.text
+    assert "learn.example.edu" in caplog.text, "our own log line (host only) is still there"
+
+    logging.getLogger("urllib3.connection").warning("Failed to parse headers (url=%s): %s", BS_URL, "x")
+    logging.getLogger("urllib3.connectionpool").debug('%s://%s:%s "%s %s %s" %s %s', "https", "learn.example.edu",
+                                                      443, "GET", "/d2l/feed.ics?token=" + TOKEN, "HTTP/1.1", 200, 0)
+    assert TOKEN not in caplog.text and "Failed to parse headers (url=https://learn.example.edu/" in caplog.text
+
+
+# ---------------------------------------------------------------- review 3: remove vs refresh, our own calendar
+
+
+def test_removing_a_link_while_it_is_being_read_leaves_nothing_behind(app, client, student, net, monkeypatch):
+    """Review 3, correctness#1: Remove pressed while a background refresh was fetching left the import
+    behind as a 'Canvas' account nothing could remove."""
+    net.serve(BS_URL, FakeResponse(200, brightspace_ics()))
+    add_feed(client, BS_URL)
+    feed = db.session.scalar(select(CalendarFeed))
+    feed_id, account_id = feed.id, feed.account_id
+    real_fetch = feeds.fetch
+
+    def removed_meanwhile(f, etag=None):
+        got = real_fetch(f, None)
+        with db.engine.begin() as conn:  # the Remove button, in another request
+            conn.execute(text("DELETE FROM canvas_account WHERE id = :id"), {"id": account_id})
+            conn.execute(text("DELETE FROM calendar_feed WHERE id = :id"), {"id": feed_id})
+        return got
+
+    monkeypatch.setattr(feeds, "fetch", removed_meanwhile)
+    assert feeds.refresh(feed, force=True) is None
+    db.session.expire_all()
+    for model in (CalendarFeed, CanvasAccount, Course, Assignment, CalendarEvent):
+        assert db.session.scalar(select(func.count(model.id))) == 0, model.__name__
+    assert "Quiz 3" not in client.get("/dashboard").get_data(as_text=True)
+
+
+def test_a_link_removed_by_another_worker_during_the_import_is_cleaned_up(app, client, student, net, monkeypatch):
+    from app.services import ingest
+
+    net.serve(BS_URL, FakeResponse(200, brightspace_ics()))
+    add_feed(client, BS_URL)
+    db.session.execute(text("DELETE FROM canvas_account"))  # the next import creates the account anew
+    db.session.commit()
+    feed = db.session.scalar(select(CalendarFeed))
+    feed_id = feed.id
+    real_ingest = ingest.ingest_snapshot
+    seen = {}
+
+    def ingest_then_removed(user, snapshot, manifest):
+        result = real_ingest(user, snapshot, manifest)
+        # The account exists from before the import, already marked as a calendar link's.
+        seen["lms"] = db.session.scalar(select(CanvasAccount.lms).where(CanvasAccount.canvas_user_id == f"feed-{feed_id}"))
+        # remove() in this process would wait: the import holds the student's lock.
+        lock = feeds._user_lock(student.id)
+        probe = threading.Thread(target=lambda: seen.setdefault("free", lock.acquire(blocking=False)))
+        probe.start()
+        probe.join()
+        with db.engine.begin() as conn:  # another worker deletes only the link row
+            conn.execute(text("DELETE FROM calendar_feed WHERE id = :id"), {"id": feed_id})
+        return result
+
+    monkeypatch.setattr(ingest, "ingest_snapshot", ingest_then_removed)
+    assert feeds.refresh(feed, force=True) is None
+    assert seen == {"lms": "ics", "free": False}
+    db.session.expire_all()
+    for model in (CanvasAccount, Course, Assignment, CalendarEvent):
+        assert db.session.scalar(select(func.count(model.id))) == 0, model.__name__
+
+
+def test_remove_deletes_a_link_account_not_recorded_on_the_link_and_keeps_canvas(app, client, student, net):
+    import copy
+
+    from app.services import ingest
+
+    from .conftest import BASE_SNAPSHOT
+
+    snap = copy.deepcopy(BASE_SNAPSHOT)
+    snap["base_url"] = "https://learn.example.edu"
+    ingest.ingest_snapshot(db.session.get(User, student.id), snap, [])  # a Canvas account on the same host
+    net.serve(BS_URL, FakeResponse(200, brightspace_ics()))
+    add_feed(client, BS_URL)
+    feed = db.session.scalar(select(CalendarFeed))
+    feed.account_id = None  # e.g. an import that ended before recording it
+    db.session.commit()
+    client.post(f"/settings/feeds/{feed.id}/remove")
+    db.session.expire_all()
+    assert [(a.lms, a.canvas_user_id) for a in db.session.scalars(select(CanvasAccount))] == [("canvas", "501")]
+
+
+def test_our_own_calendar_is_refused_wherever_it_comes_from(app, client, student, net):
+    """Review 3, correctness#2: our own ICS export pasted as a link imported every due date back as a new
+    one, and again on every refresh."""
+    net.serve(BS_URL, FakeResponse(200, brightspace_ics()))
+    add_feed(client, BS_URL)
+    before = db.session.scalar(select(func.count(Assignment.id)))
+    user = db.session.get(User, student.id)
+    export = client.get(f"/calendar/{user.calendar_token}.ics").data
+    calls = len(net.calls)
+    app.config["PUBLIC_URL"] = "https://hh.example.org"
+    for url in (f"https://hatch.test/calendar/{user.calendar_token}.ics",  # the address in use
+                "webcal://homeworkhatch.onrender.com/calendar/x.ics", "https://www.homeworkhatch.com/calendar/x.ics",
+                "https://hh.example.org/calendar/x.ics"):  # PUBLIC_URL
+        page = html.unescape(add_feed(client, url).get_data(as_text=True))
+        assert "That's a Homework Hatch calendar" in page, url
+    assert len(net.calls) == calls, "never fetched"
+    # Served from another address, or reached through a redirect: still refused.
+    net.serve("https://mirror.example/hh.ics", FakeResponse(200, export))
+    net.serve("https://short.example/c", FakeResponse(302, headers={"Location": "https://hh.example.org/calendar/x.ics"}))
+    for url in ("https://mirror.example/hh.ics", "https://short.example/c"):
+        assert "That's a Homework Hatch calendar" in html.unescape(add_feed(client, url).get_data(as_text=True))
+    assert db.session.scalar(select(func.count(CalendarFeed.id))) == 1
+    assert db.session.scalar(select(func.count(Assignment.id))) == before
+
+
+def test_due_dates_we_pushed_to_google_calendar_are_not_imported_back(app, client, student, net):
+    app.config["PUBLIC_URL"] = "https://hh.example.org"
+    body = cal(
+        # What gcal.py puts on Google Calendar, as Google's secret iCal link gives it back.
+        ev("a1@google.com", "Due: Quiz 3 · CHEM 1010-001", z(at(3)),
+           DESCRIPTION='Fall 2026 CHEM 1010-001 LEC<br><a href="https://hh.example.org/courses/assignments/1">Open in Homework Hatch</a>'),
+        ev("a2@google.com", "✓ Due: Essay 1 · HIST 2200-003", z(at(6)),
+           DESCRIPTION='<a href="https://hh.example.org/courses/assignments/2">Open</a>'),
+        ev("assignment-7@hatch.test", "Due: Midterm (Fall 2026 HIST)", z(at(10))),  # our export, re-published
+        ev("event-8@homeworkhatch.onrender.com", "Lab meeting", z(at(2))),
+        ev("own@google.com", "Problem Set 2 - Due", z(at(4))),
+        ev("own2@google.com", "Soccer practice", z(at(5))),
+        head="PRODID:-//Google Inc//Google Calendar 70.9054//EN\r\nX-WR-CALNAME:Sam\r\n")
+    url = "https://calendar.google.com/calendar/ical/sam%40example.com/private-abc/basic.ics"
+    net.serve(url, lambda h: FakeResponse(200, body))
+    page = add_feed(client, url).get_data(as_text=True)
+    assert "found 1 due date and 1 event" in page
+    feed = db.session.scalar(select(CalendarFeed))
+    for _ in range(3):
+        feeds.refresh(feed, force=True)
+    db.session.expire_all()
+    assert [a.name for a in db.session.scalars(select(Assignment))] == ["Problem Set 2"]
+    assert [e.title for e in db.session.scalars(select(CalendarEvent))] == ["Soccer practice"]
+
+
+# ---------------------------------------------------------------- review 3: what the planner and calendar see
+
+
+def test_a_late_window_end_is_not_a_second_test(app, client, student, net):
+    """Review 3, correctness#4: Brightspace's End Date days after the Due Date (Moodle's 'should be
+    completed' after 'closes') stayed in the class and the exam planner found the test twice."""
+    host = "learn.example.edu"
+    chem = "Fall 2026 CHEM 1010-001 LEC"
+    quiz = f"Quizzes:\\nUnit 5 Test - https://{host}/d2l/lms/quizzing/quizzing.d2l?ou=111&qi=9"
+    body = cal(ev("u1@x", "Unit 5 Test - Due", z(at(3)), z(at(3)), LOCATION=chem, DESCRIPTION=quiz),
+               ev("u2@x", "Unit 5 Test - Availability Ends", z(at(10)), z(at(10)), LOCATION=chem, DESCRIPTION=quiz),
+               ev("u3@x", "Unit 5 Test - Available", z(at(1)), z(at(1)), LOCATION=chem, DESCRIPTION=quiz), head=D2L)
+    net.serve(BS_URL, FakeResponse(200, body))
+    add_feed(client, BS_URL)
+    found = [(f.title, f.kind) for f in assessments.find(db.session.get(User, student.id))]
+    assert len(found) == 1 and found[0][0] == "Unit 5 Test", found
+    ends = db.session.scalar(select(CalendarEvent).where(CalendarEvent.title == "Unit 5 Test - Availability Ends"))
+    assert ends is not None and ends.course_id is None, "still on the calendar, outside the class"
+
+    moodle = cal(ev("1@m", "Unit 6 Test closes", z(at(4)), z(at(4)), CATEGORIES="BIO110"),
+                 ev("2@m", "Unit 6 Test should be completed", z(at(11)), z(at(11)), CATEGORIES="BIO110"),
+                 head="PRODID:-//Moodle Pty Ltd//NONSGML Moodle Version 2024100700//EN\r\n")
+    snap, _ = snapshot_for("moodle", moodle, "moodle.example.edu")
+    assert set(assignments(snap)) == {"Unit 6 Test"}
+    assert events(snap)["Unit 6 Test should be completed"]["course"] is None
+
+
+def test_multi_day_all_day_events_show_on_every_day(app, client, student, net):
+    """Review 3, correctness#5: a week-long break was stored as one date and showed on its first day only."""
+    from app.blueprints.main import _event_days
+
+    first = at(3).date()
+    day = lambda d: ";VALUE=DATE:" + d.strftime("%Y%m%d")  # noqa: E731
+    body = cal(ev("brk@x", "Spring Break", day(first), day(first + timedelta(days=5)), LOCATION="Example University"),
+               ev("one@x", "Reading Day", day(first + timedelta(days=7)), day(first + timedelta(days=8)),
+                  LOCATION="Example University"),
+               ev("q@x", "Quiz - Due", z(at(2)), z(at(2)), LOCATION="Fall 2026 CHEM 1010-001 LEC"), head=D2L)
+    net.serve(BS_URL, FakeResponse(200, body))
+    add_feed(client, BS_URL)
+    zone = ZoneInfo("America/New_York")
+    brk = db.session.scalar(select(CalendarEvent).where(CalendarEvent.title == "Spring Break"))
+    assert brk.all_day and brk.all_day_date is None, "all day for the planner, no single date"
+    shown = _event_days(brk, zone)
+    assert [d for d, *_ in shown] == [first + timedelta(days=i) for i in range(5)]
+    assert {label for _d, _w, label, _l in shown} == {"All day"}
+    one = db.session.scalar(select(CalendarEvent).where(CalendarEvent.title == "Reading Day"))
+    assert one.all_day_date == first + timedelta(days=7)
+    assert [d for d, *_ in _event_days(one, zone)] == [first + timedelta(days=7)]
+
+
+def test_the_repeat_budget_is_shared_so_no_series_vanishes(app):
+    """Review 3, correctness#6: series were expanded in file order from one budget, so a few daily
+    routines used it up and a weekly due date after them vanished (and its stored rows were deleted)."""
+    now = utcnow()
+    start = (now - timedelta(days=60)).strftime("%Y%m%d")
+    routines = [ev(f"daily{n}@google.com", f"Routine {n}", f";TZID=America/New_York:{start}T0{6 + n}0000",
+                   RRULE="FREQ=DAILY") for n in range(4)]
+    pset = ev("pset@google.com", "Problem set - Due", f";TZID=America/New_York:{start}T235900", RRULE="FREQ=WEEKLY")
+    body = cal(*routines, pset, head="X-WR-CALNAME:Sam\r\n")
+    parsed = parse(body)
+    per_series = Counter(i.uid for i in parsed.items)
+    weeks_ahead = (feeds.LOOKAHEAD.days // 7)
+    assert per_series["pset@google.com"] >= weeks_ahead + 1
+    assert all(per_series[f"daily{n}@google.com"] for n in range(4))
+    assert len(parsed.items) <= feeds.MAX_OCCURRENCES and parsed.shape["occurrences_capped"]
+    for n in range(4):  # a series that was cut keeps what's nearest: its next occurrence is there
+        upcoming = [i.start for i in parsed.items if i.uid == f"daily{n}@google.com" and i.start >= now]
+        assert upcoming and min(upcoming) - now < timedelta(days=1)
+    _snap, counts = snapshot_for("other", body, "calendar.google.com")
+    assert counts["due"] >= weeks_ahead + 1
+
+    # More series than slices: due-looking series go first, then what's nearest to now.
+    many = cal(*(ev(f"r{n}@google.com", f"Routine {n}", f";TZID=America/New_York:{start}T080000", RRULE="FREQ=DAILY")
+                 for n in range(60)), pset)
+    parsed = parse(many)
+    assert len(parsed.items) == feeds.MAX_OCCURRENCES
+    assert Counter(i.uid for i in parsed.items)["pset@google.com"] == per_series["pset@google.com"]
+    assert max(i.start for i in parsed.items if i.uid != "pset@google.com") < now + timedelta(days=12)
+
+
+# ---------------------------------------------------------------- review 3: messages
+
+
+def test_a_link_that_fails_to_be_added_never_promises_a_retry(app, client, student, net):
+    """Review 3, ui#2: a failed add said "We'll try again later" and "The link wasn't added" together."""
+    net.serve(BS_URL, FakeResponse(503))
+    page = html.unescape(add_feed(client, BS_URL).get_data(as_text=True))
+    assert ("Brightspace didn't answer properly (503). Try adding it again in a few minutes. "
+            "The link wasn't added.") in page
+    assert "try again later" not in page.lower()
+    net.serve(BS_URL, FakeResponse(404))
+    page = html.unescape(add_feed(client, BS_URL).get_data(as_text=True))
+    assert "The link stopped working (404). Copy a fresh link from Brightspace. The link wasn't added." in page
+    assert db.session.scalar(select(func.count(CalendarFeed.id))) == 0
+
+    # A link that was kept is retried, and says so.
+    net.serve(BS_URL, FakeResponse(200, brightspace_ics()))
+    add_feed(client, BS_URL)
+    feed = db.session.scalar(select(CalendarFeed))
+    net.serve(BS_URL, FakeResponse(503))
+    assert feeds.refresh(feed, force=True) is None
+    db.session.expire_all()
+    assert db.session.get(CalendarFeed, feed.id).last_error == "Brightspace didn't answer properly (503). We'll try again later."
+
+
+# ---------------------------------------------------------------- review 3: refreshing without page views
+
+
+def _stale_feed(user, n: int, hours_ago: float | None, net) -> CalendarFeed:
+    url = f"https://learn.example.edu/d2l/le/calendar/feed/user/feed.ics?token=t{n}"
+    net.serve(url, FakeResponse(200, cal(ev(f"u{n}@x", f"Item {n} - Due", z(at(2)), z(at(2)),
+                                            LOCATION="Fall 2026 CHEM 1010-001 LEC"), head=D2L)))
+    feed = CalendarFeed(user_id=user.id, url=url, url_hash=feeds.url_hash(url), lms="brightspace",
+                        host="learn.example.edu",
+                        last_fetched_at=None if hours_ago is None else utcnow() - timedelta(hours=hours_ago))
+    db.session.add(feed)
+    db.session.commit()
+    return feed
+
+
+def test_health_refreshes_the_stalest_links_of_every_student(app, client, net):
+    """Review 3, ui#0: links only refreshed when their student opened a page, though the Connect page and
+    the privacy policy promise about-hourly refreshes and Google Calendar delivery. The keep-alive ping
+    to /health now sweeps the stalest links of everyone, a few at a time, at most every 5 minutes."""
+    ana, ben, gone, busy = (make_user(n, f"{n}@example.com") for n in ("ana", "ben", "gone", "busy"))
+    gone.active = False
+    db.session.commit()
+    feeds_by_age = [_stale_feed(ana, 0, 2, net), _stale_feed(ben, 1, 3, net), _stale_feed(ana, 2, 4, net),
+                    _stale_feed(ben, 3, 5, net), _stale_feed(ana, 4, 6, net), _stale_feed(ben, 5, None, net),
+                    _stale_feed(ana, 6, 0.5, net)]  # fresh: not due
+    inactive = _stale_feed(gone, 7, None, net)
+    in_progress = _stale_feed(busy, 8, 9, net)  # a page view is refreshing this student's links already
+    ids = [f.id for f in feeds_by_age]
+    feeds._running.add(busy.id)
+    try:
+        assert client.get("/health").get_json()["ok"] is True
+    finally:
+        feeds._running.discard(busy.id)
+    db.session.expire_all()
+    fetched = {c["target"].rsplit("=", 1)[1] for c in net.calls}
+    assert fetched == {"t5", "t4", "t3", "t2", "t1"}, "the five stalest (never checked first), anyone's"
+    assert all(db.session.get(CalendarFeed, i).account_id for i in ids[1:6])
+    assert db.session.get(CalendarFeed, inactive.id).last_fetched_at is None
+    assert db.session.get(CalendarFeed, in_progress.id).account_id is None
+
+    calls = len(net.calls)
+    assert client.get("/health").status_code == 200
+    assert len(net.calls) == calls, "at most one sweep every 5 minutes"
+
+    result = app.test_cli_runner().invoke(args=["feeds", "refresh-stale"])  # by hand, for everything stale
+    assert result.exit_code == 0 and "Refreshed 2 calendar links." in result.output
+    db.session.expire_all()
+    assert {c["target"].rsplit("=", 1)[1] for c in net.calls[calls:]} == {"t0", "t8"}
+    assert db.session.get(CalendarFeed, inactive.id).last_fetched_at is None
+
+
+def test_the_sweep_runs_on_its_own_thread_and_never_breaks_health(app, client, monkeypatch):
+    calls, release = [], threading.Event()
+
+    def slow_sweep(limit):
+        calls.append(limit)
+        release.wait(5)
+        return 0
+
+    monkeypatch.setattr(feeds, "refresh_stale", slow_sweep)
+    app.config["EXTRACT_INLINE"] = False
+    try:
+        started = time.monotonic()
+        assert feeds.tick(app) is True
+        assert time.monotonic() - started < 0.5, "returns at once"
+        app.extensions["hh_feeds_tick"]["last"] = None
+        assert feeds.tick(app) is False, "one sweep at a time"
+    finally:
+        release.set()
+    for _ in range(50):
+        if not app.extensions["hh_feeds_tick"]["running"]:
+            break
+        time.sleep(0.05)
+    assert calls == [feeds.TICK_BATCH] and not app.extensions["hh_feeds_tick"]["running"]
+
+    app.config["EXTRACT_INLINE"] = True
+    app.extensions["hh_feeds_tick"]["last"] = None
+
+    def broken(limit):
+        raise RuntimeError("database down")
+
+    monkeypatch.setattr(feeds, "refresh_stale", broken)
+    assert client.get("/health").get_json()["ok"] is True
+
+
+def test_the_sweep_delivers_new_due_dates_to_google_calendar(app, client, student, net, composio):
+    composio.connect(student, "googlecalendar")
+    db.session.add(Integration(user_id=student.id, kind="calendar", connected=True, settings={"enabled": True}))
+    db.session.commit()
+    body = [brightspace_ics()]
+    net.serve(BS_URL, lambda h: FakeResponse(200, body[0]))
+    add_feed(client, BS_URL)
+    client.post("/logout")  # the student doesn't open anything after this
+    body[0] = body[0].replace(b"END:VCALENDAR", ev("new@x", "Project - Due", z(at(9)), z(at(9)),
+                                                   LOCATION="Fall 2026 CHEM 1010-001 LEC").encode() + b"END:VCALENDAR")
+    db.session.scalar(select(CalendarFeed)).last_fetched_at = utcnow() - timedelta(minutes=61)
+    db.session.commit()
+    client.get("/health")
+    created = [a["summary"] for s, a in composio.calls if s == "GOOGLECALENDAR_CREATE_EVENT"]
+    assert "Due: Project · CHEM 1010-001" in created
