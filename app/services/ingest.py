@@ -323,7 +323,10 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
         course.term_id = _clip(term.get("id"), 64)
         course.term_name = _clip(term.get("name"), 200)
         course.class_key = (c.get("class_key") or f"{course.term_id}::{course.name.lower()}")[:400]
-        course.room_key = f"{host}:{cid}"
+        # Class chat joins classmates by room_key. A calendar link's classes come from a guessable
+        # name ("Calendar", "Zoom", the school's name), so they get a room only their account can
+        # reach: "/" never appears in a host, so no Canvas snapshot can forge this key.
+        course.room_key = f"ics/{account.id}:{cid}" if canvas_user_id.startswith("feed-") else f"{host}:{cid}"
         course.on_dashboard = c.get("on_dashboard")
         course.active = True
         course.current_score = _float(grade.get("current_score"))
@@ -437,7 +440,8 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
 
     # Events the extension couldn't fully fetch (or didn't send) are unknown, not gone: keep them.
     # Deleting on a partial list would also unlink study plans and "is this a test?" answers.
-    failed_events = any(str((e or {}).get("endpoint", "")) == "calendar_events" for e in snapshot.get("errors") or [])
+    failed_events = any(str((e or {}).get("endpoint", "")) == "calendar_events" for e in snapshot.get("errors") or []) \
+        or any(str((r or {}).get("endpoint", "")).rstrip("/") == "/calendar_events" for r in snapshot.get("restricted") or [])
     events = None if failed_events or snapshot.get("calendar_events") is None else snapshot["calendar_events"]
     _sync_rows(CalendarEvent, {"account_id": account.id, "user_id": user.id}, events, "canvas_id",
                lambda e: _str(e.get("id")), lambda row, e: _apply_event(row, e, courses_by_canvas_id))

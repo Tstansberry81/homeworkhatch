@@ -175,7 +175,11 @@ def dashboard():
         label = "Today" if d == today else "Tomorrow" if d == today + timedelta(days=1) else d.strftime("%a · %b %-d")
         agenda.append((label, by_day[d]))
     accounts = queries.accounts(current_user.id)
-    last_sync = accounts[0].last_sync_at if accounts else None
+    # The pill tracks the extension's Canvas sync: an hourly calendar link must not hide a stale
+    # one. Calendar links count only for students who have nothing else.
+    canvas = [a for a in accounts if a.lms != "ics"]
+    pill = (canvas or accounts)[0] if accounts else None
+    last_sync = pill.last_sync_at if pill else None
     soon = [p for p in planner.active_plans(current_user.id) if p.exam_at and p.exam_at <= utcnow() + timedelta(days=21)]
     today_iso = today.isoformat()
     return render_template(
@@ -184,7 +188,7 @@ def dashboard():
                                       for p in soon},
         roles=planner.ROLES,
         missing=queries.missing(current_user.id), classes=queries.class_rows(courses),
-        announcements=queries.recent_announcements(current_user.id), accounts=accounts,
+        announcements=queries.recent_announcements(current_user.id), accounts=accounts, pill=pill,
         stale=last_sync is None or (utcnow() - last_sync) > timedelta(hours=3),
         files_undecided=sum(1 for c in courses if c.sync_files is None and c.account.lms != "ics"),
     )

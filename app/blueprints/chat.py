@@ -31,6 +31,8 @@ def _member_count(room_key: str) -> int:
 
 def _course(course_id: int) -> Course:
     course = queries.owned_course(current_user.id, course_id)
+    if course.account.lms == "ics":  # calendar-link classes have no classmates to chat with
+        abort(404)
     if not course.active:
         abort(404)
     return course
@@ -52,7 +54,8 @@ def _payload(m: ChatMessage) -> dict:
 @bp.route("/")
 @login_required
 def index():
-    courses = queries.visible_courses(current_user.id)
+    # Class chat is for classmates found through Canvas; a calendar link's classes have no classmates.
+    courses = [c for c in queries.visible_courses(current_user.id) if c.account.lms != "ics"]
     keys = [c.room_key for c in courses]
     counts, last = {}, {}
     if keys:

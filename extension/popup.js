@@ -401,7 +401,7 @@ $("save").onclick = () => {
 // Deliberately not async: an async listener returns a Promise, which Chrome treats as a
 // reply to *every* message — including ones meant for the worker or offscreen page.
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type !== "status" || !settings.baseUrl) return;
+  if (msg.type !== "status" || !settings.baseUrl || $("main").hidden) return;  // only the Canvas view shows sync states
   (async () => {
     const fresh = await chrome.storage.local.get(["snapshot", "downloadedKeys"]);
     if (msg.status.state === "ok") snapshot = fresh.snapshot;

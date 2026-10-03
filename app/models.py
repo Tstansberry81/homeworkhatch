@@ -804,7 +804,7 @@ class LmsDiagnostic(db.Model):
     """A shape-only check the extension ran on an LMS it can't sync yet (no names, grades or text):
     which endpoints answered, with what status, counts and field types. For building new adapters."""
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"), index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     lms: Mapped[str] = mapped_column(String(20))
     host: Mapped[str] = mapped_column(String(255))
     extension_version: Mapped[str | None] = mapped_column(String(20))

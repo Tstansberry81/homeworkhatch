@@ -391,7 +391,11 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
     safe("calendar_events", () => client.all("/calendar_events", {
       type: "event", "context_codes[]": codes, start_date: iso(now - 14 * DAY), end_date: iso(now + 120 * DAY),
     }))));
-  const events = eventChunks.some((c) => c == null) ? null : eventChunks.flat().filter(Boolean);
+  // A later page that failed (403 rate limit, 404) leaves a partial list and a "restricted" note:
+  // that list is unknown too.
+  const eventsCut = eventChunks.some((c) => c == null)
+    || client.restricted.some((r) => String(r.endpoint || "").replace(/\/$/, "") === "/calendar_events");
+  const events = eventsCut ? null : eventChunks.flat().filter(Boolean);
 
   const missing = await safe("missing_submissions", () => client.all("/users/self/missing_submissions"));
 

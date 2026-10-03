@@ -86,6 +86,9 @@ def post_snapshot():
         body = json.loads(request.get_data(cache=False) or b"{}")
     except (json.JSONDecodeError, UnicodeDecodeError):
         return _error(400, "body is not JSON")
+    snapshot_user = ((body.get("snapshot") or {}).get("user") or {}) if isinstance(body.get("snapshot"), dict) else {}
+    if str(snapshot_user.get("id", "") if isinstance(snapshot_user, dict) else "").startswith("feed-"):
+        return _error(400, "that user id is reserved")  # calendar links' accounts; Canvas ids are numeric
     try:
         run, needed = ingest.ingest_snapshot(g.api_user, body.get("snapshot"), body.get("files") or [])
     except ingest.IngestError as exc:

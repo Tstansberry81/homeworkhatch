@@ -216,3 +216,13 @@ def test_field_names_with_spaces_are_dropped():
 
     assert diagnostics.KEY_RE.match("SubmissionType") and diagnostics.KEY_RE.match("{ou}")
     assert not diagnostics.KEY_RE.match("Pat Example")
+
+
+def test_deleting_the_account_deletes_its_diagnostics(app, client):
+    student = make_user("sam")
+    _post(client, api_token(student), REPORT)
+    assert db.session.query(LmsDiagnostic).count() == 1
+    login(client, student)
+    client.post("/settings/data/delete", data={"confirm": "sam", "password": "password123"})
+    db.session.expire_all()
+    assert db.session.query(LmsDiagnostic).count() == 0

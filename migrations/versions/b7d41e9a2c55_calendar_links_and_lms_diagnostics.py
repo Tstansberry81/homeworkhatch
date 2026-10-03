@@ -50,7 +50,7 @@ def upgrade():
         sa.Column('extension_version', sa.String(length=20), nullable=True),
         sa.Column('payload', sa.JSON(), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(['user_id'], ['user.id'], ondelete='SET NULL'),
+        sa.ForeignKeyConstraint(['user_id'], ['user.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
     )
     with op.batch_alter_table('lms_diagnostic', schema=None) as batch_op:

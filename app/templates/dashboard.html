@@ -26,7 +26,7 @@
     <h1>{{ "Morning" if today.hour < 12 else "Afternoon" if today.hour < 18 else "Evening" }}, <span class="hl">{{ current_user.display_name }}</span>.</h1>
   </div>
   {% if accounts %}
-  <a class="sync-pill {{ 'stale' if stale }}" href="{{ url_for('settings.sync') }}"><span class="dot"></span>synced {{ accounts[0].last_sync_at|ago }} · {{ source_label(accounts[0]) }}</a>
+  <a class="sync-pill {{ 'stale' if stale }}" href="{{ url_for('settings.sync') }}"><span class="dot"></span>synced {{ pill.last_sync_at|ago }} · {{ source_label(pill) }}</a>
   {% endif %}
 </div>
 

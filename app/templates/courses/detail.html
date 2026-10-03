@@ -11,7 +11,7 @@
     {% if ai_available %}
     <form method="post" action="{{ url_for('tutor.new') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn">Ask about this class</button></form>
     {% endif %}
-    <a class="btn btn-ghost" href="{{ url_for('chat.room', course_id=course.id) }}">Class chat</a>
+    {% if course.account.lms != 'ics' %}<a class="btn btn-ghost" href="{{ url_for('chat.room', course_id=course.id) }}">Class chat</a>{% endif %}
     {% if course.html_url %}<a class="btn btn-ghost" href="{{ course.html_url }}" target="_blank" rel="noopener">Open in Canvas ↗</a>{% endif %}
   </div>
 </div>
@@ -30,7 +30,7 @@
     {% else %}{{ empty("✅", "Nothing due in this class for the next two weeks.") }}{% endif %}
   </div>
   <div>
-    <div class="card stat"><div class="value">{{ grade_text(course) }}</div><div class="label">current grade in Canvas</div></div>
+    {% if course.account.lms != 'ics' %}<div class="card stat"><div class="value">{{ grade_text(course) }}</div><div class="label">current grade in Canvas</div></div>{% endif %}
     {% if course.syllabus_html %}
     <div class="card"><h2>Syllabus</h2><div class="prose small" style="max-height:340px;overflow:auto">{{ course.syllabus_html|canvas_html(base_url)|safe }}</div></div>
     {% endif %}

@@ -3,7 +3,7 @@
 {% from "_icons.html" import icon %}
 {% block title %}Classes{% endblock %}
 {% block content %}
-<div class="page-head"><div><p class="kicker">Synced from Canvas</p><h1>Classes</h1><p class="muted">Hidden classes stay out of your dashboard, calendar and downloads.</p></div>
+<div class="page-head"><div><p class="kicker">Synced from {{ source_names(current_user) }}</p><h1>Classes</h1><p class="muted">Hidden classes stay out of your dashboard, calendar and downloads.</p></div>
   <a class="btn btn-ghost" href="{{ url_for('chat.index') }}">{{ icon('chat', 18) }} Class chats</a></div>
 {% if courses %}
 <div class="grid grid-3">

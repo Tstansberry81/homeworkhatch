@@ -1,7 +1,9 @@
 {% macro status_badge(a) -%}
 {%- set s = a.effective_status -%}
+{#- A calendar link only knows dates, not what was handed in. -#}
+{%- if s == 'past_due' and a.course and a.course.account and a.course.account.lms == 'ics' -%}{%- set s = 'date_passed' -%}{%- endif -%}
 {%- set labels = {"graded": "Graded", "submitted": "Submitted", "submitted_late": "Late", "missing": "Missing",
-   "past_due": "Past due", "upcoming": "To do", "excused": "Excused", "no_submission": "In class", "done": "Done"} -%}
+   "past_due": "Past due", "date_passed": "Date passed", "upcoming": "To do", "excused": "Excused", "no_submission": "In class", "done": "Done"} -%}
 <span class="badge {{ s }}">{{ labels.get(s, s) }}</span>
 {%- endmacro %}
 

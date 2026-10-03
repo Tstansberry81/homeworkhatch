@@ -761,3 +761,48 @@ def test_past_items_from_a_calendar_link_drop_off_instead_of_piling_up(app):
     ])
     db.session.commit()
     assert [a.name for a in queries.upcoming(user.id)] == ["Quiz 3"]
+
+
+def test_calendar_link_classes_never_share_chat_rooms_or_identities(app, client):
+    from app.models import CanvasAccount, Course
+    from app.services import ingest
+
+    rooms = []
+    for name in ("ana", "ben"):
+        user = make_user(name, f"{name}@example.com")
+        snap = {"schema_version": 1, "base_url": "https://lms.district.example", "user": {"id": f"feed-{user.id}"},
+                "courses": [{"id": "abc123", "name": "Calendar (lms.district.example)", "assignments": [],
+                             "assignment_groups": []}], "calendar_events": []}
+        ingest.ingest_snapshot(user, snap, [])
+        db.session.commit()
+        rooms.append(db.session.scalar(select(Course.room_key).where(Course.user_id == user.id)))
+    assert rooms[0] != rooms[1] and all(r.startswith("ics/") for r in rooms), rooms
+    # Nobody can claim a calendar link's identity through the extension API.
+    from .conftest import api_token
+
+    mallory = make_user("mallory", "mallory@example.com")
+    r = client.post("/v1/snapshots", headers={"Authorization": f"Bearer {api_token(mallory)}"},
+                    json={"snapshot": {"schema_version": 1, "base_url": "https://lms.district.example",
+                                       "user": {"id": "feed-99"}, "courses": []}, "files": []})
+    assert r.status_code == 400
+    assert not db.session.scalar(select(CanvasAccount).where(CanvasAccount.canvas_user_id == "feed-99"))
+
+
+def test_dashboard_pill_follows_canvas_even_with_a_fresher_calendar_link(app, client, snapshot, manifest):
+    from app.models import CanvasAccount, utcnow
+    from app.services import ingest
+
+    from .conftest import api_token, sync
+
+    user = make_user("both", "both@example.com")
+    sync(client, api_token(user), snapshot, manifest)
+    canvas = db.session.scalar(select(CanvasAccount).where(CanvasAccount.user_id == user.id))
+    canvas.last_sync_at = utcnow() - timedelta(days=5)
+    ingest.ingest_snapshot(user, {"schema_version": 1, "base_url": "https://school.brightspace.example",
+                                  "user": {"id": f"feed-{user.id}"}, "courses": [], "calendar_events": []}, [])
+    feed_account = db.session.scalar(select(CanvasAccount).where(CanvasAccount.canvas_user_id == f"feed-{user.id}"))
+    feed_account.lms = "ics"
+    db.session.commit()
+    login(client, user)
+    page = client.get("/dashboard").get_data(as_text=True)
+    assert "sync-pill stale" in page and "5 days" in page

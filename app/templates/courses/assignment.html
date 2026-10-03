@@ -36,7 +36,11 @@
     <div class="card">
       <h2>Your submission</h2>
       {% if a.score is not none %}<div class="stat"><div class="value">{{ '%g' % a.score }}{% if a.points_possible %}<span class="muted" style="font-size:1rem"> / {{ '%g' % a.points_possible }}</span>{% endif %}</div>{% if a.percent is not none %}<div class="label">{{ a.percent }}%</div>{% endif %}</div>{% endif %}
+      {% if a.course.account and a.course.account.lms == 'ics' %}
+      <p class="small">This came from your {{ source_name(a.course.account) }} calendar link, which only has due dates. Check {{ source_name(a.course.account) }} for what you've handed in{% if a.effective_status != 'done' %}, and tick it done here when you have{% endif %}.</p>
+      {% else %}
       <p class="small">{% if a.submitted_at %}Submitted {{ a.submitted_at|dt('long') }}{% if a.late %} (late){% endif %}.{% elif a.effective_status == 'no_submission' %}Nothing to turn in online.{% else %}Not submitted yet.{% endif %}</p>
+      {% endif %}
       {% if a.attachments %}<h3>Files you turned in</h3><ul class="small">{% for f in a.attachments %}<li>{{ f.name }}</li>{% endfor %}</ul>{% endif %}
     </div>
     {% if a.comments %}
