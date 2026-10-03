@@ -169,6 +169,9 @@ class CanvasAccount(db.Model):
     # re-reading and re-writing every class (see ingest.snapshot_digest).
     last_snapshot_hash: Mapped[str | None] = mapped_column(String(64))
     restricted: Mapped[list | None] = mapped_column(JSON)
+    # Where the data comes from: "canvas" (the extension), or "ics" (a calendar link the student
+    # pasted, for Brightspace, Blackboard, Moodle, Schoology...). More LMS adapters later.
+    lms: Mapped[str] = mapped_column(String(20), default="canvas", server_default="canvas")
 
     __table_args__ = (UniqueConstraint("user_id", "host", "canvas_user_id"),)
 
@@ -775,6 +778,38 @@ class AssessmentChoice(db.Model):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (UniqueConstraint("user_id", "course_id", "item"),)
+
+
+class CalendarFeed(db.Model):
+    """A personal calendar link (iCal) from another LMS. The server fetches it about hourly and turns
+    its due dates and events into a class list under its own account (CanvasAccount.lms == "ics")."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    # The link carries a secret token that opens the student's calendar: encrypted, and found by hash.
+    url: Mapped[str] = mapped_column(EncryptedText("calendar_feed.url"))
+    url_hash: Mapped[str] = mapped_column(String(64))
+    lms: Mapped[str] = mapped_column(String(20), default="other")  # brightspace / blackboard / moodle / schoology / other
+    host: Mapped[str] = mapped_column(String(255))
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("canvas_account.id", ondelete="SET NULL"))
+    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+    etag: Mapped[str | None] = mapped_column(String(300))
+    event_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("user_id", "url_hash"),)
+
+
+class LmsDiagnostic(db.Model):
+    """A shape-only check the extension ran on an LMS it can't sync yet (no names, grades or text):
+    which endpoints answered, with what status, counts and field types. For building new adapters."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"), index=True)
+    lms: Mapped[str] = mapped_column(String(20))
+    host: Mapped[str] = mapped_column(String(255))
+    extension_version: Mapped[str | None] = mapped_column(String(20))
+    payload: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 Index("ix_chunk_course_source", ContentChunk.course_id, ContentChunk.source_type, ContentChunk.source_id)
