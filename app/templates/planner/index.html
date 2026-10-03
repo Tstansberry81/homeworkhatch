@@ -8,7 +8,7 @@
 <div class="page-head">
   <div>
     <h1>Exams</h1>
-    <p class="muted">Your tests, quizzes and exams from Canvas, each with a study plan built around it. Short sessions on different days, a practice test before the real one. Free, no AI needed.</p>
+    <p class="muted">Your tests, quizzes and exams from {{ source_names(current_user) }}, each with a study plan built around it. Short sessions on different days, a practice test before the real one. Free, no AI needed.</p>
   </div>
 </div>
 
@@ -73,7 +73,7 @@
 
   <div>
     <section class="card" aria-labelledby="found-h">
-      <h2 id="found-h">Found in Canvas</h2>
+      <h2 id="found-h">Found in {{ source_names(current_user) }}</h2>
       {% if sure or ask %}
       {% if sure %}
       <ul class="list">
@@ -118,7 +118,7 @@
       </ul>
       {% endif %}
       {% else %}
-      <p class="small muted">Nothing new in the next 60 days. Tests appear here after your Canvas syncs; anything we miss, add by hand below.</p>
+      <p class="small muted">Nothing new in the next 60 days. Tests appear here after each sync from {{ source_names(current_user) }}; anything we miss, add by hand below.</p>
       {% endif %}
     </section>
 

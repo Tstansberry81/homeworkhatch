@@ -9,7 +9,7 @@
   </div>
   <div class="btn-row">
     <form method="post" action="{{ url_for('main.toggle_done', assignment_id=a.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost">{{ 'Unmark done' if a.user_done else '✓ Mark done' }}</button></form>
-    {% if a.html_url %}<a class="btn" href="{{ a.html_url }}" target="_blank" rel="noopener">Open in Canvas ↗</a>{% endif %}
+    {% if a.html_url %}<a class="btn" href="{{ a.html_url }}" target="_blank" rel="noopener">Open in {{ source_name(course.account) }} ↗</a>{% endif %}
   </div>
 </div>
 <div class="grid grid-main">

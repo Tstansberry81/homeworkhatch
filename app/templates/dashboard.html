@@ -26,7 +26,7 @@
     <h1>{{ "Morning" if today.hour < 12 else "Afternoon" if today.hour < 18 else "Evening" }}, <span class="hl">{{ current_user.display_name }}</span>.</h1>
   </div>
   {% if accounts %}
-  <a class="sync-pill {{ 'stale' if stale }}" href="{{ url_for('settings.sync') }}"><span class="dot"></span>synced {{ accounts[0].last_sync_at|ago }} · {{ accounts[0].host }}</a>
+  <a class="sync-pill {{ 'stale' if stale }}" href="{{ url_for('settings.sync') }}"><span class="dot"></span>synced {{ accounts[0].last_sync_at|ago }} · {{ source_label(accounts[0]) }}</a>
   {% endif %}
 </div>
 
@@ -38,6 +38,7 @@
   <h2>Connect your Canvas</h2>
   <p>Add the extension, sign in to Canvas like always, and your classes, due dates and grades land here and stay in sync every hour. You choose which classes' files to keep.</p>
   <a class="btn btn-ghost" href="{{ url_for('settings.sync') }}">Set it up {{ icon('arrow', 16) }}</a>
+  <p class="small muted mt">On Brightspace, Blackboard, Moodle or Schoology? <a href="{{ url_for('settings.sync') }}#calendar-links">Add your calendar link</a> to bring in your due dates.</p>
 </div>
 {% endif %}
 

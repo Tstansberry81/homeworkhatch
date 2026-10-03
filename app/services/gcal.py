@@ -21,6 +21,7 @@ from sqlalchemy.orm import selectinload
 from ..extensions import db
 from ..models import Assignment, CalendarPush, Course, User, utcnow
 from . import integrations
+from .feeds import source_name
 
 LOOKAHEAD = timedelta(days=60)
 EVENT_MINUTES = 30
@@ -55,7 +56,7 @@ def _event(a: Assignment, tz: ZoneInfo) -> dict:
     if a.points_possible:
         lines.append(f"{a.points_possible:g} points")
     if a.html_url:
-        lines.append(f'<a href="{a.html_url}">Open in Canvas</a>')
+        lines.append(f'<a href="{a.html_url}">Open in {source_name(course.account)}</a>')
     path = url_for("courses.assignment", assignment_id=a.id)
     due = a.due_at.replace(tzinfo=timezone.utc).astimezone(tz)
     return {"summary": summary, "end": due, "start": due - timedelta(minutes=EVENT_MINUTES),

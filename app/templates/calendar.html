@@ -41,7 +41,7 @@
 <div class="page-head">
   <div>
     <h1>{{ title }}</h1>
-    <p class="muted">{% if to_do or done %}{{ to_do }} to do{% if done %} · {{ done }} done{% endif %} · {% endif %}Due dates and Canvas events in your time zone ({{ current_user.timezone }}).</p>
+    <p class="muted">{% if to_do or done %}{{ to_do }} to do{% if done %} · {{ done }} done{% endif %} · {% endif %}Due dates and {{ source_names(current_user) }} events in your time zone ({{ current_user.timezone }}).</p>
   </div>
   <div class="btn-row">
     <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=prev.isoformat()) }}" aria-label="Previous {{ view }}">←</a>
