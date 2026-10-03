@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from .. import queries
 from ..extensions import db
-from ..models import AssessmentChoice, Assignment, CalendarEvent, Deck, PracticeQuiz, StudyPlan, StudySession, utcnow
+from ..models import AssessmentChoice, Assignment, CalendarEvent, Deck, DeckTest, PracticeQuiz, StudyPlan, StudySession, utcnow
 from ..services import assessments, coins, planner
 from ..utils import local_now, user_zone
 
@@ -50,22 +50,41 @@ def _planned_keys(plans) -> set[str]:
 
 
 def _suggestions(found, plans) -> list:
-    """Tests without a plan, one per real sitting: 'Exam 1 Part A/B' in the same hour are one test,
-    and a make-up sitting is dropped when the regular one is listed."""
+    """Tests without a plan, one per real sitting: parts of one exam in the same hour are one test,
+    a make-up sitting is dropped when its regular sitting is listed, and anything already over is
+    left out."""
     planned = _planned_keys(plans)
+    now = utcnow()
+    regular = {(f.course.id, assessments.makeup_key(f.title)) for f in found if not f.hints.get("makeup")}
     out, seen = [], {}
-    regular = {(f.course.id, f.family.replace(" +makeup", "")) for f in found if not f.hints.get("makeup")}
     for f in found:
         if f.kind == "none" or f.key in planned or (f.event and f"e:{f.event.id}" in planned):
             continue
-        if f.hints.get("makeup") and (f.course.id, f.family.replace(" +makeup", "")) in regular:
+        if f.when is not None and f.when <= now:
             continue
-        sib = (f.course.id, assessments.stem(f.title, sibling=True))
+        if f.hints.get("makeup") and (f.course.id, assessments.makeup_key(f.title)) in regular:
+            continue
+        sib = (f.course.id, f.kind, assessments.sibling_key(f.title))
         if sib in seen and f.when and seen[sib] and abs((f.when - seen[sib]).total_seconds()) <= 3600:
             continue
         seen[sib] = f.when
         out.append(f)
     return out
+
+
+def _existing(found) -> StudyPlan | None:
+    """The student's active plan for this test, if they already have one."""
+    if found.assignment is not None:
+        cond = StudyPlan.assignment_id == found.assignment.id
+    else:
+        cond = StudyPlan.event_id == found.event.id
+    return db.session.scalar(select(StudyPlan).where(StudyPlan.user_id == current_user.id,
+                                                     StudyPlan.status == "active", cond))
+
+
+def _family_label(item: str) -> str:
+    key = item[7:].split("|")[0].split("~")[0]
+    return f"Everything like “{key.replace('#', 'N')}”"
 
 
 @bp.app_template_global()
@@ -123,7 +142,7 @@ def index():
             e = db.session.get(CalendarEvent, int(c.item[2:]))
             nope_titles[c.id] = e.title if e else "A calendar event"
         else:
-            nope_titles[c.id] = f"Everything like “{c.item[7:].replace('#', 'N')}”"
+            nope_titles[c.id] = _family_label(c.item)
     past = db.session.scalars(select(StudyPlan).where(StudyPlan.user_id == current_user.id, StudyPlan.status == "done")
                               .order_by(StudyPlan.exam_at.desc()).limit(5)).all()
     return render_template(
@@ -158,13 +177,12 @@ def create():
         if found is None:
             flash("That test isn't in your synced Canvas data any more.", "error")
             return redirect(url_for("planner.index"))
-        if found.kind == "none":
-            found.kind = request.form.get("kind") if request.form.get("kind") in KINDS else "test"
-        existing = db.session.scalar(select(StudyPlan).where(
-            StudyPlan.user_id == current_user.id, StudyPlan.status == "active",
-            (StudyPlan.assignment_id == found.assignment.id) if found.assignment else (StudyPlan.event_id == found.event.id)))
+        existing = _existing(found)
         if existing:
             return redirect(url_for("planner.plan", plan_id=existing.id))
+        if found.when is not None and found.when <= utcnow():
+            flash(f"{found.title} has already happened.", "info")
+            return redirect(url_for("planner.index"))
         plan = planner.create(current_user, title=found.title, kind=found.kind, exam_at=found.when, course=found.course,
                               assignment=found.assignment, event=found.event, share=found.share, hints=found.hints)
     else:  # by hand: a test that isn't in Canvas (or only in the syllabus)
@@ -214,7 +232,7 @@ def choice():
     if found is None:
         abort(404)
     course_id = found.course.id
-    key = f"family:{found.family}"[:200] if request.form.get("scope") == "family" else item
+    key = f"family:{assessments.family_id(found.family, found.natural)}" if request.form.get("scope") == "family" else item
     row = db.session.scalar(select(AssessmentChoice).where(AssessmentChoice.user_id == current_user.id,
                                                            AssessmentChoice.course_id == course_id,
                                                            AssessmentChoice.item == key))
@@ -224,6 +242,12 @@ def choice():
     row.kind = kind
     db.session.commit()
     if kind != "none" and request.form.get("plan"):
+        existing = _existing(found)
+        if existing:
+            return redirect(url_for("planner.plan", plan_id=existing.id))
+        if found.when is not None and found.when <= utcnow():
+            flash(f"{found.title} has already happened.", "info")
+            return redirect(url_for("planner.index"))
         plan = planner.create(current_user, title=found.title, kind=kind, exam_at=found.when, course=found.course,
                               assignment=found.assignment, event=found.event, share=found.share, hints=found.hints)
         db.session.commit()
@@ -283,6 +307,9 @@ def plan(plan_id: int):
             planner.schedule(current_user)
         p.updated_at = utcnow()
         db.session.commit()
+        back = request.form.get("next") or ""
+        if back.startswith("/study/exams/session/") and "//" not in back:  # only back to a session page
+            return redirect(back)
         return redirect(url_for("planner.plan", plan_id=p.id) + (request.form.get("anchor") or ""))
     zone = user_zone(current_user)
     exam_local = p.exam_at.replace(tzinfo=timezone.utc).astimezone(zone) if p.exam_at else None
@@ -290,9 +317,11 @@ def plan(plan_id: int):
         "planner/plan.html", plan=p, methods=planner.METHODS, pacings=planner.PACINGS, roles=planner.ROLES,
         tiers=planner.TIER_LABELS, kinds=planner.KIND_LABELS, today=local_now(current_user).date(),
         exam_local=exam_local, readiness=planner.readiness(p), materials=planner.materials(p),
+        upcoming=bool(p.exam_at and p.exam_at > utcnow()),
         needed=planner.needed_score(p), recommended=planner.recommend_method(p.course),
-        generate_deck=_endpoint("study.generate", course=p.course_id, output="deck", mode="course") if p.course_id else None,
-        import_url=_endpoint("study.import_deck"), new_deck_url=_endpoint("study.new_deck"),
+        generate_deck=_endpoint("study.generate", course=p.course_id, output="deck", mode="course", plan=p.id)
+        if p.course_id else None,
+        import_url=_endpoint("study.import_deck", plan=p.id), new_deck_url=_endpoint("study.new_deck", plan=p.id),
         new_quiz_url=_endpoint("study.new_quiz"))
 
 
@@ -321,7 +350,14 @@ def _tools(p: StudyPlan, s: StudySession) -> dict:
     if decks:
         tools["learn"] = _endpoint("study.learn", plan=p.id, session=s.id)
         tools["learn_starred"] = _endpoint("study.learn", plan=p.id, session=s.id, starred=1)
-        tools["pretest"] = _endpoint("study.test_mode", plan=p.id, session=s.id, n=12)
+        last = db.session.scalar(select(DeckTest).where(DeckTest.plan_id == p.id).order_by(DeckTest.created_at.desc()))
+        missed = [a.get("card_id") for a in (last.answers or []) if not a.get("correct")] if last else []
+        missed = [int(c) for c in missed if isinstance(c, int) or str(c).isdigit()][:60]
+        if missed:
+            tools["learn_missed"] = _endpoint("study.learn", card=missed, session=s.id)
+            tools["missed_count"] = len(missed)
+        # The opening check is ungraded ("guessing is fine"): it never counts as readiness.
+        tools["pretest"] = _endpoint("study.test_mode", plan=p.id, session=s.id, n=12, check=1)
         tools["test"] = _endpoint("study.test_mode", plan=p.id, session=s.id, n=10 if p.kind == "quiz" else 30,
                                   minutes=test_minutes)
     if quizzes:
@@ -341,14 +377,28 @@ def session(session_id: int):
                            plan_url=url_for("planner.plan", plan_id=p.id))
 
 
+def _daily_award(amount: int, reason: str, kind: str, session_id: int, per_day: int = 3) -> None:
+    """Coins for studying: once per session, and at most per_day sessions a day (plans can be made
+    and deleted freely, so per-session alone could be farmed)."""
+    from sqlalchemy import func
+
+    from ..models import CoinTransaction
+
+    today = local_now(current_user).date().isoformat()
+    paid_today = db.session.scalar(select(func.count(CoinTransaction.id)).where(
+        CoinTransaction.user_id == current_user.id, CoinTransaction.ref.like(f"{kind}:{today}:%")))
+    if paid_today < per_day:
+        coins.award(current_user.id, amount, reason, f"{kind}:{today}:{session_id}")
+
+
 @bp.route("/session/<int:session_id>/start", methods=["POST"])
 @login_required
 def start(session_id: int):
     s = _session(session_id)
     if s.started_at is None:
         s.started_at = utcnow()
-        # Starting is the hard part: a coin for showing up (once per session).
-        coins.award(current_user.id, 1, "Started a study session", f"session-start:{s.id}")
+        # Starting is the hard part: a coin for showing up (a few times a day at most).
+        _daily_award(1, "Started a study session", "session-start", s.id)
     db.session.commit()
     return jsonify({"ok": True})
 
@@ -357,7 +407,7 @@ def start(session_id: int):
 @login_required
 def notes(session_id: int):
     s = _session(session_id)
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True) or request.form  # a beacon sends a form when the page closes
     s.notes = str(payload.get("notes") or "")[:20000] or None
     db.session.commit()
     return jsonify({"ok": True})
@@ -378,7 +428,11 @@ def done(session_id: int):
         s.done_at = s.done_at or utcnow()
         s.started_at = s.started_at or s.done_at
         s.minutes_done = max(s.minutes_done or 0, min(max(minutes, 0), 600))
-        coins.award(current_user.id, 3, "Finished a study session", f"session:{s.id}")
+        notes = payload.get("notes")
+        if notes is not None:  # the blank page's last words, sent with "I'm done"
+            s.notes = str(notes)[:20000] or None
+        if s.minutes_done >= 10 or (s.done_at - s.started_at) >= timedelta(minutes=10):  # some real studying
+            _daily_award(3, "Finished a study session", "session-done", s.id)
     db.session.commit()
     if request.is_json:
         return jsonify({"ok": True, "next": url_for("planner.plan", plan_id=s.plan_id)})

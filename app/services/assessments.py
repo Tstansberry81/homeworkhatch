@@ -623,7 +623,8 @@ def merge(assignments, events, days: int = 3):
             n_a, n_e = _num(a.name), _num(ev.name)
             same_num = n_a is not None and n_a == n_e
             same_kind = ar.kind == er.kind
-            if not close or not (same_num or (same_kind and (n_a is None or n_e is None))):
+            compatible = (ar.kind == "quiz") == (er.kind == "quiz")  # 'Quiz 2' is not the 'Exam 2' event
+            if not close or not compatible or not (same_num or (same_kind and (n_a is None or n_e is None))):
                 continue
             key = (same_num, same_kind, -abs((a.due_at - ev.start_at).total_seconds()) if a.due_at else -1e12)
             if best_key is None or key > best_key:
@@ -640,13 +641,42 @@ def merge(assignments, events, days: int = 3):
 # ------------------------------------------------------------------ the app's data
 
 
+def sibling_key(name: str) -> str:
+    """Parts of one sitting share this key ('Exam 1 Part A' / 'Part B'); different numbers don't
+    ('Chapter 4 Quiz' / 'Chapter 5 Quiz'), nor different tests in one unit ('Week 9: Exam')."""
+    raw = LOCKDOWN_SUFFIX.sub("", name or "")
+    h, sub = split_name(raw)
+    label_only = bool(CONTENT_REF.fullmatch(norm(h))) and bool(sub.strip())
+    base = h if re.search(r"\d", h) and not label_only else raw
+    return re.sub(r"\s+", " ", STEM_DROP.sub(" ", norm(base))).strip()
+
+
+def makeup_key(name: str) -> str:
+    """'Exam 2 (Make-up)', 'Makeup Exam 2' and 'Exam 2' share this; 'Exam 3' doesn't."""
+    n = MAKEUP.sub(" ", norm(LOCKDOWN_SUFFIX.sub("", name or "")))
+    n = re.sub(r" (sitting|session|version|exam room)s? ", " ", n)
+    return re.sub(r"\s+", " ", STEM_DROP.sub(" ", n)).strip()
+
+
+def family_id(family: str, natural_kind: str) -> str:
+    """How a "same for everything like it" answer is stored: the series key plus the classifier's own
+    kind for the item, so a 'No' on 'Week 3: Reading Check' can't hide 'Week 9: Midterm Exam', and a
+    'Yes' on 'Exam 2' can't turn 'Exam 1: Corrections' into a test. Long keys are shortened stably."""
+    key = f"{family}|{natural_kind}"
+    if len(key) > 150:
+        import hashlib
+
+        key = f"{key[:120]}~{hashlib.sha1(key.encode()).hexdigest()[:16]}"
+    return key
+
+
 @dataclass
 class Found:
     """A test, quiz or exam found in a student's synced Canvas data."""
 
     key: str  # "a:<assignment id>" or "e:<calendar event id>"
     title: str
-    kind: str  # final / midterm / test / quiz
+    kind: str  # final / midterm / test / quiz (or none, with include_none)
     confidence: str  # user / high / medium
     when: datetime | None  # naive UTC; None when Canvas has no date
     course: object
@@ -654,14 +684,16 @@ class Found:
     event: object = None
     share: float | None = None  # fraction of the course grade, when known
     family: str = ""
+    natural: str = ""  # what the classifier says without the student's answers
     reasons: list = field(default_factory=list)
     hints: dict = field(default_factory=dict)
 
 
 def _choices(user_id: int) -> tuple[dict, dict]:
+    from sqlalchemy import select
+
     from ..extensions import db
     from ..models import AssessmentChoice
-    from sqlalchemy import select
 
     exact, family = {}, {}
     for c in db.session.scalars(select(AssessmentChoice).where(AssessmentChoice.user_id == user_id)):
@@ -670,6 +702,18 @@ def _choices(user_id: int) -> tuple[dict, dict]:
         else:
             exact[c.item] = c.kind
     return exact, family
+
+
+def _judge(it: Item, course_id: int, key: str, exact: dict, family: dict) -> tuple[Result, Result]:
+    """(the result to use, the classifier's own result). The student's exact answer wins; a series
+    answer applies only to items the classifier puts in the same kind."""
+    natural = classify(it)
+    it.user_kind = exact.get(key)
+    it.inherited_kind = None if it.user_kind else family.get((course_id, family_id(stem(it.name), natural.kind)))
+    return (classify(it) if (it.user_kind or it.inherited_kind) else natural), natural
+
+
+DONE_STATUSES = {"graded", "submitted", "submitted_late", "excused"}
 
 
 def find(user, days: int = 60, back_hours: int = 12, include_none: bool = False) -> list[Found]:
@@ -697,53 +741,62 @@ def find(user, days: int = 60, back_hours: int = 12, include_none: bool = False)
               "group_id": a.group_canvas_id} for a in everything],
             [{"id": g.canvas_id, "weight": g.weight, "name": g.name} for g in groups], course.group_weighting)
         group_names = {g.canvas_id: g.name for g in groups}
-        window = [a for a in everything if a.due_at is None or lo <= a.due_at <= hi]
+
+        def undated_and_done(a) -> bool:  # last month's graded exam with no date isn't coming up
+            return a.due_at is None and (a.status in DONE_STATUSES or a.score is not None or a.submitted_at is not None)
+
+        window = [a for a in everything if (a.due_at is None or lo <= a.due_at <= hi) and not undated_and_done(a)]
         if window:  # their instructions are encrypted and deferred: load just these
             ids = [a.id for a in window]
             window = db.session.scalars(select(Assignment).options(undefer_group("assignment_detail"))
                                         .where(Assignment.id.in_(ids))).all()
-        pairs = []
+        pairs = []  # (item, result, natural result, assignment)
         for a in window:
-            key = f"a:{a.id}"
             it = Item(name=a.name, submission_types=a.submission_types or [], is_quiz=bool(a.is_quiz),
                       points_possible=a.points_possible, grading_type=a.grading_type,
                       omit_from_final_grade=bool(a.omit_from_final_grade), unlock_at=a.unlock_at, lock_at=a.lock_at,
                       due_at=a.due_at, description_html=a.description_html, rubric=a.rubric,
-                      group_name=group_names.get(a.group_canvas_id), group_count=len(groups),
-                      share=shares.get(a.id), user_kind=exact.get(key),
-                      inherited_kind=family.get((course.id, stem(a.name))))
-            pairs.append((it, classify(it), a))
+                      group_name=group_names.get(a.group_canvas_id), group_count=len(groups), share=shares.get(a.id))
+            r, natural = _judge(it, course.id, f"a:{a.id}", exact, family)
+            pairs.append((it, r, natural, a))
         events = []
         for e in db.session.scalars(select(CalendarEvent).where(
                 CalendarEvent.user_id == user.id, CalendarEvent.course_id == course.id,
                 CalendarEvent.start_at >= lo, CalendarEvent.start_at <= hi)):
-            key = f"e:{e.id}"
-            it = Item(name=e.title, is_event=True, start_at=e.start_at, end_at=e.end_at, all_day=e.all_day,
-                      user_kind=exact.get(key), inherited_kind=family.get((course.id, stem(e.title))))
-            events.append((it, classify(it), e))
+            it = Item(name=e.title, is_event=True, start_at=e.start_at, end_at=e.end_at, all_day=e.all_day)
+            r, natural = _judge(it, course.id, f"e:{e.id}", exact, family)
+            events.append((it, r, natural, e))
 
         # An exam often exists twice: the gradebook assignment and the calendar event with the room.
-        merged = merge([(it, r) for it, r, _ in pairs], [(it, r) for it, r, _ in events])
-        by_item = {id(it): (r, a) for it, r, a in pairs}
-        ev_by_item = {id(it): (r, e) for it, r, e in events}
+        # Pair them using the classifier's own view, so a "Not a test" on the assignment also hides
+        # its event instead of the event coming back on its own.
+        suppressed = {id(it) for it, r, nat, _ in pairs + events if not r.is_assessment and nat.is_assessment}
+        merged = merge([(it, nat if id(it) in suppressed else r) for it, r, nat, _ in pairs],
+                       [(it, nat if id(it) in suppressed else r) for it, r, nat, _ in events])
+        by_item = {id(it): (r, nat, a) for it, r, nat, a in pairs}
+        ev_by_item = {id(it): (r, nat, e) for it, r, nat, e in events}
         seen = set()
         for a_it, e_it in merged:
+            if (a_it is not None and id(a_it) in suppressed) or (e_it is not None and id(e_it) in suppressed):
+                if a_it is not None:
+                    seen.add(id(a_it))
+                continue
             if a_it is not None:
-                r, a = by_item[id(a_it)]
-                ev = ev_by_item[id(e_it)][1] if e_it is not None else None
+                r, nat, a = by_item[id(a_it)]
+                ev = ev_by_item[id(e_it)][2] if e_it is not None else None
                 seen.add(id(a_it))
                 when = a.due_at or (ev.start_at if ev else None)
                 out.append(Found(f"a:{a.id}", a.name, r.kind, r.confidence, when, course, a, ev, a_it.share,
-                                 stem(a.name), r.reasons, r.hints))
+                                 stem(a.name), nat.kind, r.reasons, r.hints))
             else:
-                r, ev = ev_by_item[id(e_it)]
+                r, nat, ev = ev_by_item[id(e_it)]
                 out.append(Found(f"e:{ev.id}", ev.title, r.kind, r.confidence, ev.start_at, course, None, ev, None,
-                                 stem(ev.title), r.reasons, r.hints))
+                                 stem(ev.title), nat.kind, r.reasons, r.hints))
         if include_none:
-            for it, r, a in pairs:
+            for it, r, nat, a in pairs:
                 if id(it) not in seen and not r.is_assessment:
                     out.append(Found(f"a:{a.id}", a.name, "none", r.confidence, a.due_at, course, a, None, it.share,
-                                     stem(a.name), r.reasons, r.hints))
+                                     stem(a.name), nat.kind, r.reasons, r.hints))
     # Low confidence never reaches the planner; "medium" asks once.
     out = [f for f in out if f.kind == "none" or f.confidence in ("user", "high", "medium")]
     return sorted(out, key=lambda f: (f.when is None, f.when or now, f.title))

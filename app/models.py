@@ -715,6 +715,9 @@ class StudyPlan(db.Model):
     title: Mapped[str] = mapped_column(String(500))
     kind: Mapped[str] = mapped_column(String(10), default="test")  # final / midterm / test / quiz
     exam_at: Mapped[datetime | None] = mapped_column(DateTime)  # naive UTC
+    # The Canvas time the plan last followed: exam_at follows Canvas only when Canvas changes, so a
+    # date the student sets by hand sticks.
+    source_at: Mapped[datetime | None] = mapped_column(DateTime)
     tier: Mapped[str] = mapped_column(String(10), default="medium")  # micro / low / medium / high / major / final
     share: Mapped[float | None] = mapped_column(Float)  # fraction of the course grade, when known
     method: Mapped[str] = mapped_column(String(20), default="spaced")

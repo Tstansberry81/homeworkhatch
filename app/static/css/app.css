@@ -402,6 +402,9 @@ a.cite { display: inline-block; font: 700 .7rem var(--mono); padding: 0 6px; bor
 
 /* ---------- exam planner ---------- */
 .quiet-note { margin: -6px 0 12px; }
+.page-head > :first-child { min-width: 0; }
+.page-head h1, .page-head .kicker { overflow-wrap: anywhere; }
+fieldset.chip-row, fieldset.method-grid { border: 0; padding: 0; margin: 0; min-width: 0; }
 .mt-xs { margin-top: 6px; }
 .btn-col { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .badge.kind-final { background: var(--tomato-soft); }
@@ -411,7 +414,8 @@ a.cite { display: inline-block; font: 700 .7rem var(--mono); padding: 0 6px; bor
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .chip-radio { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1.5px solid var(--hair); border-radius: 999px; cursor: pointer; font-size: .86rem; font-weight: 600; }
 .chip-radio input { margin: 0; accent-color: var(--ink, #141311); }
-.chip-radio.on { background: var(--yolk); color: #141311; border-color: var(--line); }
+.chip-radio:has(input:checked) { background: var(--yolk); color: #141311; border-color: var(--line); }
+.chip-radio:has(input:focus-visible) { outline: 3px solid var(--sky); outline-offset: 2px; }
 .countdown.big { font-size: .95rem; padding: 6px 12px; }
 .ask-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
 .plan-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
@@ -445,7 +449,8 @@ a.cite { display: inline-block; font: 700 .7rem var(--mono); padding: 0 6px; bor
 .method input { position: absolute; opacity: 0; pointer-events: none; }
 .method:has(input:focus-visible) { outline: 3px solid var(--sky); outline-offset: 2px; }
 .method .name { font-weight: 700; }
-.method.on { border-color: var(--line); background: var(--yolk-soft); box-shadow: 2px 2px 0 var(--shadow-color); }
+.method { position: relative; }
+.method:has(input:checked) { border-color: var(--line); background: var(--yolk-soft); box-shadow: 2px 2px 0 var(--shadow-color); }
 .timer-face { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 6px 0 12px; }
 .timer-face #clock { font: 800 3.2rem/1 var(--mono); letter-spacing: -.02em; }
 .timer-card.ping { box-shadow: 0 0 0 4px var(--yolk); transition: box-shadow .3s; }

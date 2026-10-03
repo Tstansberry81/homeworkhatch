@@ -44,7 +44,7 @@
       {% if plans %}
       <ul class="list">
         {% for p in plans %}
-        {% set cd = p.exam_at|countdown if p.exam_at else (none, none) %}
+        {% set cd = p.exam_at|countdown if p.exam_at and p.exam_at > now_utc() else (none, none) %}
         {% set r = readiness[p.id] %}
         {% set total = p.sessions|length %}
         {% set finished = p.sessions|selectattr('done_at')|list|length %}
@@ -138,7 +138,7 @@
       </form>
     </details>
 
-    <form method="post" action="{{ url_for('planner.settings') }}" class="card">{{ csrf() }}
+    <form method="post" action="{{ url_for('planner.settings') }}" class="card" id="limit">{{ csrf() }}
       <h2>Daily limit</h2>
       <p class="small muted">The most study time to plan on one day, across every test. Extra sessions move to an earlier free day.</p>
       <div class="btn-row">

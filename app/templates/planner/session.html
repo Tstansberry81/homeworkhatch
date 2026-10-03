@@ -4,7 +4,8 @@
 {% block title %}{{ role[0] }} · {{ plan.title }}{% endblock %}
 {% block content %}
 {% include "_study_tabs.html" %}
-{% set needs_page = s.role in ('blurt', 'explain') or (not tools.get('learn') and s.role in ('learn', 'pretest', 'misses', 'cram', 'review')) %}
+{% set needs_page = s.role in ('blurt', 'explain') or (not tools.get('learn') and s.role in ('learn', 'pretest', 'misses', 'cram', 'review', 'mixed'))
+     or (s.role == 'practice_test' and not tools.get('test') and not tools.get('quiz')) %}
 <div class="page-head">
   <div>
     <p class="kicker"><a href="{{ plan_url }}">{{ plan.title }}</a> · {{ day_label(s.day) }} · {{ s.minutes }} min</p>
@@ -24,7 +25,7 @@
           {% if tools.test %}<a class="btn" href="{{ tools.test }}">Start the practice test</a>{% endif %}
           {% if tools.quiz %}<a class="btn {{ 'btn-ghost' if tools.test }}" href="{{ tools.quiz }}">Take your practice quiz</a>{% endif %}
         </div>
-        {% if not tools.test and not tools.quiz %}<p class="small muted">No cards or quiz linked yet. Add some on the <a href="{{ plan_url }}#materials">plan page</a>, or write out answers to last year's questions or the end-of-chapter problems below, timed.</p>{% endif %}
+        {% if not tools.test and not tools.quiz %}<p class="small muted">No cards or quiz linked yet. Add some on the <a href="{{ plan_url }}#materials">plan page</a>, or do end-of-chapter problems or an old exam with the timer running, writing your answers on the blank page below.</p>{% endif %}
       {% elif s.role == 'pretest' %}
         <p>First, about 10 minutes: a quick check across every topic. Not graded, and guessing is fine. Then spend the rest of the session on what you missed.</p>
         <div class="btn-row">{% if tools.pretest %}<a class="btn" href="{{ tools.pretest }}">1. Quick check</a>{% endif %}{% if tools.learn %}<a class="btn btn-ghost" href="{{ tools.learn }}">2. Recall</a>{% endif %}</div>
@@ -33,13 +34,16 @@
         {% if tools.learn %}<div class="btn-row"><a class="btn" href="{{ tools.learn }}">Start recall</a></div>{% endif %}
       {% elif s.role in ('review', 'misses') %}
         <p>{{ 'Go back over every miss from your practice test.' if s.role == 'review' else 'A short, light pass. Stop early tonight and sleep: the week of sleep before matters more than the last hours of studying.' }}</p>
-        {% if tools.learn %}<div class="btn-row"><a class="btn" href="{{ tools.learn_starred }}">Study your starred misses</a><a class="btn btn-ghost" href="{{ tools.learn }}">Everything</a></div>{% endif %}
+        {% if tools.learn %}<div class="btn-row">
+          {% if tools.learn_missed %}<a class="btn" href="{{ tools.learn_missed }}">Study the {{ tools.missed_count }} you missed</a>{% endif %}
+          <a class="btn {{ 'btn-ghost' if tools.learn_missed }}" href="{{ tools.learn_starred }}">Your starred cards</a>
+          <a class="btn btn-ghost" href="{{ tools.learn }}">Everything</a></div>{% endif %}
       {% elif s.role == 'mixed' %}
         <p>Mix problems from different topics so you have to choose the method each time. Expect it to feel slower: that's the point.</p>
         <div class="btn-row">{% if tools.learn %}<a class="btn" href="{{ tools.learn }}">Shuffled recall</a>{% endif %}</div>
         <details class="mt" open>
           <summary><strong>Shuffle your problem list</strong></summary>
-          <p class="small muted">Type the problems you'll do, one per line (like "4.2 #12"). We'll mix the order so you can't tell what's coming next.</p>
+          <label class="small muted" for="problems">Type the problems you'll do, one per line (like "4.2 #12"). We'll mix the order so you can't tell what's coming next.</label>
           <textarea id="problems" rows="4" placeholder="4.2 #12&#10;4.3 #7&#10;5.1 #3&#10;5.2 #20"></textarea>
           <div class="btn-row mt"><button type="button" class="btn btn-ghost btn-sm" id="shuffle">Shuffle</button></div>
           <ol id="shuffled" class="mt"></ol>
@@ -90,12 +94,17 @@
       <p class="small muted mt" id="elapsed" aria-live="polite">0 min studied</p>
       <form method="post" action="{{ url_for('planner.done', session_id=s.id) }}" class="mt" id="done-form">{{ csrf() }}
         <input type="hidden" name="minutes" id="done-minutes" value="{{ s.minutes_done or 0 }}">
+        {% if needs_page %}<input type="hidden" name="notes" value="">{% endif %}
         {% if s.done_at %}<input type="hidden" name="undo" value="1"><button class="linklike small">Mark as not done</button>
         {% else %}<button class="btn btn-block">I'm done</button>{% endif %}
       </form>
       <details class="mt"><summary class="small">Timer style</summary>
-        <form method="post" action="{{ plan_url }}" class="chip-row mt">{{ csrf() }}<input type="hidden" name="action" value="pacing">
-          {% for key, p in pacings.items() %}<label class="chip-radio {{ 'on' if pacing_key == key }}"><input type="radio" name="pacing" value="{{ key }}" {{ 'checked' if pacing_key == key }} onchange="this.form.submit()"> {{ p[0] }}</label>{% endfor %}
+        <form method="post" action="{{ plan_url }}" class="mt">{{ csrf() }}<input type="hidden" name="action" value="pacing">
+          <input type="hidden" name="next" value="{{ url_for('planner.session', session_id=s.id) }}">
+          <fieldset class="chip-row"><legend class="sr-only">Timer style</legend>
+          {% for key, p in pacings.items() %}<label class="chip-radio {{ 'on' if pacing_key == key }}"><input type="radio" name="pacing" value="{{ key }}" {{ 'checked' if pacing_key == key }}> {{ p[0] }}</label>{% endfor %}
+          </fieldset>
+          <button class="btn btn-ghost btn-sm mt">Use this timer</button>
         </form>
       </details>
     </section>

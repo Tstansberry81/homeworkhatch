@@ -26,6 +26,7 @@ def upgrade():
         sa.Column('title', sa.String(length=500), nullable=False),
         sa.Column('kind', sa.String(length=10), nullable=False),
         sa.Column('exam_at', sa.DateTime(), nullable=True),
+        sa.Column('source_at', sa.DateTime(), nullable=True),
         sa.Column('tier', sa.String(length=10), nullable=False),
         sa.Column('share', sa.Float(), nullable=True),
         sa.Column('method', sa.String(length=20), nullable=False),

@@ -11,7 +11,7 @@
     <h1>{{ plan.title }}</h1>
     <p class="muted">{% if plan.exam_at %}{{ plan.exam_at|dt('long') }}{% else %}No date yet: set one below to get a schedule.{% endif %}</p>
   </div>
-  {% if cd[0] %}<span class="countdown big {{ cd[1] }}">{{ cd[0] }}</span>{% endif %}
+  {% if upcoming and cd[0] %}<span class="countdown big {{ cd[1] }}">{{ cd[0] }}</span>{% elif plan.exam_at and not upcoming %}<span class="badge done">Taken</span>{% endif %}
 </div>
 
 <div class="chip-row mb">
@@ -40,11 +40,14 @@
             <div class="small muted">{{ role[1] }}</div>
           </div>
           {% if s.done_at %}<span class="badge done">Done</span>
+          {% elif not upcoming %}<span class="small muted">Skipped</span>
           {% else %}<a class="btn btn-sm {{ '' if d <= today.isoformat() else 'btn-ghost' }}" href="{{ url_for('planner.session', session_id=s.id) }}">{{ 'Start' if d <= today.isoformat() else 'Open' }}</a>{% endif %}
         </li>
         {% endfor %}
       </ol>
-      <p class="small muted mt">Missed one? It slides into your next session on its own. Nothing piles up.</p>
+      {% if upcoming %}<p class="small muted mt">Missed one? It slides into your next session on its own. Nothing piles up.</p>{% endif %}
+      {% elif plan.exam_at and upcoming %}
+      <p class="muted">No study time fit before this test under your <a href="{{ url_for('planner.index') }}#limit">daily limit</a>. Raise the limit, or make this test bigger below.</p>
       {% elif plan.exam_at %}
       <p class="muted">This test has passed.</p>
       {% else %}
@@ -55,17 +58,19 @@
     <section class="card" id="method" aria-labelledby="method-h">
       <h2 id="method-h">How you'll study</h2>
       <p class="small muted">Every method here is backed by learning research. Pick what fits the class; you can switch anytime.</p>
-      <form method="post" class="method-grid">{{ csrf() }}<input type="hidden" name="action" value="method"><input type="hidden" name="anchor" value="#method">
+      <form method="post">{{ csrf() }}<input type="hidden" name="action" value="method"><input type="hidden" name="anchor" value="#method">
+        <fieldset class="method-grid"><legend class="sr-only">Study method</legend>
         {% for key, m in methods.items() %}
         <label class="method {{ 'on' if plan.method == key }}">
-          <input type="radio" name="method" value="{{ key }}" {{ 'checked' if plan.method == key }} onchange="this.form.submit()">
+          <input type="radio" name="method" value="{{ key }}" {{ 'checked' if plan.method == key }}>
           <span class="name">{{ m.name }}{% if key == recommended %} <span class="badge upcoming">Suggested</span>{% endif %}</span>
           <span class="small">{{ m.blurb }}</span>
           <span class="small muted">Why: {{ m.evidence }}</span>
           <span class="small muted">Best for: {{ m.best_for }}</span>
         </label>
         {% endfor %}
-        <noscript><button class="btn btn-sm mt">Save</button></noscript>
+        </fieldset>
+        <button class="btn btn-sm mt">Use this method</button> <span class="small muted">Your sessions update to match.</span>
       </form>
     </section>
   </div>
@@ -74,11 +79,13 @@
     <section class="card" id="pacing" aria-labelledby="pacing-h">
       <h2 id="pacing-h">Timer</h2>
       <p class="small muted">Breaks keep you fresh; no timer has been shown to raise grades, so pick what feels right. A gentle chime, never a hard stop.</p>
-      <form method="post" class="chip-row">{{ csrf() }}<input type="hidden" name="action" value="pacing"><input type="hidden" name="anchor" value="#pacing">
+      <form method="post">{{ csrf() }}<input type="hidden" name="action" value="pacing"><input type="hidden" name="anchor" value="#pacing">
+        <fieldset class="chip-row"><legend class="sr-only">Timer style</legend>
         {% for key, p in pacings.items() %}
-        <label class="chip-radio {{ 'on' if plan.pacing == key }}"><input type="radio" name="pacing" value="{{ key }}" {{ 'checked' if plan.pacing == key }} onchange="this.form.submit()"> {{ p[0] }}</label>
+        <label class="chip-radio {{ 'on' if plan.pacing == key }}"><input type="radio" name="pacing" value="{{ key }}" {{ 'checked' if plan.pacing == key }}> {{ p[0] }}</label>
         {% endfor %}
-        <noscript><button class="btn btn-sm">Save</button></noscript>
+        </fieldset>
+        <button class="btn btn-ghost btn-sm mt">Save</button>
       </form>
     </section>
 
@@ -114,8 +121,8 @@
     </section>
 
     <form method="post" class="card" id="scope">{{ csrf() }}<input type="hidden" name="action" value="scope"><input type="hidden" name="anchor" value="#scope">
-      <h2>What's on it?</h2>
-      <textarea name="scope" rows="3" maxlength="2000" placeholder="Chapters 4-6, lectures 8-12, the lab practical">{{ plan.scope or '' }}</textarea>
+      <h2 id="scope-h">What's on it?</h2>
+      <textarea name="scope" aria-labelledby="scope-h" rows="3" maxlength="2000" placeholder="Chapters 4-6, lectures 8-12, the lab practical">{{ plan.scope or '' }}</textarea>
       <button class="btn btn-ghost btn-sm mt">Save</button>
     </form>
 

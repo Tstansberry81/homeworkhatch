@@ -197,32 +197,36 @@ def ideal_sessions(plan: StudyPlan, user, today: date) -> list[dict]:
 def _roles(method: str, n: int, d: int, tier: str, offsets: list[int]) -> list[str]:
     main = METHODS.get(method, METHODS["spaced"]).main
     if n == 1:
-        return ["cram" if d <= 1 else main]
-    roles = [main] * n
+        return ["cram" if d <= 1 else ("learn" if main == "practice_test" else main)]
     if method == "explain":  # alternate explaining with recall
         roles = ["explain" if i % 2 == 0 else "learn" for i in range(n)]
+    else:
+        roles = ["learn" if main == "practice_test" else main] * n
     big = TIER_ORDER.index(tier) >= TIER_ORDER.index("medium")
     if big and d >= 3 and method in ("spaced", "recall", "practice", "mixed"):
         roles[0] = "pretest"
     roles[-1] = "misses"
-    if big and n >= 3:
-        # The practice test 3-4 days out (1-6 days before works best), the fix-up right after.
-        candidates = [i for i in range(1, n - 1) if offsets[i] >= 2]
-        if candidates:
-            best = min(candidates, key=lambda i: (abs(offsets[i] - 3.5), -i))
-            roles[best] = "practice_test"
-            if best + 1 < n - 1:
-                roles[best + 1] = "review"
-    elif n == 2 and method == "practice":
+    middle = [i for i in range(1, n - 1)]
+    if method == "practice" and n == 2:
         roles[0] = "practice_test"
+    if not middle or not (big or method == "practice"):
+        return roles
+    # The (last) practice test 3-4 days out: 1-6 days before works best. Its review comes next.
+    candidates = [i for i in middle if offsets[i] >= 2] or middle
+    best = min(candidates, key=lambda i: (abs(offsets[i] - 3.5), -i))
+    roles[best] = "practice_test"
+    if best + 1 < n - 1:
+        roles[best + 1] = "review"
     if method == "practice":
-        # Practice-test focus: every other middle session is a test, each followed by its review.
-        for i in range(1, n - 1):
-            if roles[i] == main and (i == 1 or roles[i - 1] not in ("practice_test",)):
-                roles[i] = "practice_test" if roles[i - 1] != "practice_test" else "review"
-        for i in range(1, n - 1):
-            if roles[i - 1] == "practice_test" and roles[i] == "practice_test":
-                roles[i] = "review"
+        # Practice-test focus: the middle is test / review pairs, the last pair just before the
+        # night-before session; an odd slot left at the start is plain recall.
+        if len(middle) == 1:
+            roles[middle[0]] = "practice_test"
+        else:
+            for j, i in enumerate(reversed(middle)):
+                roles[i] = "review" if j % 2 == 0 else "practice_test"
+            if roles[middle[0]] == "review":
+                roles[middle[0]] = "learn"
     return roles
 
 
@@ -234,38 +238,47 @@ def active_plans(user_id: int) -> list[StudyPlan]:
                               .order_by(StudyPlan.exam_at)).all()
 
 
+def _source_when(plan: StudyPlan) -> datetime | None:
+    """The test's time in Canvas now: the assignment's due date, else the calendar event's start
+    (an undated gradebook item is often dated only by its calendar event)."""
+    a = db.session.get(Assignment, plan.assignment_id) if plan.assignment_id else None
+    if a is not None and a.name and a.name != plan.title:
+        plan.title = a.name[:500]
+    when = a.due_at if a is not None else None
+    if when is None and plan.event_id:
+        e = db.session.get(CalendarEvent, plan.event_id)
+        when = e.start_at if e is not None else None
+    return when
+
+
 def refresh(user) -> list[str]:
     """Bring plans in line with Canvas (moved dates, renamed items), close finished ones, and roll
-    missed sessions forward. Returns quiet notes for the page ("Moved Tuesday's session to today")."""
+    missed sessions forward. Returns quiet notes for the page ("Moved Tuesday's session forward")."""
     now = utcnow()
-    today = local_now(user).date()
+    today = local_now(user).date().isoformat()
     notes: list[str] = []
     changed = False
     for plan in active_plans(user.id):
-        source_when = None
-        if plan.assignment_id:
-            a = db.session.get(Assignment, plan.assignment_id)
-            if a is not None:
-                source_when = a.due_at
-                if a.name and a.name != plan.title:
-                    plan.title = a.name[:500]
-        elif plan.event_id:
-            e = db.session.get(CalendarEvent, plan.event_id)
-            if e is not None:
-                source_when = e.start_at
-        if source_when and source_when != plan.exam_at:
-            old = local_day(plan.exam_at, user)
-            plan.exam_at = source_when
-            if old and old != local_day(source_when, user):
-                notes.append(f"{plan.title} moved to {local_day(source_when, user):%a %b %-d}; its plan moved with it.")
+        source = _source_when(plan)
+        if source and source != plan.source_at:  # Canvas moved it (a date set by hand sticks otherwise)
+            if plan.exam_at and local_day(plan.exam_at, user) != local_day(source, user):
+                notes.append(f"{plan.title} moved to {local_day(source, user):%a %b %-d}; its plan moved with it.")
+            plan.exam_at = plan.source_at = source
             changed = True
         if plan.exam_at and plan.exam_at < now - timedelta(hours=6):
             plan.status = "done"
             changed = True
             continue
+        # Started on a past day but never marked done: it counts, with the minutes logged.
+        for s in db.session.scalars(select(StudySession).where(
+                StudySession.plan_id == plan.id, StudySession.done_at.is_(None), StudySession.started_at.is_not(None),
+                StudySession.day < today)):
+            s.done_at = s.started_at
+        if plan.exam_at and plan.exam_at <= now:
+            continue  # the test is under way: nothing to roll forward
         missed = db.session.scalars(select(StudySession).where(
             StudySession.plan_id == plan.id, StudySession.done_at.is_(None), StudySession.started_at.is_(None),
-            StudySession.day < today.isoformat()).order_by(StudySession.day)).all()
+            StudySession.day < today).order_by(StudySession.day)).all()
         if missed:
             day = date.fromisoformat(missed[0].day)
             notes.append(f"Moved {day:%A}'s {plan.title} session forward." if len(missed) == 1
@@ -281,88 +294,110 @@ def schedule(user, today: date | None = None) -> None:
     """(Re)build every active plan's future sessions together, within the daily cap. Sessions already
     done or started are kept and count toward their day; everything else is regenerated."""
     today = today or local_now(user).date()
+    now = utcnow()
     cap = max(30, min(user.study_minutes_per_day or 120, 720))
     plans = [p for p in active_plans(user.id) if p.exam_at]
-    load: dict[date, int] = {}
-    keep: dict[int, list[StudySession]] = {}
+    exam_days = {p.id: local_day(p.exam_at, user) for p in plans}
+    kept: dict[int, list[StudySession]] = {}
+    kept_minutes: dict[date, list[tuple[int, int]]] = {}  # day -> [(plan id, minutes)]
     for p in plans:
-        keep[p.id] = []
+        kept[p.id] = []
         # Query, don't trust p.sessions: within one request it can still hold rows we replaced.
         for s in db.session.scalars(select(StudySession).where(StudySession.plan_id == p.id)).all():
             if s.done_at or s.started_at:
-                keep[p.id].append(s)
-                d = date.fromisoformat(s.day)
-                load[d] = load.get(d, 0) + (s.minutes_done or s.minutes)
+                kept[p.id].append(s)
+                kept_minutes.setdefault(date.fromisoformat(s.day), []).append((p.id, s.minutes_done or s.minutes))
             else:
                 db.session.delete(s)
     db.session.flush()
-    big_test_days = {local_day(p.exam_at, user) for p in plans if TIER_ORDER.index(p.tier) >= TIER_ORDER.index("high")}
+    big_days = {exam_days[p.id] for p in plans
+                if p.exam_at > now and TIER_ORDER.index(p.tier) >= TIER_ORDER.index("high")}
 
-    # 1. What each plan wants, adjusted for sessions already done (ahead) or missed (behind).
+    # 1. What each plan still needs. Each session already done or started cancels the planned
+    #    session it stands for (same kind, nearest day); planned sessions left in the past were
+    #    missed, and part of their time rides along with the next one.
     order = sorted(plans, key=lambda p: (-TIER_ORDER.index(p.tier), p.exam_at))  # higher stakes, then sooner
     wanted: list[dict] = []
     for rank, p in enumerate(order):
-        ideal = ideal_sessions(p, user, today)
-        exam_day = local_day(p.exam_at, user)
-        done = len(keep[p.id])
-        past = [x for x in ideal if x["day"] < today]
-        future = [x for x in ideal if x["day"] >= today]
-        if done > len(past):  # ahead of plan: drop that many of the earliest unprotected sessions
-            extra = done - len(past)
-            for x in list(future):
-                if extra and not x["protected"]:
-                    future.remove(x)
-                    extra -= 1
-        elif len(past) > done and future:  # behind: part of the missed time rides along with the next session
-            behind = sum(x["minutes"] for x in past[done:])
+        if p.exam_at <= now:
+            continue  # under way or over: nothing new
+        remaining = ideal_sessions(p, user, today)
+        for k in kept[p.id]:
+            kd = date.fromisoformat(k.day)
+            same = [x for x in remaining if x["role"] == k.role]
+            pick = min(same, key=lambda x: abs((x["day"] - kd).days)) if same else \
+                next((x for x in remaining if not x["protected"]), None)
+            if pick is not None:
+                remaining.remove(pick)
+        past = [x for x in remaining if x["day"] < today]
+        future = [x for x in remaining if x["day"] >= today]
+        if past and future:
+            behind = sum(x["minutes"] for x in past)
             future[0] = {**future[0], "minutes": min(90, future[0]["minutes"] + behind // 2)}
-        elif len(past) > done and exam_day and exam_day >= today:
+        elif past:  # every session left was missed, and the test is still ahead: one quick pass today
             future = [{"day": today, "minutes": 30, "role": "cram", "protected": True}]
-        taken = {date.fromisoformat(x.day) for x in keep[p.id]}
+        taken = {date.fromisoformat(k.day) for k in kept[p.id]}
         for x in future:
-            if x["day"] in taken:  # already studied for this test that day
-                continue
-            wanted.append({**x, "plan": p, "rank": rank, "exam_day": exam_day})
-
-    def limit(x: dict, d: date) -> int:
-        # At most 30 minutes for other tests on the day of a big test.
-        return 30 if d in big_test_days and d != x["exam_day"] else cap
+            if x["day"] not in taken:
+                wanted.append({**x, "plan": p, "rank": rank, "exam_day": exam_days[p.id], "orig": x["day"]})
 
     def busy(d: date) -> int:
-        return load.get(d, 0) + sum(x["minutes"] for x in wanted if x["day"] == d)
+        return sum(m for _, m in kept_minutes.get(d, [])) + sum(x["minutes"] for x in wanted if x["day"] == d)
+
+    def others(d: date) -> int:
+        """Minutes on d for tests other than the big one held that day."""
+        return (sum(m for pid, m in kept_minutes.get(d, []) if exam_days.get(pid) != d)
+                + sum(x["minutes"] for x in wanted if x["day"] == d and x["exam_day"] != d))
+
+    def over(d: date) -> bool:
+        return busy(d) > cap or (d in big_days and others(d) > 30)
+
+    def fits(x: dict, d: date) -> bool:
+        if busy(d) + x["minutes"] > cap:
+            return False
+        return d not in big_days or x["exam_day"] == d or others(d) + x["minutes"] <= 30
+
+    def lower_bound(x: dict) -> date:
+        """A session may move earlier, but not before the plan's previous session (so a review never
+        lands before its practice test, nor anything before the opening check)."""
+        p = x["plan"]
+        prior = [y["day"] for y in wanted if y["plan"] is p and y["orig"] < x["orig"]]
+        prior += [date.fromisoformat(k.day) for k in kept[p.id] if date.fromisoformat(k.day) < x["orig"]]
+        return max(prior, default=today - timedelta(days=1))
 
     def has_day(x: dict, d: date) -> bool:
-        return any(y is not x and y["plan"] is x["plan"] and y["day"] == d for y in wanted)
+        p = x["plan"]
+        return any(y is not x and y["plan"] is p and y["day"] == d for y in wanted) or \
+            any(date.fromisoformat(k.day) == d for k in kept[p.id])
 
-    # 2. Fit each day under the cap: move the least important sessions to an earlier free day, then
-    #    shorten them (never below 15 minutes), then drop them. Practice tests and the night-before
-    #    review are never moved, shortened or dropped.
+    # 2. Fit each day: move the least important sessions to an earlier free day, then shorten them
+    #    (never below 15 minutes), then drop them. Practice tests, the night-before review and a
+    #    plan's only session are never dropped.
     for d in sorted({x["day"] for x in wanted}):
         here = lambda: sorted((x for x in wanted if x["day"] == d), key=lambda x: (x["protected"], -x["rank"]))  # noqa: E731
-        over = lambda: busy(d) > cap or any(  # noqa: E731
-            sum(y["minutes"] for y in wanted if y["day"] == d and y["exam_day"] != x["exam_day"]) + load.get(d, 0) > limit(x, d)
-            for x in wanted if x["day"] == d)
         for x in here():
-            if not over():
+            if not over(d):
                 break
             if x["protected"]:
                 continue
-            # ...but not ahead of the plan's first session (the warm-up check comes first).
-            first = min((y["day"] for y in wanted if y["plan"] is x["plan"] and y is not x), default=today)
+            floor = lower_bound(x)
             for back in (1, 2, 3):
                 alt = d - timedelta(days=back)
-                if alt >= today and alt > first and not has_day(x, alt) and busy(alt) + x["minutes"] <= min(cap, limit(x, alt)):
+                if alt >= today and alt > floor and not has_day(x, alt) and fits(x, alt):
                     x["day"] = alt
                     break
         for x in here():
-            if not over() or x["protected"]:
+            if not over(d) or x["protected"]:
                 continue
             spare = cap - (busy(d) - x["minutes"])
+            if d in big_days and x["exam_day"] != d:
+                spare = min(spare, 30 - (others(d) - x["minutes"]))
             x["minutes"] = max(15, min(x["minutes"], 5 * (spare // 5)))
         for x in here():
-            if not over():
+            if not over(d):
                 break
-            if not x["protected"]:
+            only = not kept[x["plan"].id] and sum(1 for y in wanted if y["plan"] is x["plan"]) == 1
+            if not x["protected"] and not only:
                 wanted.remove(x)
 
     # 3. Save.
@@ -391,7 +426,8 @@ def create(user, *, title: str, kind: str, exam_at: datetime | None, course=None
            share: float | None = None, hints: dict | None = None, method: str | None = None) -> StudyPlan:
     plan = StudyPlan(user_id=user.id, course_id=getattr(course, "id", None), assignment_id=getattr(assignment, "id", None),
                      event_id=getattr(event, "id", None), title=title[:500], kind=kind if kind in KIND_LABELS else "test",
-                     exam_at=exam_at, share=share, tier=tier_for(kind, share, hints),
+                     exam_at=exam_at, source_at=exam_at if (assignment is not None or event is not None) else None,
+                     share=share, tier=tier_for(kind, share, hints),
                      method=method if method in METHODS else recommend_method(course), pacing="25_5")
     db.session.add(plan)
     db.session.flush()

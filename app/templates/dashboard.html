@@ -58,7 +58,7 @@
     <div class="card">
       <h2>Exams coming up <a href="{{ url_for('planner.index') }}">Exams {{ icon('arrow', 14) }}</a></h2>
       {% for p in exam_plans %}
-      {% set cd = p.exam_at|countdown %}
+      {% set cd = p.exam_at|countdown if p.exam_at > now_utc() else (none, none) %}
       <div class="task" style="--c: {{ course_color(p.course_id) if p.course_id else 'var(--lilac)' }}">
         <span class="bar"></span>
         <div>

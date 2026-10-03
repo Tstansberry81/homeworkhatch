@@ -134,7 +134,8 @@ def test_finds_the_midterm_but_not_the_homework(app, synced_user):
     # "Not a test" for the whole series hides it; undoing brings it back.
     course = db.session.scalar(select(Course).where(Course.user_id == synced_user.id, Course.course_code == "MATH 101-01"))
     db.session.add(AssessmentChoice(user_id=synced_user.id, course_id=course.id,
-                                    item=f"family:{assessments.stem('Midterm Exam')}", kind="none"))
+                                    item=f"family:{assessments.family_id(assessments.stem('Midterm Exam'), 'midterm')}",
+                                    kind="none"))
     db.session.commit()
     assert "Midterm Exam" not in {f.title for f in assessments.find(synced_user)}
 
@@ -235,3 +236,96 @@ def test_export_includes_study_plans(app, synced_user, client):
     data = client.get("/settings/data/export").get_json(force=True)
     assert data["study_plans"][0]["title"] == "Midterm Exam" and data["study_plans"][0]["sessions"]
     assert "practice_tests" in data
+
+
+
+def test_review_fixes_for_the_scheduler(app):
+    """Nothing after the test; others get 30 minutes on a big test's day; reviews follow their practice
+    test; a small quiz keeps its only session; early sessions cancel the matching planned one."""
+    user = make_user(study_minutes_per_day=60)
+    final = _exam(user, None, "Final", 5, kind="final", tier="final")
+    quiz = _exam(user, None, "Tiny quiz", 4, kind="quiz", tier="micro")
+    db.session.commit()
+    assert quiz.sessions, "a plan's only session is never dropped"
+    for p in (final, quiz):
+        exam_day = planner.local_day(p.exam_at, user).isoformat()
+        assert all(s.day < exam_day for s in p.sessions)
+        roles = [s.role for s in p.sessions]
+        for i, r in enumerate(roles):
+            if r == "review":
+                assert "practice_test" in roles[:i], roles
+    # The 30-minute rule: on a big test's day, other tests get at most 30 minutes.
+    user2 = make_user("kai", "kai@example.com", study_minutes_per_day=120)
+    midterm = _exam(user2, None, "Midterm", 10, tier="high")
+    test = _exam(user2, None, "Test", 12, kind="test", tier="medium")
+    db.session.commit()
+    big_day = planner.local_day(midterm.exam_at, user2).isoformat()
+    assert sum(s.minutes for s in test.sessions if s.day == big_day) <= 30
+    # A test that already started gets nothing new.
+    user3 = make_user("ola", "ola@example.com")
+    now_test = _exam(user3, None, "Started", 0, kind="quiz", tier="low")
+    now_test.exam_at = utcnow() - timedelta(hours=1)
+    db.session.commit()
+    planner.schedule(user3)
+    db.session.commit()
+    assert not db.session.scalars(select(StudySession).where(StudySession.plan_id == now_test.id)).all()
+
+
+def test_a_date_set_by_hand_sticks_until_canvas_changes(app, synced_user, client):
+    midterm = db.session.scalar(select(Assignment).where(Assignment.name == "Midterm Exam"))
+    client.post("/study/exams/plan", data={"item": f"a:{midterm.id}"})
+    plan = db.session.scalar(select(StudyPlan).where(StudyPlan.user_id == synced_user.id))
+    day = (local_now(synced_user).date() + timedelta(days=12)).isoformat()
+    client.post(f"/study/exams/{plan.id}", data={"action": "date", "date": day, "time": "10:00"})
+    client.get("/dashboard")
+    client.get("/study/exams/")
+    db.session.refresh(plan)
+    assert planner.local_day(plan.exam_at, synced_user).isoformat() == day, "the student's date stays"
+    midterm.due_at += timedelta(days=1)  # Canvas itself moves it: follow Canvas again
+    db.session.commit()
+    client.get("/study/exams/")
+    db.session.refresh(plan)
+    assert plan.exam_at == midterm.due_at
+
+
+def test_choices_and_suggestions_after_review(app, synced_user, client):
+    midterm = db.session.scalar(select(Assignment).where(Assignment.name == "Midterm Exam"))
+    # A double tap on "Yes, plan it" makes one plan.
+    for _ in range(2):
+        client.post("/study/exams/choice", data={"item": f"a:{midterm.id}", "kind": "midterm", "plan": "1"})
+    assert db.session.query(StudyPlan).count() == 1
+    # Past tests aren't offered or planned again.
+    plan = db.session.scalar(select(StudyPlan))
+    db.session.delete(plan)
+    midterm.due_at = utcnow() - timedelta(hours=8)
+    db.session.commit()
+    assert "Plan it" not in client.get("/study/exams/").get_data(as_text=True)
+    client.post("/study/exams/plan", data={"item": f"a:{midterm.id}"})
+    assert db.session.query(StudyPlan).count() == 0
+    # Sibling and make-up keys.
+    A = assessments
+    assert A.sibling_key("Exam 1 Part A") == A.sibling_key("Exam 1 Part B")
+    assert A.sibling_key("Chapter 4 Quiz") != A.sibling_key("Chapter 5 Quiz")
+    assert A.sibling_key("Week 9: Exam") != A.sibling_key("Week 9: Concept Check")
+    assert A.makeup_key("Exam 2 (Make-up)") == A.makeup_key("Exam 2") != A.makeup_key("Exam 3")
+    assert len(A.family_id("x" * 400, "quiz")) <= 150
+    # A quiz never swallows an exam event with the same number.
+    q, e = A.Item(name="Quiz 2", is_quiz=True, submission_types=["online_quiz"], points_possible=10,
+                  due_at=utcnow() + timedelta(days=6)), A.Item(name="Exam 2", is_event=True,
+                                                               start_at=utcnow() + timedelta(days=7),
+                                                               end_at=utcnow() + timedelta(days=7, minutes=75))
+    merged = A.merge([(q, A.classify(q))], [(e, A.classify(e))])
+    assert (None, e) in merged and (q, None) in merged
+
+
+def test_session_coins_are_capped_per_day(app, synced_user, client):
+    day = (local_now(synced_user).date() + timedelta(days=20)).isoformat()
+    client.post("/study/exams/plan", data={"title": "Farm", "date": day, "kind": "final"})
+    plan = db.session.scalar(select(StudyPlan).where(StudyPlan.title == "Farm"))
+    for s in list(plan.sessions):
+        client.post(f"/study/exams/session/{s.id}/start")
+        client.post(f"/study/exams/session/{s.id}/done", data={"minutes": "30"})
+    rows = db.session.scalars(select(CoinTransaction).where(CoinTransaction.user_id == synced_user.id,
+                                                            CoinTransaction.reason.like("%study session%"))).all()
+    assert sum(1 for r in rows if r.amount == 3) == 3 and sum(1 for r in rows if r.amount == 1) == 3
+    client.post(f"/study/exams/session/{plan.sessions[-1].id}/done", data={"minutes": "0", "undo": "1"})
