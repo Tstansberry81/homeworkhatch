@@ -411,3 +411,21 @@ def test_file_choices_hold_across_twins_late_uploads_media_and_past_classes(app,
     monkeypatch.undo()
     c.post("/settings/files", data={"mode": "pick", "keep": []})
     assert _file("9002").storage_key is None and db.session.get(Course, calc.id).sync_files is False
+
+
+def test_calendar_events_survive_a_failed_or_missing_calendar_fetch(app, client, snapshot, manifest):
+    from app.models import CalendarEvent
+
+    user = make_user()
+    token = api_token(user)
+    sync(client, token, snapshot, manifest)
+    before = db.session.query(CalendarEvent).count()
+    assert before, "the fixture has calendar events"
+    failed = {**snapshot, "calendar_events": snapshot["calendar_events"][:0],
+              "errors": [{"endpoint": "calendar_events", "message": "500"}]}
+    sync(client, token, failed, manifest)
+    assert db.session.query(CalendarEvent).count() == before, "a failed fetch isn't 'no events'"
+    sync(client, token, {k: v for k, v in snapshot.items() if k != "calendar_events"}, manifest)
+    assert db.session.query(CalendarEvent).count() == before, "events not sent are unknown, not gone"
+    sync(client, token, {**snapshot, "calendar_events": []}, manifest)
+    assert db.session.query(CalendarEvent).count() == 0, "a real empty list still clears them"

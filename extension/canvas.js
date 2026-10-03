@@ -385,10 +385,13 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
     start_date: iso(now - 14 * DAY), end_date: iso(now + 120 * DAY),
   }));
 
-  const events = (await Promise.all(chunks.map((codes) =>
+  // One failed chunk makes the whole list unknown (null), so the server keeps the events it has
+  // instead of deleting the ones that chunk would have returned.
+  const eventChunks = await Promise.all(chunks.map((codes) =>
     safe("calendar_events", () => client.all("/calendar_events", {
       type: "event", "context_codes[]": codes, start_date: iso(now - 14 * DAY), end_date: iso(now + 120 * DAY),
-    }))))).flat().filter(Boolean);
+    }))));
+  const events = eventChunks.some((c) => c == null) ? null : eventChunks.flat().filter(Boolean);
 
   const missing = await safe("missing_submissions", () => client.all("/users/self/missing_submissions"));
 
@@ -409,7 +412,7 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
       missing: p.submissions?.missing ?? null, late: p.submissions?.late ?? null,
       marked_complete: p.planner_override?.marked_complete ?? false,
     })),
-    calendar_events: events.map((e) => ({
+    calendar_events: events && events.map((e) => ({
       id: String(e.id), title: e.title, start_at: e.start_at, end_at: e.end_at,
       course_id: String(e.context_code || "").replace("course_", "") || null,
       location: e.location_name ?? null, html_url: e.html_url,
