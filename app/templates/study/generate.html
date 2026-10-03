@@ -35,8 +35,14 @@
     <label for="pasted">Your notes</label>
     <textarea id="pasted" name="pasted" placeholder="Paste lecture notes, a reading, a study guide…"></textarea>
   </div>
-  <label for="count">How many</label>
-  <input id="count" name="count" type="number" min="3" max="50" value="{{ 10 if preset.output == 'quiz' else 15 }}" style="width:110px">
+  <div class="form-row">
+    <div><label for="count">How many</label>
+      <input id="count" name="count" type="number" min="3" max="50" value="{{ 10 if preset.output == 'quiz' else 15 }}" style="width:110px"></div>
+    {% if plans %}
+    <div><label for="plan_id">Which exam is this for? <span class="hint">(optional)</span></label>
+      <select id="plan_id" name="plan_id"><option value="">Not for a particular exam</option>{% for p in plans %}<option value="{{ p.id }}" {{ 'selected' if p.id == preset.plan_id }}>{{ p.title }}{% if p.exam_at %} · {{ p.exam_at|dt('date') }}{% endif %}</option>{% endfor %}</select></div>
+    {% elif preset.plan_id %}<input type="hidden" name="plan_id" value="{{ preset.plan_id }}">{% endif %}
+  </div>
   <button class="btn btn-block mt" type="submit" id="go" {{ 'disabled' if not ai_available }}>Generate</button>
   <p class="help center" id="busy" hidden>Working on it… this usually takes 10–40 seconds (longer for many files).</p>
 </form>

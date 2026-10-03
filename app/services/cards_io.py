@@ -3,7 +3,7 @@
 Everything here is plain text processing: no network, no AI. The student pastes what Quizlet's
 "Export -> Copy text" or Anki's "Notes in Plain Text" gives them; we never fetch a Quizlet URL.
 
-Formats `parse_cards` recognizes (auto-detected unless separators are given):
+Formats `parse` recognizes (auto-detected unless separators are given):
 
 * Anki "Notes in Plain Text": `#separator:tab|comma|semicolon|pipe|...`, `#html:true`,
   `#tags column:N` (and deck / notetype / guid columns) headers; HTML is turned into text; a
@@ -14,6 +14,9 @@ Formats `parse_cards` recognizes (auto-detected unless separators are given):
   cards, a line with no separator continues the previous card's definition (Quizlet writes
   multi-line definitions that way).
 * The original one-per-line `front :: back` (tab works there too).
+
+A front that is a cloze note becomes cloze cards in every format (the back is its "extra").
+At most MAX_CARDS cards are kept; past that, cards are only counted (`Parsed.dropped`).
 """
 
 from __future__ import annotations
@@ -22,12 +25,16 @@ import csv
 import html
 import io
 import re
+from dataclasses import dataclass, field
 
 import nh3
 
 MAX_CARDS = 2000
 MAX_FRONT = 2000
 MAX_BACK = 4000
+# One Anki field (HTML and all) is cut here before it's read; cards end up trimmed to
+# MAX_FRONT / MAX_BACK anyway. A cloze note is cut to MAX_BACK before it's expanded.
+FIELD_MAX = 20_000
 
 TERM_SEPS = {"tab": "\t", "comma": ",", "semicolon": ";", "dash": " - "}
 CARD_SEPS = {"newline": "\n", "semicolon": ";"}
@@ -44,10 +51,17 @@ DETECTED_LABELS = {
     "unknown": "Couldn't find any cards",
 }
 
+# Every pattern here runs on text anyone can paste (the public /free-learn preview included),
+# so each one is linear: no nested or overlapping repeats, and a repeat that may not find its
+# end stops at the next "<" / "{{" / "[" instead of rescanning the rest of the text.
 _ANKI_HEADER = re.compile(r"^#(separator|html|tags column|columns|notetype|deck|guid column|notetype column|"
                           r"deck column|if matches|tags)\s*:", re.I)
-CLOZE = re.compile(r"\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}", re.S)
-_LOOKS_HTML = re.compile(r"<(br|div|p|span|b|i|u|em|strong|img|sub|sup|font|ul|ol|li)\b[^>]*>|&nbsp;|&amp;|&lt;", re.I)
+# {{c1::answer}} or {{c1::answer::hint}}. Both parts stop at "{{" and are possessive, so a
+# cloze that never closes costs one scan up to the next "{{" instead of backtracking.
+CLOZE = re.compile(r"\{\{c(\d{1,4}+)::((?:(?!::|\}\}|\{\{).)*+)(?:::((?:(?!\}\}|\{\{).)*+))?\}\}", re.S)
+_LOOKS_HTML = re.compile(r"<(br|div|p|span|b|i|u|em|strong|img|sub|sup|font|ul|ol|li)\b[^<>]*>|&nbsp;|&amp;|&lt;",
+                         re.I)
+_DIGITS = re.compile(r"[0-9]{1,9}")
 
 
 def _sep(value, names: dict) -> str | None:
@@ -64,8 +78,20 @@ def _sep(value, names: dict) -> str | None:
 
 
 def _clip(s: str, n: int = 120) -> str:
-    s = " ".join(s.split())
+    s = " ".join(s[: n * 4].split())  # only a clipped copy is shown: don't tidy all of a huge line
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _tidy(back: str) -> str:
+    return re.sub(r"\n{3,}", "\n\n", back.strip())
+
+
+def _outside_cloze(line: str) -> str:
+    """The line with every cloze blanked out (same length), to find separators outside them:
+    `The {{c1::cat}} sat :: el gato` splits at the second "::", not inside the cloze."""
+    if "{{" not in line:
+        return line
+    return CLOZE.sub(lambda m: "\x00" * (m.end() - m.start()), line)
 
 
 # ---------------------------------------------------------------- detection
@@ -76,7 +102,7 @@ def _first_row(text: str) -> list[str]:
         if line.strip():
             try:
                 return next(csv.reader([line]))
-            except (csv.Error, StopIteration):
+            except (csv.Error, ValueError, StopIteration):
                 return []
     return []
 
@@ -111,91 +137,179 @@ def _auto_card_sep(text: str, term_sep: str) -> str:
     return ";" if by_semi > by_line else "\n"
 
 
+# ---------------------------------------------------------------- what the parsers found
+
+
+@dataclass
+class Parsed:
+    cards: list[tuple[str, str]]
+    skipped: list[str]  # lines we couldn't use, and notes about trimmed cards
+    detected: str
+    dropped: int = 0  # cards past the MAX_CARDS limit, left out
+
+    @property
+    def total(self) -> int:
+        return len(self.cards) + self.dropped
+
+
+def limit_note(parsed: Parsed, verb: str = "were imported") -> str:
+    """"Only the first 2,000 of 5,000 cards were imported." when the limit cut the set short."""
+    if not parsed.dropped:
+        return ""
+    return f"Only the first {len(parsed.cards):,} of {parsed.total:,} cards {verb}."
+
+
+@dataclass
+class _Out:
+    """Cards as a parser finds them: tidied, checked, cloze notes expanded, long ones trimmed,
+    and at most MAX_CARDS of them. Past the limit nothing more is built: cards are only counted."""
+
+    cards: list[tuple[str, str]] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    dropped: int = 0
+    seen: int = 0  # rows offered as cards (the first may be a "term,definition" header)
+
+    @property
+    def full(self) -> bool:
+        return len(self.cards) >= MAX_CARDS
+
+    def skip(self, line: str) -> None:
+        if not self.full and line and line.strip():
+            self.skipped.append(line)
+
+    def add(self, front: str, back: str) -> None:
+        self.seen += 1
+        if "{{" in front and CLOZE.search(front):
+            self._cloze(front, back)
+            return
+        front, back = front.strip(), _tidy(back)
+        if not front or not back:
+            self.skip(front or back)
+            return
+        if self.seen == 1 and _is_header(front, back):
+            return  # a header row, not a card
+        self._keep(front, back)
+
+    def _keep(self, front: str, back: str, note: bool = True) -> None:
+        if self.full:
+            self.dropped += 1
+            return
+        if len(front) > MAX_FRONT or len(back) > MAX_BACK:
+            if note:
+                self.skipped.append(f"Trimmed a very long card: {_clip(front, 60)}")
+            front, back = front[:MAX_FRONT].rstrip(), back[:MAX_BACK].rstrip()
+        self.cards.append((front, back))
+
+    def _cloze(self, text: str, extra: str) -> None:
+        if len(text) > MAX_BACK:  # cut before expanding: each cloze number copies the whole note
+            if not self.full:
+                self.skipped.append(f"Trimmed a very long card: {_clip(text, 60)}")
+            text = text[:MAX_BACK]
+        numbers = sorted({int(m.group(1)) for m in CLOZE.finditer(text)})
+        room = max(0, MAX_CARDS - len(self.cards))
+        self.dropped += max(0, len(numbers) - room)
+        if not room:
+            return
+        for front, back in cloze_cards(text, extra, numbers[:room]):
+            front, back = front.strip(), _tidy(back)
+            if front and back:
+                self._keep(front, back, note=False)
+
+
 # ---------------------------------------------------------------- parsers
 
 
-def _quizlet(text: str, term_sep: str, card_sep: str) -> tuple[list[list[str]], list[str]]:
-    cards: list[list[str]] = []
-    skipped: list[str] = []
+def _quizlet(out: _Out, text: str, term_sep: str, card_sep: str) -> None:
     if card_sep == "\n":
+        current: tuple[str, list[str]] | None = None  # (term, the definition's lines)
+
+        def finish(card: tuple[str, list[str]]) -> None:
+            front, lines = card
+            back = "\n".join(lines)  # joined once, not re-copied for every continuation line
+            if back.strip():
+                out.add(front, back)
+            else:
+                out.skip(front)
+
         for line in text.split("\n"):
-            if term_sep in line and line.split(term_sep, 1)[0].strip():
-                front, back = line.split(term_sep, 1)
-                cards.append([front, back])
-            elif cards:
-                cards[-1][1] += "\n" + line  # a multi-line definition goes on
+            front, sep, back = line.partition(term_sep)
+            if sep and front.strip():
+                if current is not None:
+                    finish(current)
+                current = (front, [back])
+            elif current is not None:
+                current[1].append(line)  # a multi-line definition goes on
             elif line.strip():
-                skipped.append(line)
-    else:
-        for chunk in text.split(card_sep):
-            if not chunk.strip():
-                continue
-            if term_sep in chunk:
-                front, back = chunk.split(term_sep, 1)
-                if front.strip() and back.strip():
-                    cards.append([front, back])
-                    continue
-            skipped.append(chunk)
-    kept = []
-    for front, back in cards:
-        if back.strip():
-            kept.append([front, back])
-        else:
-            skipped.append(front)
-    return kept, skipped
-
-
-def _lines(text: str) -> tuple[list[list[str]], list[str]]:
-    """The original format: one card per line, `front :: back` or tab-separated."""
-    cards, skipped = [], []
-    for line in text.split("\n"):
-        if "\t" in line:
-            front, back = line.split("\t", 1)
-        elif "::" in line:
-            front, back = line.split("::", 1)
-        else:
-            if line.strip():
-                skipped.append(line)
+                out.skip(line)
+        if current is not None:
+            finish(current)
+        return
+    for chunk in text.split(card_sep):
+        if not chunk.strip():
             continue
-        if front.strip() and back.strip():
-            cards.append([front, back])
+        front, sep, back = chunk.partition(term_sep)
+        if sep and front.strip() and back.strip():
+            out.add(front, back)
         else:
-            skipped.append(line)
-    return cards, skipped
+            out.skip(chunk)
 
 
-def _csv(text: str, delimiter: str = ",") -> tuple[list[list[str]], list[str]]:
-    cards, skipped = [], []
+def _lines(out: _Out, text: str) -> None:
+    """The original format: one card per line, `front :: back` or tab-separated. A cloze note
+    (alone on its line, or as the front) becomes cloze cards."""
+    for line in text.split("\n"):
+        plain = _outside_cloze(line)
+        if "\t" in plain:
+            at, width = plain.index("\t"), 1
+        elif "::" in plain:
+            at, width = plain.index("::"), 2
+        elif plain != line:  # a cloze note with no back
+            out.add(line, "")
+            continue
+        else:
+            out.skip(line)
+            continue
+        front, back = line[:at], line[at + width:]
+        has_cloze = plain[:at] != front
+        if front.strip() and (back.strip() or has_cloze):
+            out.add(front, back)
+        else:
+            out.skip(line)
+
+
+def _csv(out: _Out, text: str, delimiter: str = ",") -> None:
     try:
         rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
-    except csv.Error:
-        return _quizlet(text, delimiter, "\n")
+    except (csv.Error, ValueError, TypeError):
+        _quizlet(out, text, delimiter, "\n")
+        return
     for row in rows:
         if not any(cell.strip() for cell in row):
             continue
         if len(row) >= 2 and row[0].strip() and row[1].strip():
-            cards.append([row[0], row[1]])
+            out.add(row[0], row[1])
         else:
-            skipped.append(delimiter.join(row))
-    return cards, skipped
+            out.skip(delimiter.join(row))
 
 
 def html_to_text(value: str) -> str:
     """Anki fields with HTML -> plain text (line breaks kept, tags, images and sounds dropped)."""
     s = re.sub(r"(?i)<br\s*/?>", "\n", value)
     s = re.sub(r"(?i)</(div|p|li|tr|h[1-6])\s*>", "\n", s)
-    s = re.sub(r"(?i)<li[^>]*>", "- ", s)
-    s = re.sub(r"\[sound:[^\]]*\]", "", s)
+    s = re.sub(r"(?i)<li[^<>]*>", "- ", s)
+    s = re.sub(r"\[sound:[^\[\]]*\]", "", s)
     s = html.unescape(nh3.clean(s, tags=set()))
     s = s.replace("\xa0", " ")
-    s = re.sub(r"[ \t]+\n", "\n", s)
+    s = "\n".join(line.rstrip(" \t") for line in s.split("\n"))
     return re.sub(r"\n{3,}", "\n\n", s).strip()
 
 
-def cloze_cards(text: str, extra: str = "") -> list[list[str]]:
-    """`{{c1::Paris}} is the capital of {{c2::France::country}}` -> one card per cloze number.
-    The front shows that number's blanks as [...] (or [hint]); the back is the whole sentence."""
-    numbers = sorted({int(m.group(1)) for m in CLOZE.finditer(text)})
+def cloze_cards(text: str, extra: str = "", numbers: list[int] | None = None) -> list[list[str]]:
+    """`{{c1::Paris}} is the capital of {{c2::France::country}}` -> one card per cloze number
+    (only `numbers`, when given). The front shows that number's blanks as [...] (or [hint]);
+    the back is the whole sentence."""
+    if numbers is None:
+        numbers = sorted({int(m.group(1)) for m in CLOZE.finditer(text)})
     full = CLOZE.sub(lambda m: m.group(2), text).strip()
     back = full + (f"\n\n{extra.strip()}" if extra and extra.strip() else "")
     cards = []
@@ -206,7 +320,7 @@ def cloze_cards(text: str, extra: str = "") -> list[list[str]]:
     return cards
 
 
-def _anki(text: str) -> tuple[list[list[str]], list[str]]:
+def _anki(out: _Out, text: str) -> None:
     headers: dict[str, str] = {}
     lines = text.split("\n")
     start = 0
@@ -226,93 +340,84 @@ def _anki(text: str) -> tuple[list[list[str]], list[str]]:
         is_html = headers["html"].lower() == "true"
     else:
         is_html = bool(_LOOKS_HTML.search(body))
-    excluded = set()
-    for key in ("tags column", "deck column", "notetype column", "guid column"):
-        if headers.get(key, "").isdigit():
-            excluded.add(int(headers[key]))
-    cards, skipped = [], []
+    excluded = {int(headers[key]) for key in ("tags column", "deck column", "notetype column", "guid column")
+                if _DIGITS.fullmatch(headers.get(key, ""))}
     try:
         rows = list(csv.reader(io.StringIO(body), delimiter=sep))
-    except csv.Error:
+    except (csv.Error, ValueError, TypeError):  # e.g. #separator:" (csv can't split on its quote)
         rows = [line.split(sep) for line in body.split("\n")]
     for row in rows:
-        fields = [cell for idx, cell in enumerate(row, 1) if idx not in excluded]
-        if is_html:
+        fields = [cell[:FIELD_MAX] for idx, cell in enumerate(row, 1) if idx not in excluded]
+        if is_html and not out.full:  # past the limit, cards are only counted
             fields = [html_to_text(f) for f in fields]
         if not any(f.strip() for f in fields):
             continue
-        if CLOZE.search(fields[0]):
-            cards.extend(cloze_cards(fields[0], fields[1] if len(fields) > 1 else ""))
+        if "{{" in fields[0] and CLOZE.search(fields[0]):
+            out.add(fields[0], fields[1] if len(fields) > 1 else "")
         elif len(fields) >= 2 and fields[0].strip() and fields[1].strip():
-            cards.append([fields[0], fields[1]])
+            out.add(fields[0], fields[1])
         else:
-            skipped.append(sep.join(row))
-    return cards, skipped
+            out.skip(sep.join(row))
 
 
 # ---------------------------------------------------------------- entry point
 
 
-def parse_cards(text: str | None, term_sep: str | None = None,
-                card_sep: str | None = None) -> tuple[list[tuple[str, str]], list[str], str]:
-    """Pasted text -> (cards as (front, back), lines we couldn't use, detected format).
+def parse(text: str | None, term_sep: str | None = None, card_sep: str | None = None) -> Parsed:
+    """Pasted text -> the cards as (front, back), the lines we couldn't use, the detected format,
+    and how many cards the MAX_CARDS limit left out.
 
     `term_sep` / `card_sep` are "auto" (or None), a name ("tab", "comma", "newline",
     "semicolon") or a custom string; giving either one means Quizlet-style parsing."""
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿")
     if not text.strip():
-        return [], [], "empty"
+        return Parsed([], [], "empty")
+    out = _Out()
     ts, cs = _sep(term_sep, TERM_SEPS), _sep(card_sep, CARD_SEPS)
     if ts or cs:
         if not ts:
             ts = "\t" if "\t" in text else ","
-        raw, skipped = _quizlet(text, ts, cs or _auto_card_sep(text, ts))
+        _quizlet(out, text, ts, cs or _auto_card_sep(text, ts))
         detected = "quizlet"
     elif _looks_anki(text):
-        raw, skipped = _anki(text)
+        _anki(out, text)
         detected = "anki"
     elif len(row := _first_row(text)) >= 2 and _is_header(row[0], row[1]):
-        raw, skipped = _csv(text)
+        _csv(out, text)
         detected = "csv"
-    elif CLOZE.search(text):
-        raw, skipped = _anki(text)
-        detected = "anki"
     else:
         lines = [line for line in text.split("\n") if line.strip()]
-        tab_lines = sum(1 for line in lines if "\t" in line)
-        colon_lines = sum(1 for line in lines if "::" in line and "\t" not in line)
-        if tab_lines > colon_lines:
-            raw, skipped = _quizlet(text, "\t", _auto_card_sep(text, "\t"))
+        plain = [_outside_cloze(line) for line in lines]
+        cloze_lines = sum(1 for line, bare in zip(lines, plain) if bare != line)
+        tab_lines = sum(1 for bare in plain if "\t" in bare)
+        colon_lines = sum(1 for bare in plain if "::" in bare and "\t" not in bare)
+        if cloze_lines * 2 > len(lines) and not tab_lines and not colon_lines:
+            _anki(out, text)  # cloze notes, one per line
+            detected = "anki"
+        elif tab_lines > colon_lines:
+            _quizlet(out, text, "\t", _auto_card_sep(text, "\t"))
             detected = "quizlet"
         elif colon_lines:
-            raw, skipped = _lines(text)
+            _lines(out, text)
             detected = "lines"
         elif _looks_csv(text):
-            raw, skipped = _csv(text)
+            _csv(out, text)
             detected = "csv"
         elif "," in text:
-            raw, skipped = _quizlet(text, ",", _auto_card_sep(text, ","))
+            _quizlet(out, text, ",", _auto_card_sep(text, ","))
             detected = "quizlet"
         else:
-            return [], [line for line in lines], "unknown"
-    cards: list[tuple[str, str]] = []
-    for i, (front, back) in enumerate(raw):
-        front, back = front.strip(), re.sub(r"\n{3,}", "\n\n", back.strip())
-        if not front or not back:
-            skipped.append(front or back)
-            continue
-        if not cards and i == 0 and _is_header(front, back):
-            continue  # a header row, not a card
-        if len(cards) >= MAX_CARDS:
-            skipped.append(f"{len(raw) - i} more cards past the {MAX_CARDS:,}-card limit")
-            break
-        if len(front) > MAX_FRONT or len(back) > MAX_BACK:
-            skipped.append(f"Trimmed a very long card: {_clip(front, 60)}")
-            front, back = front[:MAX_FRONT].rstrip(), back[:MAX_BACK].rstrip()
-        cards.append((front, back))
-    if not cards and detected != "empty":
-        detected = "unknown" if not raw else detected
-    return cards, [_clip(s) for s in skipped if s and s.strip()], detected
+            return Parsed([], [_clip(line) for line in lines], "unknown")
+    if not out.cards and not out.seen:
+        detected = "unknown"
+    return Parsed(out.cards, [_clip(s) for s in out.skipped if s and s.strip()], detected, out.dropped)
+
+
+def parse_cards(text: str | None, term_sep: str | None = None,
+                card_sep: str | None = None) -> tuple[list[tuple[str, str]], list[str], str]:
+    """`parse` as (cards, lines we couldn't use, detected format)."""
+    parsed = parse(text, term_sep, card_sep)
+    return parsed.cards, parsed.skipped, parsed.detected
 
 
 def separator_choice(src, name: str) -> str | None:
@@ -324,12 +429,14 @@ def separator_choice(src, name: str) -> str | None:
 
 
 def preview(src, show: int = 20) -> dict:
-    """What the import box shows while typing: a count, the first cards and the skipped lines."""
-    cards, skipped, detected = parse_cards(str(src.get("text") or ""), separator_choice(src, "term_sep"),
-                                           separator_choice(src, "card_sep"))
-    return {"count": len(cards), "cards": [{"front": f, "back": b} for f, b in cards[:show]],
-            "skipped": skipped[:20], "skipped_count": len(skipped), "detected": detected,
-            "label": DETECTED_LABELS.get(detected, detected)}
+    """What the import box shows while typing: a count, the first cards, the skipped lines, and
+    (for a set over the limit) how many cards would be left out."""
+    parsed = parse(str(src.get("text") or ""), separator_choice(src, "term_sep"), separator_choice(src, "card_sep"))
+    return {"count": len(parsed.cards), "cards": [{"front": f, "back": b} for f, b in parsed.cards[:show]],
+            "skipped": parsed.skipped[:20], "skipped_count": len(parsed.skipped), "detected": parsed.detected,
+            "label": DETECTED_LABELS.get(parsed.detected, parsed.detected),
+            "dropped": parsed.dropped, "truncated": parsed.dropped > 0, "total": parsed.total,
+            "note": limit_note(parsed, "will be imported")}
 
 
 # ---------------------------------------------------------------- export

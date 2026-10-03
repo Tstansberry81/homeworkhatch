@@ -2,7 +2,7 @@
 {% block title %}Learn · {{ sset.title }}{% endblock %}
 {% block head %}{% include "_katex.html" %}{% endblock %}
 {% block content %}
-{% set sel = dict(sset.params, session=session_id or None) %}
+{% set sel = dict(test_params, session=session_id or None) %}
 <div class="page-head">
   <div>
     <div class="small muted">
@@ -56,4 +56,5 @@
 <script type="application/json" id="learn-data">{{ data|tojson }}</script>
 {% endif %}
 {% endblock %}
-{% block scripts %}{% if data.cards %}<script src="{{ url_for('static', filename='js/learn.js') }}"></script>{% endif %}{% endblock %}
+{% block scripts %}{% if data.cards %}<script src="{{ url_for('static', filename='js/answers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/learn.js') }}"></script>{% endif %}{% endblock %}

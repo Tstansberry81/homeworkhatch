@@ -12,32 +12,9 @@
   const stage = $("#learn-stage");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // ------------------------------------------------------------ answer checking (mirrors services/learn.py)
-  const SOFT = /[.,;:!?'"`()[\]{}…–—‘’“”«»¿¡$\\*_~#]/g;
-  const NUM = /^([-+−]?)(\$?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(%?)$/;
-  const normalize = (text, strict) => {
-    let s = String(text ?? "").normalize("NFC");
-    if (strict) return s.trim().split(/\s+/).filter(Boolean).join(" ").toLowerCase();
-    s = s.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-    return s.replace(/(\d)\.(?=\d)/g, "$1\u0000").replace(SOFT, "").replace(/\u0000/g, ".").replace(/\s+/g, "");
-  };
-  const isNumber = (text) => NUM.test(String(text ?? "").trim());
-  const oneEditApart = (a, b) => {
-    if (a === b || Math.abs(a.length - b.length) > 1) return false;
-    if (a.length > b.length) [a, b] = [b, a];
-    let i = 0;
-    while (i < a.length && a[i] === b[i]) i++;
-    if (a.length !== b.length) return a.slice(i) === b.slice(i + 1);
-    if (a.slice(i + 1) === b.slice(i + 1)) return true;
-    return i + 1 < a.length && a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2); // swapped pair
-  };
-  const check = (given, expected, strict) => {
-    const g = normalize(given, strict), e = normalize(expected, strict);
-    if (!g) return "wrong";
-    if (g === e) return "right";
-    if (!strict && e.length >= 4 && !isNumber(expected) && oneEditApart(g, e)) return "almost";
-    return "wrong";
-  };
+  // ------------------------------------------------------------ answer checking (static/js/answers.js,
+  // the same rules as services/learn.py; the ignored accent marks come from the server)
+  const { normalize, check } = window.hhAnswers.checker(data.marks);
 
   // ------------------------------------------------------------ options
   const prefs = { answerWith: data.answerWith === "term" ? "term" : "definition", strict: false, starredOnly: false };
@@ -256,9 +233,10 @@
     try {
       const res = await hh.post(data.urls.answers, { answers: batch });
       if (res.coins) note("+3 Buddy Coins for studying today.", "success");
-    } catch {
+    } catch (err) {
       unsent.unshift(...batch);
-      note("Couldn't save your progress just now; we'll try again after the next round.", "warning");
+      note(err?.signedOut ? `Your progress wasn't saved. ${err.message}`
+        : "Couldn't save your progress just now; we'll try again after the next round.", "warning");
     }
   }
 

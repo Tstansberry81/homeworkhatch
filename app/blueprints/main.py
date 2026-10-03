@@ -64,7 +64,8 @@ def privacy():
     return render_template("legal/privacy.html")
 
 
-FREE_PREVIEW_MAX_BYTES = 200 * 1024
+# The page only shows 50 cards; the browser sends the start of a longer paste (import.js).
+FREE_PREVIEW_MAX_BYTES = 30 * 1024
 
 
 @bp.route("/free-learn")
@@ -72,15 +73,18 @@ def free_learn():
     """Public page: Learn mode free, with your own Quizlet or Anki sets (paste, preview, sign up)."""
     if current_user.is_authenticated:
         return redirect(url_for("study.import_deck"))
-    return render_template("free_learn.html")
+    return render_template("free_learn.html", preview_max=FREE_PREVIEW_MAX_BYTES)
 
 
 @bp.route("/free-learn/preview", methods=["POST"])
 @csrf.exempt  # read-only: parses the posted text and answers; no session, account or storage involved
 def free_learn_preview():
-    """Parse pasted cards for the public page. Nothing is stored; at most 200 KB in, 50 cards out."""
+    """Parse pasted cards for the public page. Nothing is stored; at most 30 KB in, 50 cards out.
+    JSON only: another site's form (or a "simple" cross-site fetch) can't send that type."""
     if (request.content_length or 0) > FREE_PREVIEW_MAX_BYTES:
         return jsonify({"error": "That's a big set! Sign up to import all of it."}), 413
+    if not request.is_json:
+        return jsonify({"error": "Send JSON with a text field."}), 415
     raw = request.stream.read(FREE_PREVIEW_MAX_BYTES + 1)
     if len(raw) > FREE_PREVIEW_MAX_BYTES:
         return jsonify({"error": "That's a big set! Sign up to import all of it."}), 413

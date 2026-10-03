@@ -27,7 +27,9 @@
 
   <section class="free-section">
     <h2>2. Paste it here to check it</h2>
-    <div class="card" data-import data-preview-url="{{ url_for('main.free_learn_preview') }}">
+    <div class="card" data-import data-preview-url="{{ url_for('main.free_learn_preview') }}" data-preview-max="{{ preview_max }}"
+         data-cut-note="That's a long set, so this preview reads only its beginning. Sign up to import all of it.">
+
       {% with with_file=false, form=none %}{% include "study/_import_fields.html" %}{% endwith %}
       <p class="small muted">Nothing is saved until you sign up: this preview just reads the text.</p>
     </div>

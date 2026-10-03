@@ -9,8 +9,12 @@ right -> 4, right after an "almost" (one typo, or "I was right") -> 3, wrong -> 
 * Intervals go 1 day -> 3 days -> previous x ease; ease never drops below 1.3.
 * Answering the same card right again within a few hours (Learn asks multiple choice, then
   typed) is practice: it's counted, but it doesn't stretch the interval a second time.
+* So is answering a learned card right before it's due (starred-only or picked-card Learn,
+  "Keep going"): drilling a card every few hours must not push it out for years. A miss
+  still counts and brings the card back.
 * Exam clamp: when the card's deck belongs to a plan with a future exam, the next interval is
   at most max(1, days_left // 2), so every card comes due again before the exam.
+* No interval is ever longer than MAX_INTERVAL_DAYS (ten years).
 
 `due_queue` picks what to study today: cards that are due (most overdue first), then new ones,
 never more than the daily cap. A backlog after days off is spread over the next days instead of
@@ -28,6 +32,7 @@ EASE_FLOOR = 1.3
 RELEARN = timedelta(minutes=10)
 SAME_SESSION = timedelta(hours=6)
 DAILY_CAP = 150
+MAX_INTERVAL_DAYS = 3650
 
 
 def quality(correct: bool, almost: bool = False) -> int:
@@ -69,8 +74,16 @@ def grade(card: Card, correct: bool, almost: bool = False, now: datetime | None 
         card.due_at = now + RELEARN
         return card
 
+    cap = exam_cap(exam_at, now)
     if same_session and reps >= 1:
         return card  # practice inside one session: counted, schedule unchanged
+    if reps >= 1 and card.due_at is not None and now < card.due_at:
+        # Reviewed before it's due: practice too. The schedule stays, except that an exam
+        # added since still brings the card back in time.
+        if cap is not None and card.due_at > now + timedelta(days=cap):
+            card.interval_days = min(card.interval_days or cap, cap)
+            card.due_at = now + timedelta(days=cap)
+        return card
 
     card.ease = ease = _ease_after(ease, q)
     reps += 1
@@ -80,10 +93,10 @@ def grade(card: Card, correct: bool, almost: bool = False, now: datetime | None 
     elif reps == 2:
         interval = 3
     else:
-        interval = max(1, round((card.interval_days or 1) * ease))
-    cap = exam_cap(exam_at, now)
+        interval = max(1, round(min(card.interval_days or 1, MAX_INTERVAL_DAYS) * ease))
     if cap is not None:
         interval = min(interval, cap)
+    interval = min(interval, MAX_INTERVAL_DAYS)  # now + timedelta(days=...) can never overflow
     card.interval_days = interval
     card.due_at = now + timedelta(days=interval)
     return card

@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from ..extensions import db
 from ..models import CanvasFile, Course, Page, Upload, User
-from ..utils import html_to_text
+from ..utils import html_to_text, parse_id
 
 READY = {"ok", "ai"}
 READING = {"pending", "extracting"}
@@ -81,9 +81,10 @@ def parse(refs) -> list[tuple[str, int]]:
     out, seen = [], set()
     for ref in refs or []:
         kind, _, ident = str(ref).partition(":")
-        if kind in KINDS and ident.isdigit() and (kind, int(ident)) not in seen:
-            seen.add((kind, int(ident)))
-            out.append((kind, int(ident)))
+        number = parse_id(ident)  # not str.isdigit(): "²" passes that and crashes int()
+        if kind in KINDS and number is not None and (kind, number) not in seen:
+            seen.add((kind, number))
+            out.append((kind, number))
     return out[:40]
 
 
