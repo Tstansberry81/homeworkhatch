@@ -9,6 +9,10 @@
     <div><label for="title">Title</label><input id="title" name="title" type="text" maxlength="200" required></div>
     <div><label for="course_id">Class <span class="hint">(optional)</span></label>
       <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select></div>
+    {% if plans %}
+    <div><label for="plan_id">Which exam is this for? <span class="hint">(optional)</span></label>
+      <select id="plan_id" name="plan_id"><option value="">Not for a particular exam</option>{% for p in plans %}<option value="{{ p.id }}" {{ 'selected' if p.id == plan_id }}>{{ p.title }}{% if p.exam_at %} · {{ p.exam_at|dt('date') }}{% endif %}</option>{% endfor %}</select></div>
+    {% elif plan_id %}<input type="hidden" name="plan_id" value="{{ plan_id }}">{% endif %}
   </div>
   <label for="description">Description <span class="hint">(optional)</span></label>
   <input id="description" name="description" type="text" maxlength="1000">

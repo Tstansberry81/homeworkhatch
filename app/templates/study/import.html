@@ -6,7 +6,8 @@
   <p class="muted">Bring your flashcards from Quizlet or Anki (or a spreadsheet). Learn, Test and spaced repetition are free on every plan, and you can download your cards again anytime.</p></div></div>
 <p class="flash info" id="restored-note" hidden>We kept the set you pasted before signing in. Give it a title and save it.</p>
 {% with with_file=true %}{% include "study/_export_help.html" %}{% endwith %}
-<form method="post" class="card mt" data-import data-restore data-preview-url="{{ url_for('study.import_preview') }}">
+<form method="post" class="card mt" data-import data-restore data-preview-url="{{ url_for('study.import_preview') }}"
+      data-preview-max="{{ preview_max }}" data-import-max="{{ import_max }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {% with with_file=true %}{% include "study/_import_fields.html" %}{% endwith %}
   <div class="form-row">

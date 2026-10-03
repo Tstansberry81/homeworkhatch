@@ -2,7 +2,8 @@
 
 No AI anywhere: distractors are other cards' answers from the same set (numbers get nearby
 numbers), and typed answers are compared as text. `normalize` / `check_answer` mirror the
-browser's copy in static/js/learn.js, so Test mode grades exactly like Learn mode does.
+browser's copy in static/js/answers.js, so Test mode grades exactly like Learn mode does; the
+Learn page gets IGNORED_MARKS from here, so both sides drop exactly the same marks.
 """
 
 from __future__ import annotations
@@ -18,6 +19,14 @@ SOFT_PUNCTUATION = ".,;:!?'\"`()[]{}…–—‘’“”«»¿¡$\\*_~#"
 _SOFT_TABLE = str.maketrans("", "", SOFT_PUNCTUATION)
 _NUM = re.compile(r"([-+−]?)(\$?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(%?)")
 TYPED_MAX = 80  # longer answers aren't asked as typed questions in Test mode
+MAX_NUMBER_DIGITS = 15  # past this a float can't tell neighbouring numbers apart
+
+# The marks lenient checking ignores, as inclusive code point ranges: Latin accents (combining
+# diacritics), Hebrew points and Arabic harakat (optional vowel marks). Everything else stays,
+# because elsewhere a mark changes the word: Japanese voicing marks (かき "persimmon" vs かぎ
+# "key"), Indic vowel signs (काम vs कम), and so on.
+IGNORED_MARKS = ((0x0300, 0x036F), (0x0591, 0x05C7), (0x064B, 0x065F), (0x0670, 0x0670))
+_IGNORED_TABLE = {cp: None for lo, hi in IGNORED_MARKS for cp in range(lo, hi + 1)}
 
 
 def normalize(text: str | None, strict: bool = False) -> str:
@@ -25,8 +34,8 @@ def normalize(text: str | None, strict: bool = False) -> str:
     s = unicodedata.normalize("NFC", text or "")
     if strict:
         return " ".join(s.split()).lower()
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
+    s = unicodedata.normalize("NFKD", s).translate(_IGNORED_TABLE)
+    s = unicodedata.normalize("NFC", s).lower()  # recompose what's left (が stays が)
     s = re.sub(r"(\d)\.(?=\d)", "\\1\x00", s).translate(_SOFT_TABLE).replace("\x00", ".")
     return re.sub(r"\s+", "", s)
 
@@ -72,7 +81,11 @@ def _numeric_variants(answer: str, rng: random.Random, k: int) -> list[str]:
     if not m:
         return []
     sign, currency, digits, frac, pct = m.groups()
+    if len(digits.replace(",", "")) + len(frac or ".") - 1 > MAX_NUMBER_DIGITS:
+        return []  # a 309-digit answer would be infinity; any this long can't be nudged anyway
     value = float(("-" if sign in ("-", "−") else "") + digits.replace(",", "") + (frac or ""))
+    if not math.isfinite(value):
+        return []
     decimals = len(frac) - 1 if frac else 0
     if decimals:
         step = 10 ** -decimals

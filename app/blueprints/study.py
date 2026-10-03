@@ -20,7 +20,7 @@ from .. import queries
 from ..extensions import db
 from ..models import Card, Deck, DeckTest, PracticeQuiz, QuizAttempt, StudyPlan, utcnow
 from ..services import ai, cards_io, coins, learn as learn_service, sources, srs, study
-from ..utils import local_now, to_local, user_zone
+from ..utils import body_limit, local_now, parse_id, to_local, user_zone
 
 bp = Blueprint("study", __name__, url_prefix="/study")
 
@@ -52,15 +52,19 @@ def _course_id(value) -> int | None:
 
 def _preset(args) -> dict:
     """What the generator opens with: ?course=&refs=file:1,page:2&output= (from a class's Files
-    tab), or ?kind=file|page&ref= (the buttons on a file or page)."""
+    tab), ?kind=file|page&ref= (the buttons on a file or page), and ?plan= (the exam planner's
+    "Make cards with AI": the new deck or quiz is for that exam)."""
     refs = [r for r in (args.get("refs") or "").split(",") if r]
-    if args.get("kind") in ("file", "page") and str(args.get("ref") or "").isdigit():
-        refs.append(f"{args['kind']}:{args['ref']}")
+    ref_id = parse_id(args.get("ref"))
+    if args.get("kind") in ("file", "page") and ref_id is not None:
+        refs.append(f"{args['kind']}:{ref_id}")
     course_id = args.get("course", type=int) if hasattr(args, "getlist") else None
     if not course_id and refs:
         course_id = next((s.course_id for s in sources.describe(current_user, refs) if s.course_id), None)
+    plan = _owned_plan(args.get("plan"))
     return {"course_id": course_id, "refs": refs, "output": args.get("output", "deck"),
-            "mode": args.get("mode") if args.get("mode") in ("sources", "course", "paste") else "sources"}
+            "mode": args.get("mode") if args.get("mode") in ("sources", "course", "paste") else "sources",
+            "plan_id": plan.id if plan else None}
 
 
 # ---------------------------------------------------------------- hub
@@ -101,7 +105,9 @@ def generate():
     f = request.form
     mode = f.get("mode", "sources")
     output = f.get("output", "deck")
-    preset = {"course_id": f.get("picker_course", type=int), "refs": f.getlist("refs"), "output": output, "mode": mode}
+    plan = _owned_plan(f.get("plan_id"))
+    preset = {"course_id": f.get("picker_course", type=int), "refs": f.getlist("refs"), "output": output, "mode": mode,
+              "plan_id": plan.id if plan else None}
     try:
         count = int(f.get("count") or (15 if output == "deck" else 10))
         if mode == "course":
@@ -114,7 +120,7 @@ def generate():
             data = study.generate_quiz(current_user, material, count)
             quiz = PracticeQuiz(user_id=current_user.id, course_id=material.course_id, source="ai",
                                 title=data["title"] or f"Quiz: {material.title}"[:200], questions=data["questions"],
-                                from_course_files=mode != "paste")
+                                from_course_files=mode != "paste", plan_id=plan.id if plan else None)
             db.session.add(quiz)
             db.session.commit()
             target = url_for("study.take_quiz", quiz_id=quiz.id)
@@ -122,7 +128,7 @@ def generate():
             data = study.generate_flashcards(current_user, material, count)
             deck = Deck(user_id=current_user.id, course_id=material.course_id, source="ai",
                         title=data["title"] or f"Cards: {material.title}"[:200],
-                        description=f"Generated from {material.title}"[:1000])
+                        description=f"Generated from {material.title}"[:1000], plan_id=plan.id if plan else None)
             deck.cards = [Card(front=c["front"], back=c["back"], position=i) for i, c in enumerate(data["cards"])]
             db.session.add(deck)
             db.session.commit()
@@ -139,55 +145,98 @@ def generate():
 def _generate_page(preset: dict):
     options = study.material_options(current_user, preset.get("course_id"))
     return render_template("study/generate.html", courses=options["courses"], preset=preset,
-                           remaining=ai.remaining(current_user))
+                           remaining=ai.remaining(current_user), plans=_plan_choices(_owned_plan(preset.get("plan_id"))))
 
 
 # ---------------------------------------------------------------- decks
 
 
+# Pasted sets (import, New deck, Add cards). The parser is linear, and these caps keep one
+# request's work small: a 2,000-card set is far below them.
+MAX_IMPORT_CHARS = 2_000_000
+MAX_IMPORT_BODY = 8 * 1024 * 1024  # form-encoded: tabs, new lines and accents take 3-9 bytes each
+IMPORT_PREVIEW_MAX_CHARS = 300_000  # the live preview; the browser sends the start of a longer paste
+IMPORT_PREVIEW_MAX_BODY = 1_200_000
+TOO_BIG = "That's more than we can import at once. Split it into a few smaller sets."
+
+
 def _parse_cards(text: str) -> list[tuple[str, str]]:
     """Pasted cards: "front :: back" per line, tab-separated, or a Quizlet / Anki / CSV export
     (see services/cards_io)."""
-    return cards_io.parse_cards(text)[0]
+    return cards_io.parse(text).cards
+
+
+def _parse_notes(parsed: cards_io.Parsed, verb: str) -> str:
+    """" 3 lines couldn't be read. Only the first 2,000 of 5,000 cards were added." (or "")."""
+    notes = []
+    if parsed.skipped:
+        notes.append(f"{len(parsed.skipped)} line{'s' if len(parsed.skipped) != 1 else ''} couldn't be read.")
+    if parsed.dropped:
+        notes.append(cards_io.limit_note(parsed, verb))
+    return "".join(f" {n}" for n in notes)
 
 
 @bp.route("/decks/new", methods=["GET", "POST"])
+@body_limit(MAX_IMPORT_BODY, TOO_BIG)
 @login_required
 def new_deck():
+    """A deck typed or pasted by hand. ?plan=<id> (the planner's "Write cards") makes it a deck
+    for that exam; the picker on the form carries it through the POST."""
     courses = queries.visible_courses(current_user.id)
     if request.method == "POST":
+        plan = _owned_plan(request.form.get("plan_id"))
+        page = dict(courses=courses, plans=_plan_choices(plan), plan_id=plan.id if plan else None)
         title = request.form.get("title", "").strip()
-        if not title:
-            flash("Give the deck a title.", "error")
-            return render_template("study/deck_new.html", courses=courses), 400
-        deck = Deck(user_id=current_user.id, title=title[:200], course_id=_course_id(request.form.get("course_id")),
-                    description=request.form.get("description", "").strip()[:1000] or None)
-        deck.cards = [Card(front=f, back=b, position=i) for i, (f, b) in enumerate(_parse_cards(request.form.get("cards")))]
+        text = request.form.get("cards") or ""
+        if not title or len(text) > MAX_IMPORT_CHARS:
+            flash(TOO_BIG if title else "Give the deck a title.", "error")
+            return render_template("study/deck_new.html", **page), 400
+        parsed = cards_io.parse(text)
+        course_id = _course_id(request.form.get("course_id")) or (plan.course_id if plan else None)
+        deck = Deck(user_id=current_user.id, title=title[:200], course_id=course_id,
+                    description=request.form.get("description", "").strip()[:1000] or None,
+                    plan_id=plan.id if plan else None)
+        deck.cards = [Card(front=f, back=b, position=i) for i, (f, b) in enumerate(parsed.cards)]
         db.session.add(deck)
         db.session.commit()
+        notes = _parse_notes(parsed, "were added")
+        if notes:
+            flash(f"Added {len(parsed.cards)} card{'s' if len(parsed.cards) != 1 else ''}.{notes}",
+                  "warning" if parsed.dropped else "info")
         return redirect(url_for("study.deck", deck_id=deck.id))
-    return render_template("study/deck_new.html", courses=courses)
+    plan = _owned_plan(request.args.get("plan"))
+    return render_template("study/deck_new.html", courses=courses, plans=_plan_choices(plan),
+                           plan_id=plan.id if plan else None)
 
 
 @bp.route("/decks/<int:deck_id>", methods=["GET", "POST"])
+@body_limit(MAX_IMPORT_BODY, TOO_BIG)
 @login_required
 def deck(deck_id: int):
     d = _deck(deck_id)
     if request.method == "POST":
         action = request.form.get("action")
         if action == "add":
-            added = _parse_cards(request.form.get("cards"))
+            text = request.form.get("cards") or ""
+            if len(text) > MAX_IMPORT_CHARS:
+                flash(TOO_BIG, "error")
+                return redirect(url_for("study.deck", deck_id=d.id))
+            parsed = cards_io.parse(text)
             start = len(d.cards)
-            for i, (front, back) in enumerate(added):
+            for i, (front, back) in enumerate(parsed.cards):
                 d.cards.append(Card(front=front, back=back, position=start + i))
-            flash(f"Added {len(added)} card{'s' if len(added) != 1 else ''}.", "success")
+            added = len(parsed.cards)
+            flash(f"Added {added} card{'s' if added != 1 else ''}.{_parse_notes(parsed, 'were added')}",
+                  "warning" if parsed.dropped else "success")
         elif action == "edit":
-            card = db.session.get(Card, int(request.form.get("card_id", 0)))
+            card_id = parse_id(request.form.get("card_id"))
+            card = db.session.get(Card, card_id) if card_id else None
             if card and card.deck_id == d.id:
                 card.front = request.form.get("front", card.front).strip()[:2000] or card.front
                 card.back = request.form.get("back", card.back).strip()[:4000] or card.back
         elif action == "delete_card":
-            card = db.session.get(Card, int(request.form.get("card_id", 0)))
+            card_id = parse_id(request.form.get("card_id"))
+            card = db.session.get(Card, card_id) if card_id else None
             if card and card.deck_id == d.id:
                 db.session.delete(card)
         elif action == "rename":
@@ -267,6 +316,21 @@ def _plan_from_form(value) -> StudyPlan | None:
     return _plan(plan_id) if plan_id else None
 
 
+def _owned_plan(value) -> StudyPlan | None:
+    """The student's own plan for an id from a link or form; anything else is ignored."""
+    plan_id = parse_id(value)
+    plan = db.session.get(StudyPlan, plan_id) if plan_id else None
+    return plan if plan is not None and plan.user_id == current_user.id else None
+
+
+def _plan_choices(selected: StudyPlan | None) -> list[StudyPlan]:
+    """The "Which exam is this for?" options: active plans, plus the selected one if it isn't."""
+    plans = _active_plans()
+    if selected is not None and all(p.id != selected.id for p in plans):
+        plans.append(selected)
+    return plans
+
+
 def _exam_badge(plan: StudyPlan | None) -> dict | None:
     """"Calc Midterm 2 · Thu · 64% ready" for a plan whose exam is still ahead."""
     if plan is None or plan.exam_at is None or plan.exam_at <= utcnow():
@@ -310,15 +374,14 @@ def _award_study_coins(answers: int) -> bool:
 
 # ---------------------------------------------------------------- import / export / stars
 
-MAX_IMPORT_CHARS = 5_000_000
-
-
 @bp.route("/decks/import", methods=["GET", "POST"])
+@body_limit(MAX_IMPORT_BODY, TOO_BIG)
 @login_required
 def import_deck():
     """Paste a Quizlet "Copy text" export, Anki notes or a CSV; preview it live; save a deck."""
     courses = queries.visible_courses(current_user.id)
     plans = _active_plans()
+    page = dict(courses=courses, plans=plans, preview_max=IMPORT_PREVIEW_MAX_CHARS, import_max=MAX_IMPORT_CHARS)
     if request.method == "POST":
         f = request.form
         text = f.get("text", "")
@@ -326,37 +389,38 @@ def import_deck():
                 "text": text[:200_000], "term_sep": f.get("term_sep", "auto"), "card_sep": f.get("card_sep", "auto"),
                 "term_sep_custom": f.get("term_sep_custom", ""), "card_sep_custom": f.get("card_sep_custom", "")}
         if len(text) > MAX_IMPORT_CHARS:
-            flash("That's more than we can import at once. Split it into a few decks.", "error")
-            return render_template("study/import.html", courses=courses, plans=plans, form=form), 400
-        cards, skipped, _ = cards_io.parse_cards(text, cards_io.separator_choice(f, "term_sep"),
-                                                 cards_io.separator_choice(f, "card_sep"))
+            flash(TOO_BIG, "error")
+            return render_template("study/import.html", form=form, **page), 400
+        parsed = cards_io.parse(text, cards_io.separator_choice(f, "term_sep"), cards_io.separator_choice(f, "card_sep"))
         title = form["title"].strip()
-        if not title or not cards:
+        if not title or not parsed.cards:
             flash("Give the deck a title." if not title else
                   "We couldn't find any cards in that. Check the separators, or see the examples below.", "error")
-            return render_template("study/import.html", courses=courses, plans=plans, form=form), 400
+            return render_template("study/import.html", form=form, **page), 400
         plan = _plan_from_form(f.get("plan_id"))
         course_id = _course_id(f.get("course_id")) or (plan.course_id if plan else None)
         deck = Deck(user_id=current_user.id, title=title[:200], course_id=course_id, source="import",
                     plan_id=plan.id if plan else None)
-        deck.cards = [Card(front=front, back=back, position=i) for i, (front, back) in enumerate(cards)]
+        deck.cards = [Card(front=front, back=back, position=i) for i, (front, back) in enumerate(parsed.cards)]
         db.session.add(deck)
         db.session.commit()
-        note = f" {len(skipped)} line{'s' if len(skipped) != 1 else ''} couldn't be read." if skipped else ""
-        flash(f"Imported {len(cards)} card{'s' if len(cards) != 1 else ''}.{note}", "success")
+        count = len(parsed.cards)
+        flash(f"Imported {count} card{'s' if count != 1 else ''}.{_parse_notes(parsed, 'were imported')}",
+              "warning" if parsed.dropped else "success")
         return redirect(url_for("study.deck", deck_id=deck.id))
     form = {"plan_id": request.args.get("plan", ""), "course_id": request.args.get("course", "")}
-    return render_template("study/import.html", courses=courses, plans=plans, form=form)
+    return render_template("study/import.html", form=form, **page)
 
 
 @bp.route("/decks/import/preview", methods=["POST"])
+@body_limit(IMPORT_PREVIEW_MAX_BODY, "That's too long to preview. Saving reads all of it.", json=True)
 @login_required
 def import_preview():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Send JSON with a text field."}), 400
-    if len(str(data.get("text") or "")) > MAX_IMPORT_CHARS:
-        return jsonify({"error": "That's more than we can import at once."}), 413
+    if len(str(data.get("text") or "")) > IMPORT_PREVIEW_MAX_CHARS:
+        return jsonify({"error": "That's too long to preview. Saving reads all of it."}), 413
     return jsonify(cards_io.preview(data, show=20))
 
 
@@ -399,8 +463,8 @@ def _ids(values) -> list[int]:
     out = []
     for value in values:
         for part in str(value).split(","):
-            if part.strip().isdigit():
-                out.append(int(part))
+            if (n := parse_id(part)) is not None:
+                out.append(n)
     return list(dict.fromkeys(out))
 
 
@@ -412,16 +476,14 @@ class StudySet:
     params: dict = field(default_factory=dict)  # the selection, for links to Learn / Test / Flip
     deck: Deck | None = None  # when the set is one deck
     subset: str = ""  # "starred" / "picked" when only some cards are in it
+    decks: list[Deck] = field(default_factory=list)
 
 
 def _study_set(args) -> StudySet | None:
     """deck=<id> (repeatable), plan=<id> (every deck for that exam), card=<id> (repeatable: only
     those cards), starred=1. Everything is owner-checked; None when nothing was asked for."""
     deck_ids, card_ids = _ids(args.getlist("deck")), _ids(args.getlist("card"))
-    try:
-        plan_id = int(args.get("plan") or 0)
-    except ValueError:
-        plan_id = 0
+    plan_id = parse_id(args.get("plan")) or 0
     if not (deck_ids or card_ids or plan_id):
         return None
     plan = _plan(plan_id) if plan_id else None
@@ -467,25 +529,42 @@ def _study_set(args) -> StudySet | None:
                                 ("starred", 1 if starred else None)) if v}
     return StudySet(cards=cards, title=title, plan=plan, params=params,
                     deck=decks[0] if len(decks) == 1 else None,
-                    subset="starred" if starred else "picked" if card_ids else "")
+                    subset="starred" if starred else "picked" if card_ids else "", decks=decks)
+
+
+def _covers_plan(sset: StudySet) -> bool:
+    """True when the set is the whole exam: every deck for the plan and nothing else, all their
+    cards (no picked or starred subset). Only such a test says how ready the student is."""
+    if sset.plan is None or sset.subset:
+        return False
+    plan_decks = set(db.session.scalars(select(Deck.id).where(Deck.plan_id == sset.plan.id,
+                                                              Deck.user_id == current_user.id)))
+    return bool(plan_decks) and {d.id for d in sset.decks} == plan_decks
 
 
 def _answer_with(args) -> str:
     return "term" if args.get("answer_with") == "term" else "definition"
 
 
+def _local_midnight_utc() -> datetime:
+    """The start of the student's local day, as a naive UTC datetime (how the database stores times)."""
+    midnight = datetime.combine(local_now(current_user).date(), dtime.min, tzinfo=user_zone(current_user))
+    return midnight.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def _reviewed_today() -> int:
     """Cards this student has answered since local midnight (they count toward the daily cap)."""
-    midnight = datetime.combine(local_now(current_user).date(), dtime.min, tzinfo=user_zone(current_user))
-    since = midnight.astimezone(timezone.utc).replace(tzinfo=None)
     return db.session.scalar(select(func.count(Card.id)).join(Deck, Deck.id == Card.deck_id).where(
-        Deck.user_id == current_user.id, Card.last_reviewed_at >= since)) or 0
+        Deck.user_id == current_user.id, Card.last_reviewed_at >= _local_midnight_utc())) or 0
 
 
 # ---------------------------------------------------------------- Learn mode
 
 LEARN_MAX = 1000  # cards sent to one Learn page
 ROUND_SIZE = 7
+# "Test yourself" is a GET link; gunicorn refuses request lines over 4,094 bytes. A test asks
+# at most 60 questions anyway, so a long picked list is sampled down for the link.
+TEST_LINK_MAX_IDS = 150
 
 
 @bp.route("/learn", methods=["GET", "POST"])
@@ -518,11 +597,14 @@ def learn():
                 "o": learn_service.pick_options(i, backs, rng, 3, back_keys),
                 "ot": learn_service.pick_options(i, fronts, rng, 3, front_keys)} for i, c in enumerate(ordered)]
     data = {"cards": payload, "today": min(len(today), len(ordered)), "roundSize": ROUND_SIZE,
-            "answerWith": _answer_with(args), "total": len(cards),
+            "answerWith": _answer_with(args), "total": len(cards), "marks": learn_service.IGNORED_MARKS,
             "urls": {"answers": url_for("study.learn_answers"), "star": url_for("study.star_card", card_id=0)}}
+    test_params = dict(sset.params)
+    if len(test_params.get("card", [])) > TEST_LINK_MAX_IDS:
+        test_params["card"] = sorted(rng.sample(test_params["card"], TEST_LINK_MAX_IDS))
     return render_template("study/learn.html", sset=sset, data=data, exam=_exam_badge(sset.plan),
                            session_url=_session_link(args), session_id=args.get("session", ""),
-                           answer_with=data["answerWith"])
+                           answer_with=data["answerWith"], test_params=test_params)
 
 
 @bp.route("/learn/answers", methods=["POST"])
@@ -536,8 +618,9 @@ def learn_answers():
         return jsonify({"error": "Send {answers: [{card_id, correct, almost}]}."}), 400
     wanted = {}
     for item in items[:200]:
-        if isinstance(item, dict) and str(item.get("card_id", "")).isdigit():
-            wanted.setdefault(int(item["card_id"]), item)
+        card_id = parse_id(item.get("card_id")) if isinstance(item, dict) else None
+        if card_id is not None:
+            wanted.setdefault(card_id, item)
     owned = db.session.scalars(select(Card).join(Deck, Deck.id == Card.deck_id).options(selectinload(Card.deck)).where(
         Card.id.in_(list(wanted)), Deck.user_id == current_user.id)).all() if wanted else []
     plan_ids = {c.deck.plan_id for c in owned if c.deck.plan_id}
@@ -556,6 +639,7 @@ def learn_answers():
 # ---------------------------------------------------------------- Test mode
 
 TEST_MAX_AGE = 12 * 3600
+READINESS_MIN_QUESTIONS = 10  # (or every card, for a smaller exam) before a test counts as readiness
 
 
 def _test_signer() -> URLSafeTimedSerializer:
@@ -566,10 +650,15 @@ def _test_signer() -> URLSafeTimedSerializer:
 @login_required
 def test_mode():
     """A timed practice test (multiple choice, typed, true/false) with no feedback until the
-    end. What was asked travels signed in the form; scoring re-reads the real cards."""
+    end. What was asked travels signed in the form; scoring re-reads the real cards.
+
+    The saved result counts as the exam's readiness only when the test covered the whole exam
+    (see _covers_plan) with enough questions. `check=1` (or kind=pretest) is the planner's
+    ungraded quick check: plan= still picks the cards, but it never counts as readiness."""
     if request.method == "POST":
         return _grade_test()
     args = request.args
+    check = args.get("check") in ("1", "true", "on") or args.get("kind") == "pretest"
     sset = _study_set(args)
     if sset is None:
         flash("Pick a deck to test yourself on.", "info")
@@ -603,10 +692,12 @@ def test_mode():
         elif q["k"] == "tf":
             item["shown"] = html_of(q["s"])
         shown.append(item)
-    token = _test_signer().dumps({"u": current_user.id, "q": questions, "p": sset.plan.id if sset.plan else None,
-                                  "a": answer_with, "t": int(time.time()), "m": minutes})
+    counts = (not check and _covers_plan(sset)
+              and len(questions) >= min(READINESS_MIN_QUESTIONS, len(sset.cards)))
+    token = _test_signer().dumps({"u": current_user.id, "q": questions, "p": sset.plan.id if counts else None,
+                                  "a": answer_with, "t": int(time.time()), "m": minutes, "k": 1 if check else 0})
     return render_template("study/test.html", sset=sset, questions=shown, token=token, minutes=minutes,
-                           answer_with=answer_with, session_url=_session_link(args),
+                           answer_with=answer_with, session_url=_session_link(args), check=check,
                            session_id=args.get("session", ""), exam=_exam_badge(sset.plan))
 
 
@@ -636,7 +727,7 @@ def _grade_test():
     if not answers:
         flash("Those cards were deleted, so there was nothing to score.", "info")
         return redirect(url_for("study.index"))
-    plan_id = data.get("p")
+    plan_id = None if data.get("k") else data.get("p")  # a quick check is never readiness
     if plan_id:
         plan = db.session.get(StudyPlan, plan_id)
         plan_id = plan.id if plan is not None and plan.user_id == current_user.id else None
@@ -810,24 +901,38 @@ def delete_quiz(quiz_id: int):
     return redirect(url_for("study.index"))
 
 
+QUIZ_AWARDS_PER_DAY = 3  # practice-quiz coin awards per local day, however many quizzes are made
+
+
+def _passed_quiz_today(quiz: PracticeQuiz) -> bool:
+    """Already scored 80%+ on this quiz today (each quiz pays at most once a day)."""
+    return db.session.scalar(select(QuizAttempt.id).where(
+        QuizAttempt.quiz_id == quiz.id, QuizAttempt.user_id == current_user.id,
+        QuizAttempt.created_at >= _local_midnight_utc(), QuizAttempt.total >= 5,
+        QuizAttempt.score * 5 >= QuizAttempt.total * 4).limit(1)) is not None
+
+
+def _quiz_award_ref(today: str) -> str | None:
+    """The day's first unused practice-quiz award, or None once all of today's are paid."""
+    paid = coins.paid_refs(current_user.id, f"quiz-day:{today}:%")
+    return next((ref for k in range(QUIZ_AWARDS_PER_DAY) if (ref := f"quiz-day:{today}:{k}") not in paid), None)
+
+
 @bp.route("/quizzes/<int:quiz_id>", methods=["GET", "POST"])
 @login_required
 def take_quiz(quiz_id: int):
     quiz = _quiz(quiz_id)
     if request.method == "POST":
-        answers = []
-        for i in range(len(quiz.questions)):
-            value = request.form.get(f"q{i}")
-            answers.append(int(value) if value is not None and value.isdigit() else None)
+        answers = [parse_id(request.form.get(f"q{i}")) for i in range(len(quiz.questions))]
         score = sum(1 for q, a in zip(quiz.questions, answers) if a == q["answer"])
+        # Coins need a real quiz (5+ questions), so one-question quizzes can't mint coins; each
+        # quiz pays once a day, and only 3 quizzes a day pay, so making quizzes can't farm coins.
+        earned = len(quiz.questions) >= 5 and score / len(quiz.questions) >= 0.8 and not _passed_quiz_today(quiz)
         attempt = QuizAttempt(quiz_id=quiz.id, user_id=current_user.id, answers=answers, score=score,
                               total=len(quiz.questions))
         db.session.add(attempt)
-        # Coins need a real quiz (5+ questions), so one-question quizzes can't mint coins.
-        if len(quiz.questions) >= 5 and score / len(quiz.questions) >= 0.8:
-            today = local_now(current_user).date().isoformat()
-            if coins.award(current_user.id, 5, f"Scored {score}/{len(quiz.questions)} on {quiz.title}"[:200],
-                           f"quiz:{quiz.id}:{today}"):
+        if earned and (ref := _quiz_award_ref(local_now(current_user).date().isoformat())):
+            if coins.award(current_user.id, 5, f"Scored {score}/{len(quiz.questions)} on {quiz.title}"[:200], ref):
                 flash("+5 Buddy Coins for scoring 80% or better!", "success")
         db.session.commit()
         return render_template("study/quiz_result.html", quiz=quiz, attempt=attempt)

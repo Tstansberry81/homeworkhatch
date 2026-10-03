@@ -8,7 +8,7 @@ from datetime import timedelta
 
 import click
 from dotenv import load_dotenv
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
 from sqlalchemy import select
 
@@ -38,9 +38,9 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
     app.config.update(load_config(env_name))
     if overrides:
         app.config.update(overrides)
-    # Hard cap on any request body (also enforced for chunked uploads with no Content-Length).
-    app.config.setdefault("MAX_CONTENT_LENGTH",
-                          (max(app.config["MAX_FILE_MB"], app.config["MAX_SNAPSHOT_MB"]) + 1) * 1024 * 1024)
+    # No app-wide MAX_CONTENT_LENGTH: the uploads page sends up to 20 files in one request.
+    # Routes that read big bodies check their own size (api.py) or declare a cap with
+    # utils.body_limit, enforced by limit_request_body before anything reads the body.
     if env_name == "production":
         problems = validate_production(app.config)
         if problems and os.environ.get("HH_ALLOW_UNSAFE_CONFIG") != "1":
@@ -64,6 +64,7 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
     encryption_service.startup(app)  # refuses to start with a key that doesn't match the data
     encryption_service.register_cli(app)
     login_manager.init_app(app)
+    _register_body_limits(app)  # before CSRF, which reads form bodies to find the token
     csrf.init_app(app)
 
     from .blueprints import (admin, api, auth, billing, chat, coins, courses, live, main, planner, settings, study, tools,
@@ -125,6 +126,24 @@ def _register_template_helpers(app: Flask) -> None:
         if current_user.is_authenticated:
             ctx["coin_balance"] = coin_service.balance(current_user.id)
         return ctx
+
+
+def _register_body_limits(app: Flask) -> None:
+    @app.before_request
+    def limit_request_body():
+        """Routes marked with utils.body_limit: refuse a bigger body before it's read."""
+        view = app.view_functions.get(request.endpoint or "")
+        limit = getattr(view, "max_body", None)
+        if limit is None:
+            return None
+        max_bytes, message, as_json = limit
+        request.max_content_length = max_bytes  # a body with no Content-Length stops here too
+        if (request.content_length or 0) <= max_bytes:
+            return None
+        if as_json:
+            return jsonify({"error": message}), 413
+        flash(message, "error")
+        return redirect(request.full_path.rstrip("?"))  # back to the same page (a path, not a host)
 
 
 def _register_hooks(app: Flask) -> None:

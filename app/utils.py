@@ -159,6 +159,32 @@ def adult_required(view):
     return wrapper
 
 
+def body_limit(max_bytes: int, message: str, json: bool = False):
+    """Cap a route's request body at max_bytes. The app's `limit_request_body` hook enforces it
+    before anything reads the body (CSRF reads forms before the view runs): a bigger body is
+    answered without being read (JSON for `json` routes, else a flash and a redirect back), and
+    a body sent without a Content-Length is cut off at the cap. There's no app-wide cap: file
+    uploads send many files in one request."""
+
+    def decorate(view):
+        view.max_body = (max_bytes, message, json)
+        return view
+
+    return decorate
+
+
+_ID = re.compile(r"[0-9]{1,18}")
+
+
+def parse_id(value) -> int | None:
+    """A database id from a form, a query string or JSON: plain ASCII digits only ("²" and "٣"
+    pass str.isdigit() but aren't ids), else None."""
+    if isinstance(value, bool):
+        return None
+    text = str(value).strip() if value is not None else ""
+    return int(text) if _ID.fullmatch(text) else None
+
+
 def log_activity(user_id: int, event: str, detail: str | None = None) -> None:
     db.session.add(ActivityLog(user_id=user_id, event=event, detail=(detail or "")[:500] or None))
 

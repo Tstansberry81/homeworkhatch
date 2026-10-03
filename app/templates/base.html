@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   {% block head %}{% endblock %}
 </head>
-<body>
+<body{% if current_user.is_authenticated %} data-uid="{{ current_user.id }}"{% endif %}>
 {% from "_icons.html" import icon %}
 {% if current_user.is_authenticated %}
 {% set ep = request.endpoint or '' %}

@@ -8,8 +8,9 @@
       {% if session_url %}<a href="{{ session_url }}">← Back to your study session</a> · {% endif %}
       {% if sset.deck %}<a href="{{ url_for('study.deck', deck_id=sset.deck.id) }}">{{ sset.deck.title }}</a>{% else %}<a href="{{ url_for('study.index') }}">Flashcards</a>{% endif %}
     </div>
-    <h1>Practice test</h1>
-    <p class="muted">{{ sset.title }} · {{ questions|length }} question{{ 's' if questions|length != 1 }}{% if minutes %} · {{ minutes }} minute{{ 's' if minutes != 1 }}{% endif %}. You'll see your score and every miss when you hand it in.</p>
+    <h1>{{ 'Quick check' if check else 'Practice test' }}</h1>
+    <p class="muted">{{ sset.title }} · {{ questions|length }} question{{ 's' if questions|length != 1 }}{% if minutes %} · {{ minutes }} minute{{ 's' if minutes != 1 }}{% endif %}.
+      {% if check %}Not graded, and guessing is fine: it shows what to study first.{% else %}You'll see your score and every miss when you hand it in.{% endif %}</p>
   </div>
   {% include "study/_exam_ring.html" %}
 </div>
@@ -18,10 +19,13 @@
   <input type="hidden" name="token" value="{{ token }}">
   {% for key, value in sset.params.items() %}{% for v in (value if value is iterable and value is not string else [value]) %}<input type="hidden" name="{{ key }}" value="{{ v }}">{% endfor %}{% endfor %}
   {% if session_id %}<input type="hidden" name="session" value="{{ session_id }}">{% endif %}
-  <div class="test-bar card" role="status">
+  {# Not a live region: the timer changes every second. Screen readers hear the answered count
+     and the 10-minute / 1-minute marks from #test-announce instead. #}
+  <div class="test-bar card">
     <span><strong id="answered">0</strong> of {{ questions|length }} answered</span>
-    {% if minutes %}<span class="timer" id="timer" data-seconds="{{ minutes * 60 }}" aria-label="Time left">{{ minutes }}:00</span>{% endif %}
+    {% if minutes %}<span class="timer" id="timer" role="timer" aria-live="off" aria-label="Time left" data-seconds="{{ minutes * 60 }}">{{ minutes }}:00</span>{% endif %}
   </div>
+  <div class="sr-only" id="test-announce" aria-live="polite" aria-atomic="true"></div>
   {% for q in questions %}
   {% set qi = loop.index0 %}
   <fieldset class="card test-q" data-q="{{ qi }}">
@@ -51,11 +55,13 @@
 (() => {
   const form = document.getElementById("test-form");
   const total = {{ questions|length }};
-  let submitting = false;
+  const announce = (text) => { document.getElementById("test-announce").textContent = text; };
+  let submitting = false, lastCount = 0;
   const count = () => {
     const done = [...form.querySelectorAll(".test-q")].filter((q) =>
       q.querySelector("input[type=radio]:checked") || (q.querySelector("input[type=text]")?.value.trim())).length;
     document.getElementById("answered").textContent = done;
+    if (done !== lastCount) { lastCount = done; announce(`${done} of ${total} answered`); }
     return done;
   };
   form.addEventListener("input", count);
@@ -80,10 +86,12 @@
   const timer = document.getElementById("timer");
   if (timer) {
     const end = Date.now() + Number(timer.dataset.seconds) * 1000;
+    const marks = [[600, "10 minutes left."], [60, "1 minute left."]].filter(([s]) => s < Number(timer.dataset.seconds));
     const tick = () => {
       const left = Math.max(0, Math.round((end - Date.now()) / 1000));
       timer.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
       if (left <= 60) timer.classList.add("urgent");
+      while (marks.length && left <= marks[0][0]) announce(marks.shift()[1]); // once each, even after a sleep
       if (left === 0) {
         form.dataset.timeUp = "1";
         if (!submitting) { submitting = true; form.submit(); }
