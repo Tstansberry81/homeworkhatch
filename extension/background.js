@@ -1,7 +1,8 @@
 import { syncCanvas, NotLoggedInError, zipPlan, fileKey, pool } from "./canvas.js";
 import { buildZip } from "./zip.js";
-import { uploadSnapshot, HATCH_URL } from "./upload.js";
+import { uploadSnapshot, uploadDiagnostic, HATCH_URL } from "./upload.js";
 import { sameServerAs } from "./origins.js";
+import { diagnoseBrightspace } from "./d2l.js";
 
 const DEFAULTS = {
   // Empty until the student connects their school's Canvas from the popup.
@@ -420,6 +421,132 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   }
   if (msg.type === "reschedule") {
     schedule().then(() => reply({ ok: true }));
+    return true;
+  }
+});
+
+// ---------- Brightspace check (opt-in, shape only; see d2l.js) ----------
+// The student starts it from the popup on a Brightspace page. It reads that site with their
+// session, keeps only which features answered and their structure, and shows them the report.
+// Nothing leaves the browser unless they click "Send to Homework Hatch".
+
+// Transport 1, as for Canvas: the service worker's own fetch, with the site's cookies.
+async function swGetDiag(url, { signal } = {}) {
+  const r = await fetch(url, { credentials: "include", headers: { Accept: "application/json" }, signal });
+  return { status: r.status, text: await r.text(), headers: { "retry-after": r.headers.get("retry-after") } };
+}
+
+// Transport 2: inside the open Brightspace tab, for when the worker's request looks signed out.
+function tabGetDiag(tabId) {
+  return async (url, { timeoutMs = 10000 } = {}) => {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async (u, ms) => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ms);
+        try {
+          const r = await fetch(u, { credentials: "include", headers: { Accept: "application/json" }, signal: ctrl.signal });
+          return { status: r.status, text: await r.text(), headers: { "retry-after": r.headers.get("retry-after") } };
+        } catch (e) {
+          return { status: 0, text: "", error: String(e?.name || e) };
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      args: [url, timeoutMs],
+    });
+    return result;
+  };
+}
+
+// Progress arrives from two requests at a time: merge in memory, like setStatus.
+let diagCache = null;
+async function setDiag(patch, { replace = false } = {}) {
+  diagCache ??= chrome.storage.local.get("diag").then((r) => r.diag || {});
+  const next = { ...(replace ? {} : await diagCache), ...patch };
+  diagCache = Promise.resolve(next);
+  await chrome.storage.local.set({ diag: next });
+  chrome.runtime.sendMessage({ type: "diag", diag: next }).catch(() => {});
+}
+
+async function brightspaceTab(origin, tabId) {
+  const own = tabId != null ? await chrome.tabs.get(tabId).catch(() => null) : null;
+  if (own?.url?.startsWith(`${origin}/`)) return own;
+  const tabs = await chrome.tabs.query({ url: `${origin}/*` });
+  return tabs.find((t) => t.status === "complete") || tabs[0] || null;
+}
+
+async function diagnoseOnce(origin, tabId) {
+  if (!(await chrome.permissions.contains({ origins: [`${origin}/*`] }))) {
+    return setDiag({ state: "error", origin, error: "Homework Hatch needs your OK to read this Brightspace site. Nothing was read." },
+      { replace: true });
+  }
+  await setDiag({ state: "running", origin, startedAt: new Date().toISOString(), progress: null }, { replace: true });
+  const common = {
+    baseUrl: origin, extensionVersion: chrome.runtime.getManifest().version, onProgress: (p) => setDiag({ progress: p }),
+  };
+  try {
+    let report = await diagnoseBrightspace({ ...common, get: swGetDiag, transport: "worker" });
+    // Signed out from the worker, but the version list answered: the page itself may be signed in
+    // (some schools' cookies don't reach extension requests). Try once from inside the tab.
+    if (!report.signed_in && report.notes.includes("signed_out")) {
+      const tab = await brightspaceTab(origin, tabId);
+      if (tab) {
+        const inTab = await diagnoseBrightspace({ ...common, get: tabGetDiag(tab.id), transport: "tab" }).catch(() => null);
+        if (inTab?.signed_in) report = { ...inTab, notes: [...inTab.notes, "worker_signed_out"] };
+      }
+    }
+    await setDiag({ state: "done", progress: null, report, finishedAt: new Date().toISOString() });
+  } catch (e) {
+    await setDiag({ state: "error", progress: null, error: `The check stopped: ${e.message || e}` });
+  }
+}
+
+// Started by the popup's message or, when Chrome's permission prompt closed the popup, by the
+// grant itself (pendingDiag, written by the popup before it asked). One click can trigger both;
+// they share one run.
+let diagRunning = null;
+function finishDiag(request = null) {
+  diagRunning ??= (async () => {
+    const { pendingDiag } = await chrome.storage.local.get("pendingDiag");
+    await chrome.storage.local.remove("pendingDiag");
+    const fresh = pendingDiag && Date.now() - pendingDiag.at < 5 * 60000 ? pendingDiag : null;
+    const job = request || fresh;
+    if (job?.origin) await diagnoseOnce(job.origin, job.tabId);
+    await chrome.storage.local.remove("pendingDiag");  // a write that landed late mustn't start another run
+  })().finally(() => { diagRunning = null; });
+  return diagRunning;
+}
+
+async function sendDiag() {
+  const { diag } = await chrome.storage.local.get("diag");
+  if (!diag?.report) return;
+  const s = await settings();
+  if (!s.endpointUrl || !s.endpointToken) {
+    return setDiag({ sendError: "Link the extension to your Homework Hatch account first, or download the report and email it to us." });
+  }
+  await setDiag({ sending: true, sendError: null });
+  try {
+    const { id } = await uploadDiagnostic({ serverUrl: s.endpointUrl, token: s.endpointToken, report: diag.report });
+    await setDiag({ sending: false, sent: { at: new Date().toISOString(), id } });
+  } catch (e) {
+    await setDiag({ sending: false, sendError: String(e.message || e) });
+  }
+}
+
+// A check still "running" in storage belongs to a worker Chrome stopped; this one isn't running it.
+chrome.storage.local.get("diag").then(({ diag }) => {
+  if (diag?.state === "running" && !diagRunning) setDiag({ state: "error", progress: null, error: "The check was interrupted. Run it again." });
+});
+
+chrome.permissions.onAdded.addListener(() => finishDiag());
+chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg.type === "diag:run") {
+    finishDiag({ origin: msg.origin, tabId: msg.tabId }).then(() => reply({ ok: true }));
+    return true;
+  }
+  if (msg.type === "diag:send") {
+    sendDiag().then(() => reply({ ok: true }));
     return true;
   }
 });

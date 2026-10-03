@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 from ..extensions import db
 from ..models import ApiToken, SyncRun, User, utcnow
-from ..services import gcal, ingest, integrations, textjobs
+from ..services import diagnostics, gcal, ingest, integrations, textjobs
 from ..services.storage import StorageError, TooLarge
 
 bp = Blueprint("api", __name__, url_prefix="/v1")
@@ -165,3 +165,24 @@ def complete(snapshot_id: str):
         return _error(404, "unknown snapshot")
     ingest.complete_run(run, request.get_json(silent=True) or {})
     return jsonify({"ok": True})
+
+
+@bp.route("/diagnostics", methods=["POST"])
+def post_diagnostic():
+    """A shape-only LMS check the student chose to send (extension/d2l.js). It is re-validated
+    field by field before it's stored (services/diagnostics.py), whatever the client sent."""
+    if (request.content_length or 0) > diagnostics.MAX_BYTES:
+        return _error(413, "report too large")
+    raw = request.stream.read(diagnostics.MAX_BYTES + 1)  # bounded even without a Content-Length
+    if len(raw) > diagnostics.MAX_BYTES:
+        return _error(413, "report too large")
+    try:
+        body = json.loads(raw or b"null")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return _error(400, "body is not JSON")
+    try:
+        row = diagnostics.store(g.api_user, body)
+    except diagnostics.DiagnosticError as exc:
+        db.session.rollback()
+        return _error(exc.status, str(exc))
+    return jsonify({"ok": True, "id": row.id}), 201
