@@ -140,7 +140,7 @@ def test_shape_cleaner_vocabulary():
     assert clean({"len": True}) == {}, "a bool isn't a length, so this is an (empty) object"
     assert clean({"[]": {"A": "num"}, "len": 3, "{or}": "null", "extra": "str"}) == {"[]": {"A": "num"}, "len": 3, "{or}": "null"}
     assert clean({"@odata.context": "url", "{id}": {"x": "bool"}, "a b": "num"}) == \
-        {"@odata.context": "url", "{id}": {"x": "bool"}, "a b": "num"}
+        {"@odata.context": "url", "{id}": {"x": "bool"}}, "a key with a space could be a name: dropped"
     assert clean({"k" * 81: "str", "ok": "str"}) == {"ok": "str"}
     deep = "num"
     for _ in range(20):
@@ -209,3 +209,10 @@ def test_admin_diagnostics_page(app, client):
     assert "attachment" in r.headers["Content-Disposition"] and "brightspace-school.brightspace.com" in r.headers["Content-Disposition"]
     assert json.loads(r.data) == row.payload
     assert client.get("/admin/diagnostics/999999.json").status_code == 404
+
+
+def test_field_names_with_spaces_are_dropped():
+    from app.services import diagnostics
+
+    assert diagnostics.KEY_RE.match("SubmissionType") and diagnostics.KEY_RE.match("{ou}")
+    assert not diagnostics.KEY_RE.match("Pat Example")

@@ -26,7 +26,8 @@ SCHEMA = 1
 
 # Mirrors extension/d2l.js.
 SHAPE_TOKENS = {"str", "date", "url", "html", "num", "bool", "null", "obj", "arr"}
-KEY_RE = re.compile(r"^[A-Za-z0-9_.@:{}\[\] -]{1,80}$")
+# No spaces: real API field names never have them, and a name like "Pat Example" must not fit.
+KEY_RE = re.compile(r"^[A-Za-z0-9_.@:{}\[\]-]{1,80}$")
 ENUM_FIELDS = {
     "ActivityType", "AssociatedEntityType", "CalcTypeId", "CompletionType", "DropboxType", "EndDateAvailabilityType",
     "EntityType", "EventType", "GradeObjectType", "GradeObjectTypeName", "GradeType", "GradingSystem", "ItemType",
