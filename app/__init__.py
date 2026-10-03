@@ -63,6 +63,9 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
 
     encryption_service.startup(app)  # refuses to start with a key that doesn't match the data
     encryption_service.register_cli(app)
+    from .services import feeds as feed_service
+
+    feed_service.register_cli(app)  # flask feeds refresh-stale
     login_manager.init_app(app)
     _register_body_limits(app)  # before CSRF, which reads form bodies to find the token
     csrf.init_app(app)

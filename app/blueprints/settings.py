@@ -154,11 +154,13 @@ def add_feed():
         db.session.rollback()
         flash("You've already added that calendar link.", "info")
         return _back_to_links()
-    counts = feeds.refresh(feed, force=True)
+    # Read right away, within feeds.TOTAL_SECONDS all told (or refused at once when the server is
+    # already reading as many links as it allows), so this request never holds a thread for longer.
+    outcome = feeds.refresh_outcome(feed, force=True)
+    counts = outcome.counts
     if counts is None:
-        message = feed.last_error or "We couldn't read that calendar."
         feeds.remove(feed)  # nothing was imported; don't keep a link that doesn't work
-        flash(f"{message} The link wasn't added.", "error")
+        flash(outcome.not_added, "error")  # nothing retries a link that wasn't kept: say so
         return _back_to_links()
     name = feeds.lms_name(feed.lms)
     if counts.get("due") or counts.get("events"):
@@ -177,9 +179,10 @@ def refresh_feed(feed_id: int):
     if feed.last_fetched_at and utcnow() - feed.last_fetched_at < feeds.MANUAL_REFRESH_GAP:
         flash("That link was checked a moment ago. Try again in a minute.", "info")
         return _back_to_links()
-    counts = feeds.refresh(feed, force=True)
+    outcome = feeds.refresh_outcome(feed, force=True)
+    counts = outcome.counts
     if counts is None:
-        flash(feed.last_error or "We couldn't read that calendar.", "error")
+        flash(outcome.message or "We couldn't read that calendar.", "info" if outcome.busy else "error")
     elif counts.get("unchanged"):
         flash(f"Up to date: {_found(counts)}.", "success")
     else:

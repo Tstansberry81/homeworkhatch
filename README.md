@@ -109,6 +109,12 @@ select cron.schedule('homeworkhatch-keepalive', '*/5 * * * *',
 A free workspace gets 750 instance hours a month, enough for one always-on service. On a paid
 instance, drop the job: paid instances never sleep.
 
+The ping also keeps calendar links (Brightspace, Blackboard, Moodle, Schoology) fresh for students who
+don't open the site: at most every 5 minutes, `/health` refreshes up to 5 of the stalest links (older
+than an hour) on a background thread, so their due dates still reach Google Calendar about hourly. Run
+`flask feeds refresh-stale` to do it by hand. Render's health checks call `/health` as well, and the
+backup pinger's `/health/db` starts the same sweep.
+
 **4. Verify** from Render's shell (paid plans) or any machine with the same env vars:
 
 ```bash
