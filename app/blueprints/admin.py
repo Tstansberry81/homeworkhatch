@@ -9,8 +9,8 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_, select
 
 from ..extensions import db
-from ..models import (ActivityLog, AIUsage, ChatMessage, ChatReport, CoinTransaction, Course, LmsDiagnostic, SyncRun, User,
-                      utcnow)
+from ..models import (ActivityLog, AIUsage, CalendarFeed, ChatMessage, ChatReport, CoinTransaction, Course, LmsDiagnostic,
+                      SyncRun, User, utcnow)
 from ..services import ai, billing, coins, diagnostics
 from ..utils import admin_required, log_activity
 
@@ -47,7 +47,19 @@ def overview():
     enc = {"on": ring is not None, "strict": crypto.strict(), "keys": ring.checks() if ring else {},
            "active": ring.active.kid if ring else None, "pending": encryption.field_status() if ring else {},
            "last": encryption.state()}
-    return render_template("admin/overview.html", stats=stats, plans=plans, pending=pending, enc=enc)
+    return render_template("admin/overview.html", stats=stats, plans=plans, pending=pending, enc=enc,
+                           links=_calendar_links())
+
+
+def _calendar_links(limit: int = 30) -> list[tuple]:
+    """Students' calendar links with the shape of each one's last import (property names and counts,
+    never text or the link), for writing better rules per LMS."""
+    rows = []
+    for f in db.session.scalars(select(CalendarFeed).order_by(CalendarFeed.created_at.desc()).limit(limit)):
+        run = db.session.scalar(select(SyncRun).where(SyncRun.account_id == f.account_id)
+                                .order_by(SyncRun.received_at.desc()).limit(1)) if f.account_id else None
+        rows.append((f, ((run.stats or {}).get("shape") if run else None)))
+    return rows
 
 
 @bp.route("/ai")

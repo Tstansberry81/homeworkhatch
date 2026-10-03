@@ -18,7 +18,7 @@ from .. import queries
 from ..config import BASE_DIR
 from ..extensions import csrf, db
 from ..models import Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, calendar_token_hash, utcnow
-from ..services import cards_io, ics, integrations, planner
+from ..services import cards_io, feeds, ics, integrations, planner
 from ..utils import local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
 
@@ -158,6 +158,7 @@ def onboarding():
 def dashboard():
     if not current_user.onboarded:
         return redirect(url_for("main.onboarding"))
+    feeds.refresh_due(current_user)  # calendar links older than an hour (in the background)
     planner.refresh(current_user)
     courses = queries.visible_courses(current_user.id)
     upcoming = queries.upcoming(current_user.id)
@@ -185,7 +186,7 @@ def dashboard():
         missing=queries.missing(current_user.id), classes=queries.class_rows(courses),
         announcements=queries.recent_announcements(current_user.id), accounts=accounts,
         stale=last_sync is None or (utcnow() - last_sync) > timedelta(hours=3),
-        files_undecided=sum(1 for c in courses if c.sync_files is None),
+        files_undecided=sum(1 for c in courses if c.sync_files is None and c.account.lms != "ics"),
     )
 
 
@@ -303,6 +304,7 @@ def _calendar_items(first: date, last: date) -> dict[date, list]:
 @bp.route("/calendar")
 @login_required
 def calendar_view():
+    feeds.refresh_due(current_user)
     today = local_now(current_user).date()
     view = request.args.get("view")
     if view in CALENDAR_VIEWS:

@@ -2,15 +2,51 @@
 {% block title %}Connect Canvas{% endblock %}
 {% block content %}
 {% include "_account_tabs.html" %}
-<div class="page-head"><div><h1>Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension that runs in your browser while you're signed in to Canvas. Your school password never reaches us.</p></div></div>
+<div class="page-head"><div><h1>Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension that runs in your browser while you're signed in to Canvas. Your school password never reaches us. On Brightspace, Blackboard, Moodle or Schoology? <a href="#calendar-links">Add your calendar link</a>.</p></div></div>
 
 {% if accounts %}
 <div class="card mb" style="border-color:var(--ok)">
   <h2>Connected</h2>
-  <ul class="list">{% for a in accounts %}<li><div class="grow"><div class="title">{{ a.host }}</div><div class="small muted">as {{ a.canvas_name or 'you' }} · last sync {{ a.last_sync_at|ago }}</div></div>
+  <ul class="list">{% for a in accounts %}<li><div class="grow"><div class="title">{{ a.host }}</div>
+    {% if a.lms == 'ics' %}<div class="small muted">{{ source_label(a) }} · due dates and events only · last sync {{ a.last_sync_at|ago }}</div>
+    {% else %}<div class="small muted">as {{ a.canvas_name or 'you' }} · last sync {{ a.last_sync_at|ago }}</div>{% endif %}</div>
     {% if a.restricted %}<span class="small muted" title="Tabs your instructors hid in Canvas">{{ a.restricted|length }} hidden sections</span>{% endif %}</li>{% endfor %}</ul>
 </div>
 {% endif %}
+
+<div class="card mb" id="calendar-links">
+  <h2>Not on Canvas? Add your calendar link</h2>
+  <p class="small muted">Brightspace, Blackboard, Moodle and Schoology each give you a private calendar link. Paste it here and your due dates and events come in about every hour, for the dashboard, calendar, exam planner and Google Calendar. Grades, files and announcements don't come through a calendar link. Keep the link private: anyone who has it can see your school calendar.</p>
+  {% if feeds|length < max_feeds %}
+  <form method="post" action="{{ url_for('settings.add_feed') }}" class="btn-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="feed-url" class="sr-only">Calendar link</label>
+    <input id="feed-url" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" maxlength="2000" placeholder="https://… or webcal://…" style="flex:1;min-width:14rem;width:auto" required>
+    <button class="btn">Add</button>
+  </form>
+  {% else %}
+  <p class="small muted">You've added {{ max_feeds }} calendar links, the most there can be. Remove one to add another.</p>
+  {% endif %}
+  {% if feeds %}
+  <ul class="list mt">{% for f in feeds %}
+    <li><div class="grow"><div class="title">{{ lms_name(f.lms) or 'Calendar link' }}</div>
+      <div class="small muted" style="overflow-wrap:anywhere">{{ f.host }} · {% if f.last_fetched_at %}checked {{ f.last_fetched_at|ago }}{% else %}not checked yet{% endif %} · {{ f.event_count }} date{{ 's' if f.event_count != 1 }}</div>
+      {% if f.last_error %}<div class="small" style="color:var(--err)">{{ f.last_error }}</div>{% endif %}
+      <div class="btn-row" style="margin-top:6px">
+        <form method="post" action="{{ url_for('settings.refresh_feed', feed_id=f.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost btn-sm">Refresh now</button></form>
+        <form method="post" action="{{ url_for('settings.remove_feed', feed_id=f.id) }}" class="inline" data-confirm="Remove this calendar link? Its classes, due dates and events are deleted from Homework Hatch (nothing changes at your school)."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="linklike small">Remove</button></form>
+      </div></div></li>
+  {% endfor %}</ul>
+  {% endif %}
+  <details class="small mt">
+    <summary><strong>Where do I find my calendar link?</strong></summary>
+    <p><strong>Brightspace (D2L)</strong>: open <em>Calendar</em> → <em>Settings</em>, tick <em>Enable Calendar Feeds</em> and save. Back in the calendar, click <em>Subscribe</em>, choose <em>All Calendars and Tasks</em> and copy the link.</p>
+    <p><strong>Blackboard</strong>: open <em>Calendar</em> → <em>Calendar Settings</em> → the <em>⋯</em> menu → <em>Share Calendar</em> and copy the link. Older Blackboard pages call it <em>Get External Calendar Link</em>, at the bottom of the calendar.</p>
+    <p><strong>Moodle</strong>: open the <em>Calendar</em>, click <em>Import or export calendars</em> at the bottom → <em>Export calendar</em>. Choose <em>All events</em> and <em>Recent and next 60 days</em> (or a custom range, if offered), click <em>Get calendar URL</em>, then <em>Copy URL</em>. The link stops working when you change your Moodle password; add it again then.</p>
+    <p><strong>Schoology</strong>: open <em>Account Settings</em> (the arrow next to your name), find <em>Share your Schoology calendar</em>, click <em>Enable</em> and copy the iCal link. Some schools show it under <em>Calendar</em> → <em>Export</em> instead.</p>
+    <p class="muted">Each school can rename or turn off these options. If you can't find it, search your school's help pages for "calendar feed" or "subscribe to calendar".</p>
+  </details>
+</div>
 
 {% if courses %}
 <form method="post" action="{{ url_for('settings.files') }}" class="card mb" id="files">
@@ -38,7 +74,7 @@
   <div>
     {% set link_elsewhere = config.RENDER_URL if config.RENDER_URL and config.RENDER_URL.split('://')[-1] != request.host else '' %}
     <div class="card" id="ext" data-ids='{{ (config.EXTENSION_IDS + (current_user.extension_ids or []))|unique|list|tojson }}' data-link-elsewhere="{{ link_elsewhere }}" data-token-url="{{ url_for('settings.extension_token') }}"
-         data-canvas='{{ (accounts|map(attribute="host")|list)[:1]|tojson }}'>
+         data-canvas='{{ (accounts|rejectattr("lms", "equalto", "ics")|map(attribute="host")|list)[:1]|tojson }}'>
       <h2>Chrome extension</h2>
       <p id="ext-status" class="muted">Looking for the extension…</p>
       <div class="btn-row">
@@ -98,7 +134,7 @@
     {% if runs %}
     <div class="card"><h2>Recent syncs</h2>
       <ul class="list small">{% for r in runs %}<li><div class="grow">{{ r.received_at|ago }} · {{ (r.stats or {}).get('courses', 0) }} classes{% if (r.stats or {}).get('coins') %} · +{{ r.stats.coins }} 🪙{% endif %}</div>
-        <span class="muted">{{ r.files_uploaded }}/{{ r.files_needed }} files{% if r.failed %} · {{ r.failed|length }} failed{% endif %}</span></li>{% endfor %}</ul></div>
+        <span class="muted">{% if (r.stats or {}).get('calendar_link') %}calendar link{% else %}{{ r.files_uploaded }}/{{ r.files_needed }} files{% if r.failed %} · {{ r.failed|length }} failed{% endif %}{% endif %}</span></li>{% endfor %}</ul></div>
     {% endif %}
   </div>
 </div>

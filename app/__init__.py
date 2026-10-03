@@ -114,6 +114,13 @@ def _register_template_helpers(app: Flask) -> None:
     app.jinja_env.filters["canvas_html"] = safe_canvas_html
     app.jinja_env.filters["countdown"] = countdown
     app.jinja_env.globals["course_color"] = course_color
+    from .services import feeds as feed_service
+
+    # Where an account's data comes from, in words: a Canvas host, or "your Brightspace calendar link".
+    app.jinja_env.globals["source_label"] = feed_service.source_label
+    app.jinja_env.globals["source_name"] = feed_service.source_name  # "Canvas", "Brightspace"...
+    app.jinja_env.globals["lms_name"] = feed_service.lms_name
+    app.jinja_env.globals["source_names"] = feed_service.source_names  # "Canvas", "Brightspace and Moodle"...
     from .services.study import render_markdown
     app.jinja_env.filters["md"] = render_markdown  # AI text: `code`, **bold**, lists; math stays for KaTeX
     app.jinja_env.globals["now_utc"] = utcnow

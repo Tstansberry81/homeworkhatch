@@ -9,12 +9,13 @@ from flask import (Blueprint, Response, abort, current_app, flash, jsonify, redi
                    session, url_for)
 from flask_login import current_user, login_required, logout_user
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from .. import queries
 from ..extensions import db
-from ..models import (ApiToken, ChatMessage, CoinTransaction, Course, Deck, DeckTest, LivePlayer, PracticeQuiz,
-                      StudyPlan, SyncRun, TutorConversation, User, utcnow)
-from ..services import gcal, integrations
+from ..models import (ApiToken, CalendarFeed, ChatMessage, CoinTransaction, Course, Deck, DeckTest, LivePlayer,
+                      PracticeQuiz, StudyPlan, SyncRun, TutorConversation, User, utcnow)
+from ..services import feeds, gcal, integrations
 from ..services.storage import get_storage
 from .api import hash_token
 from .auth import USERNAME_RE, valid_timezone
@@ -77,15 +78,18 @@ def server_url() -> str:
 @bp.route("/sync")
 @login_required
 def sync():
+    feeds.refresh_due(current_user)
     tokens = db.session.scalars(select(ApiToken).where(ApiToken.user_id == current_user.id,
                                                        ApiToken.revoked.is_(False))
                                 .order_by(ApiToken.created_at.desc())).all()
     runs = db.session.scalars(select(SyncRun).where(SyncRun.user_id == current_user.id)
                               .order_by(SyncRun.received_at.desc()).limit(10)).all()
+    # Calendar links bring due dates and events, never files: their classes aren't offered for keeping.
+    with_files = [c for c in queries.visible_courses(current_user.id, include_hidden=True) if c.account.lms != "ics"]
     return render_template("settings/sync.html", tokens=tokens, runs=runs, accounts=queries.accounts(current_user.id),
                            server_url=server_url(), new_token=request.args.get("new_token_shown"),
-                           courses=queries.visible_courses(current_user.id, include_hidden=True),
-                           past_courses=_past_courses())
+                           courses=with_files, past_courses=_past_courses(), feeds=_feeds(),
+                           max_feeds=feeds.MAX_FEEDS)
 
 
 def _all_courses() -> list[Course]:
@@ -94,7 +98,102 @@ def _all_courses() -> list[Course]:
 
 def _past_courses() -> list[Course]:
     """Classes no longer active in Canvas (ended or dropped) that still hold stored files."""
-    return [c for c in _all_courses() if not c.active and c.sync_files]
+    return [c for c in _all_courses() if not c.active and c.sync_files and c.account.lms != "ics"]
+
+
+# ---------------------------------------------------------------- calendar links (other LMSs)
+
+
+def _feeds() -> list[CalendarFeed]:
+    return list(db.session.scalars(select(CalendarFeed).where(CalendarFeed.user_id == current_user.id)
+                                   .order_by(CalendarFeed.created_at, CalendarFeed.id)))
+
+
+def _own_feed(feed_id: int) -> CalendarFeed:
+    feed = db.session.get(CalendarFeed, feed_id)
+    if feed is None or feed.user_id != current_user.id:
+        abort(404)
+    return feed
+
+
+def _found(counts: dict) -> str:
+    """'12 due dates and 5 events in 3 classes'"""
+    due, events, classes = counts.get("due") or 0, counts.get("events") or 0, counts.get("courses") or 0
+    text = f"{due} due date{'s' if due != 1 else ''} and {events} event{'s' if events != 1 else ''}"
+    return text + (f" in {classes} class{'es' if classes != 1 else ''}" if classes > 1 else "")
+
+
+def _back_to_links():
+    return redirect(url_for("settings.sync") + "#calendar-links")
+
+
+@bp.route("/feeds", methods=["POST"])
+@login_required
+def add_feed():
+    """A pasted calendar link: checked, fetched right away, and kept only if it could be read."""
+    try:
+        url = feeds.normalize(request.form.get("url") or "")
+    except feeds.FeedError as exc:
+        flash(str(exc), "error")
+        return _back_to_links()
+    count = db.session.scalar(select(func.count(CalendarFeed.id)).where(CalendarFeed.user_id == current_user.id)) or 0
+    if count >= feeds.MAX_FEEDS:
+        flash(f"You can add up to {feeds.MAX_FEEDS} calendar links. Remove one first.", "error")
+        return _back_to_links()
+    digest = feeds.url_hash(url)
+    if db.session.scalar(select(CalendarFeed.id).where(CalendarFeed.user_id == current_user.id,
+                                                       CalendarFeed.url_hash == digest)):
+        flash("You've already added that calendar link.", "info")
+        return _back_to_links()
+    feed = CalendarFeed(user_id=current_user.id, url=url, url_hash=digest, lms=feeds.detect_lms(url),
+                        host=feeds.host_of(url))
+    db.session.add(feed)
+    try:
+        db.session.commit()
+    except IntegrityError:  # the same link, added twice at once
+        db.session.rollback()
+        flash("You've already added that calendar link.", "info")
+        return _back_to_links()
+    counts = feeds.refresh(feed, force=True)
+    if counts is None:
+        message = feed.last_error or "We couldn't read that calendar."
+        feeds.remove(feed)  # nothing was imported; don't keep a link that doesn't work
+        flash(f"{message} The link wasn't added.", "error")
+        return _back_to_links()
+    name = feeds.lms_name(feed.lms)
+    if counts.get("due") or counts.get("events"):
+        flash(f"Added your {name + ' ' if name else ''}calendar link: found {_found(counts)}. "
+              "It refreshes about every hour.", "success")
+    else:
+        flash(f"Added your {name + ' ' if name else ''}calendar link, but it has no dates in it yet. "
+              "If that's wrong, check which calendars the link includes.", "info")
+    return _back_to_links()
+
+
+@bp.route("/feeds/<int:feed_id>/refresh", methods=["POST"])
+@login_required
+def refresh_feed(feed_id: int):
+    feed = _own_feed(feed_id)
+    if feed.last_fetched_at and utcnow() - feed.last_fetched_at < feeds.MANUAL_REFRESH_GAP:
+        flash("That link was checked a moment ago. Try again in a minute.", "info")
+        return _back_to_links()
+    counts = feeds.refresh(feed, force=True)
+    if counts is None:
+        flash(feed.last_error or "We couldn't read that calendar.", "error")
+    elif counts.get("unchanged"):
+        flash(f"Up to date: {_found(counts)}.", "success")
+    else:
+        flash(f"Refreshed: {_found(counts)}.", "success")
+    return _back_to_links()
+
+
+@bp.route("/feeds/<int:feed_id>/remove", methods=["POST"])
+@login_required
+def remove_feed(feed_id: int):
+    feed = _own_feed(feed_id)
+    feeds.remove(feed)
+    flash("Removed the calendar link, with the classes, due dates and events it brought in.", "info")
+    return _back_to_links()
 
 
 @bp.route("/files", methods=["POST"])
@@ -194,6 +293,11 @@ def export():
             "assignments": [{"name": a.name, "due_at": a.due_at.isoformat() if a.due_at else None, "status": a.status,
                              "score": a.score, "points_possible": a.points_possible} for a in c.assignments],
         } for c in courses],
+        # Which calendar links you added. Not the links themselves: each one opens your school calendar.
+        "calendar_links": [{"lms": feeds.lms_name(f.lms) or "other", "host": f.host,
+                            "created_at": f.created_at.isoformat() if f.created_at else None,
+                            "last_fetched_at": f.last_fetched_at.isoformat() if f.last_fetched_at else None}
+                           for f in _feeds()],
         "decks": [{"title": d.title, "cards": [{"front": c.front, "back": c.back} for c in d.cards]}
                   for d in db.session.scalars(select(Deck).where(Deck.user_id == u.id))],
         "quizzes": [{"title": q.title, "questions": q.questions}

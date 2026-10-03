@@ -12,7 +12,7 @@ from sqlalchemy import select
 from .. import queries
 from ..extensions import db
 from ..models import AssessmentChoice, Assignment, CalendarEvent, Deck, DeckTest, PracticeQuiz, StudyPlan, StudySession, utcnow
-from ..services import assessments, coins, planner
+from ..services import assessments, coins, feeds, planner
 from ..utils import local_now, user_zone
 
 bp = Blueprint("planner", __name__, url_prefix="/study/exams")
@@ -112,6 +112,7 @@ def _from_local(day: str, at: str | None) -> datetime | None:
 @bp.route("/")
 @login_required
 def index():
+    feeds.refresh_due(current_user)  # calendar links' new due dates before looking for tests
     notes = planner.refresh(current_user)
     plans = planner.active_plans(current_user.id)
     found = assessments.find(current_user)

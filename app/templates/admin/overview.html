@@ -29,4 +29,15 @@
       <form method="post" action="{{ url_for('admin.user_detail', user_id=u.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="approve"><button class="btn btn-sm">Approve</button></form></li>{% endfor %}</ul>
     {% else %}<p class="muted small">Nobody waiting.{% if not config.REQUIRE_APPROVAL %} (Approval is off: set REQUIRE_APPROVAL=1 to require it.){% endif %}</p>{% endif %}</div>
 </div>
+{% if links %}
+<div class="card mt">
+  <h2>Calendar links</h2>
+  <p class="small muted">What each student's calendar link looked like at its last import: which properties appear and how often, how entries were sorted, how many classes were found. No titles, text or links.</p>
+  <ul class="list small">{% for f, shape in links %}
+    <li><div class="grow"><strong>{{ lms_name(f.lms) or 'Other' }}</strong> · {{ f.host }} · {{ f.event_count }} dates · checked {{ f.last_fetched_at|ago if f.last_fetched_at else 'never' }}
+      {% if f.last_error %}<div style="color:var(--err)">{{ f.last_error }}</div>{% endif %}
+      {% if shape %}<details><summary>Shape: {{ shape.get('due', 0) }} due · {{ shape.get('events', 0) }} events · {{ shape.get('courses', 0) }} classes{% if shape.get('fallback_course') %} (incl. one catch-all){% endif %}</summary><code style="white-space:pre-wrap">{{ shape|tojson(indent=1) }}</code></details>{% endif %}</div></li>
+  {% endfor %}</ul>
+</div>
+{% endif %}
 {% endblock %}
