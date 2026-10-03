@@ -44,6 +44,11 @@ def upcoming(user_id: int, days: int = 14, back_days: int = 7) -> list[Assignmen
 
 def still_to_do(a: Assignment, now) -> bool:
     status = a.effective_status
+    if a.due_at is not None and a.due_at < now and a.course is not None and a.course.account is not None \
+            and a.course.account.lms == "ics":
+        # A calendar link can't say what was handed in: past items drop off quietly instead of
+        # piling up as "overdue" (students said red overdue lists make them give up).
+        return False
     if status == "no_submission":
         # In-class items (exams, checkpoints) show while upcoming and worth points.
         return a.due_at >= now and (a.points_possible or 0) > 0

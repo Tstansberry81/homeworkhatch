@@ -738,3 +738,26 @@ def test_a_broken_link_never_breaks_a_page(app, client, student, net, monkeypatc
     assert feed.last_error == "Something went wrong reading this calendar. We'll try again later."
     assert db.session.scalar(select(func.count(Assignment.id))) == 5
     assert client.get("/dashboard").status_code == 200  # just checked: not retried on every page
+
+
+def test_past_items_from_a_calendar_link_drop_off_instead_of_piling_up(app):
+    from datetime import timedelta
+
+    from app import queries
+    from app.models import Assignment, CanvasAccount, Course, utcnow
+
+    user = make_user("ics_overdue", "ics_overdue@example.com")
+    account = CanvasAccount(user_id=user.id, host="school.brightspace.example", base_url="https://school.brightspace.example",
+                            canvas_user_id="feed-1", lms="ics")
+    db.session.add(account)
+    db.session.flush()
+    course = Course(user_id=user.id, account_id=account.id, canvas_id="c1", name="Biology", class_key="ics::biology",
+                    room_key="school.brightspace.example:c1")
+    db.session.add(course)
+    db.session.flush()
+    db.session.add_all([
+        Assignment(course_id=course.id, canvas_id="a1", name="Lab report", due_at=utcnow() - timedelta(days=2), status="past_due"),
+        Assignment(course_id=course.id, canvas_id="a2", name="Quiz 3", due_at=utcnow() + timedelta(days=2), status="upcoming"),
+    ])
+    db.session.commit()
+    assert [a.name for a in queries.upcoming(user.id)] == ["Quiz 3"]
