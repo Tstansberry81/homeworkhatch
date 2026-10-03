@@ -39,3 +39,5 @@ label.check input { display: inline; width: auto; margin: 0; }
 .disclosure p { margin: 6px 0; }
 .disclosure ul { margin: 4px 0; padding-left: 16px; }
 td:first-child { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#d2l p { margin: 10px 0; }
+pre.report { max-height: 220px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }

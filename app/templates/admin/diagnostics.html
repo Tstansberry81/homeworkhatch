@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Diagnostics · Admin{% endblock %}
+{% block content %}
+{% include "_account_tabs.html" %}
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.overview') }}">Admin</a></div><h1>Diagnostics</h1>
+  <p class="muted">Checks students ran with the extension on an LMS it can't sync yet. Shape only: which features answered, field names and types. No names, grades or course content.</p></div></div>
+<div class="card table-wrap">
+  {% if items %}
+  <table class="table">
+    <thead><tr><th>Date</th><th>User</th><th>LMS</th><th>Host</th><th>Version</th><th>Answered</th><th></th></tr></thead>
+    <tbody>{% for it in items %}{% set r = it.row %}{% set p = r.payload or {} %}
+      <tr><td class="small">{{ r.created_at|dt }}<div class="muted">{{ r.created_at|ago }}</div></td>
+        <td>{% if r.user_id %}<a href="{{ url_for('admin.user_detail', user_id=r.user_id) }}">{{ it.username }}</a>{% else %}<span class="muted">deleted</span>{% endif %}</td>
+        <td>{{ r.lms }}</td><td>{{ r.host }}</td><td class="small">{{ r.extension_version or '—' }}</td>
+        <td>{{ it.answered[0] }}/{{ it.answered[1] }}{% if not p.get('signed_in') %} <span class="badge warn">signed out</span>{% endif %}
+          {% if p.get('notes') %}<div class="small muted">{{ p.get('notes')|join(', ') }}</div>{% endif %}</td>
+        <td><a class="btn btn-ghost btn-sm" href="{{ url_for('admin.diagnostic_json', diagnostic_id=r.id) }}">JSON</a></td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}<div class="empty"><p>No diagnostics yet. They arrive when a student runs the Brightspace check in the extension and clicks Send.</p></div>{% endif %}
+</div>
+{% endblock %}

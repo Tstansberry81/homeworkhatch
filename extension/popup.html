@@ -34,6 +34,35 @@
     </details>
   </section>
 
+  <section id="d2l" hidden>
+    <p><strong>Brightspace detected.</strong> Homework Hatch can't sync Brightspace yet — help us add it.</p>
+    <div class="disclosure">
+      <strong>What the check collects</strong>
+      <p>Which Brightspace features answer and their structure — never names, grades or course content.</p>
+      <p>It asks this Brightspace site, the way its own pages do, for your course list, your calendar, and
+        the assignments, quizzes, grades, announcements and content of up to 3 courses. From the answers it
+        keeps only which ones replied, how fast, how many items came back, and the field names and types
+        (like "date" or "number"). The answers themselves stay in this browser and aren't saved. It only
+        reads, and nothing is sent unless you click Send.</p>
+    </div>
+    <button id="d2lRun">Run a 1-minute check</button>
+    <p id="d2lMsg" class="muted"></p>
+    <div id="d2lResult" hidden>
+      <p id="d2lSummary"></p>
+      <div class="row">
+        <button id="d2lSend">Send to Homework Hatch</button>
+        <button id="d2lDownload" class="secondary">Download report</button>
+        <button id="d2lCopy" class="secondary">Copy</button>
+      </div>
+      <p id="d2lSendMsg" class="muted small"></p>
+      <details>
+        <summary>See exactly what's in the report</summary>
+        <pre id="d2lReport" class="report"></pre>
+      </details>
+    </div>
+    <button id="d2lBack" class="link" hidden>Back to my Canvas sync</button>
+  </section>
+
   <div id="main" hidden>
     <p id="summary" class="muted"></p>
     <p id="auto" class="muted small"></p>

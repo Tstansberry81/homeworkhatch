@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import json
 import secrets
 from datetime import timedelta
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_, select
 
 from ..extensions import db
-from ..models import (ActivityLog, AIUsage, ChatMessage, ChatReport, CoinTransaction, Course, SyncRun, User, utcnow)
-from ..services import ai, billing, coins
+from ..models import (ActivityLog, AIUsage, ChatMessage, ChatReport, CoinTransaction, Course, LmsDiagnostic, SyncRun, User,
+                      utcnow)
+from ..services import ai, billing, coins, diagnostics
 from ..utils import admin_required, log_activity
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -145,6 +147,25 @@ def reports():
     rows = db.session.scalars(select(ChatReport).where(ChatReport.resolved.is_(False))
                               .order_by(ChatReport.created_at.desc())).all()
     return render_template("admin/reports.html", reports=rows)
+
+
+@bp.route("/diagnostics")
+def diagnostics_list():
+    """Brightspace (and later other LMS) checks students chose to send: shape only, no course data."""
+    rows = db.session.execute(select(LmsDiagnostic, User.username).outerjoin(User, User.id == LmsDiagnostic.user_id)
+                              .order_by(LmsDiagnostic.created_at.desc()).limit(200)).all()
+    items = [{"row": row, "username": username, "answered": diagnostics.answered(row.payload)} for row, username in rows]
+    return render_template("admin/diagnostics.html", items=items)
+
+
+@bp.route("/diagnostics/<int:diagnostic_id>.json")
+def diagnostic_json(diagnostic_id: int):
+    row = db.session.get(LmsDiagnostic, diagnostic_id)
+    if row is None:
+        abort(404)
+    body = json.dumps(row.payload, indent=2, sort_keys=False)
+    name = f"{row.lms}-{row.host}-{row.created_at:%Y-%m-%d}-{row.id}.json"
+    return Response(body, mimetype="application/json", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @bp.route("/chat/<int:message_id>/delete", methods=["POST"])

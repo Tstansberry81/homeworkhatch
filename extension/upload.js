@@ -124,3 +124,27 @@ export async function uploadSnapshot({
 
   return { snapshot_id, uploaded: needed.length - failed.length, skipped, failed };
 }
+
+// A Brightspace check the student chose to send (d2l.js; shape only, no course data):
+//   POST /v1/diagnostics   report  ->  { ok, id }
+export async function uploadDiagnostic({ serverUrl, token, report, fetchImpl = fetch, retryDelayMs = 1000 }) {
+  const base = serverUrl.replace(/\/+$/, "");
+  for (let attempt = 0; ; attempt++) {
+    let r;
+    try {
+      r = await fetchImpl(`${base}/v1/diagnostics`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(report),
+      });
+    } catch (e) {
+      if (attempt < 2) { await sleep(retryDelayMs * 2 ** attempt); continue; }
+      throw new Error(`Couldn't reach Homework Hatch: ${e.message || e}`);
+    }
+    if (r.status >= 500 && attempt < 2) { await sleep(retryDelayMs * 2 ** attempt); continue; }
+    if (r.status === 429) throw new Error("Homework Hatch already has 10 reports from you today. Download it instead, or send it tomorrow.");
+    if (r.status === 401 || r.status === 403) throw new Error("Homework Hatch didn't accept the extension's link. Link it again from the website.");
+    if (!r.ok) throw new Error(`Homework Hatch answered ${r.status}.`);
+    return r.json();
+  }
+}

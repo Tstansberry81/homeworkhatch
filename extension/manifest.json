@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Homework Hatch",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "Syncs your own Canvas classes, deadlines, grades and files to Homework Hatch using your normal Canvas login.",
   "icons": {
     "16": "icons/icon16.png",

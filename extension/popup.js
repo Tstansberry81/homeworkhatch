@@ -1,5 +1,6 @@
 import { upcoming, isVisible, zipPlan } from "./canvas.js";
 import { HATCH_URL } from "./upload.js";
+import { isBrightspaceUrl, summaryText } from "./d2l.js";
 
 const $ = (id) => document.getElementById(id);
 const FIELDS = ["baseUrl", "intervalMinutes", "endpointUrl", "endpointToken"];
@@ -227,12 +228,125 @@ function renderSnapshot() {
     ? `Hidden by instructors (normal): ${snapshot.restricted.map((r) => r.endpoint).join(", ")}` : "";
 }
 
+// ---------- Brightspace check (d2l.js; runs in the background worker) ----------
+
+let brightspace = null;  // { origin, tabId } when the active tab is a Brightspace page
+let showCanvas = false;  // the student chose "Back to my Canvas sync"
+let lastDiag = null;
+
+async function detectBrightspace() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !isBrightspaceUrl(tab.url)) return null;
+  return { origin: new URL(tab.url).origin, tabId: tab.id };
+}
+
+function renderBrightspace(diag) {
+  $("setup").hidden = true;
+  $("main").hidden = true;
+  $("d2l").hidden = false;
+  $("state").textContent = "Brightspace";
+  $("state").className = "pill";
+  $("d2lBack").hidden = !settings.baseUrl;
+  renderDiag(diag);
+}
+
+function renderDiag(diag) {
+  const mine = diag?.origin === brightspace.origin ? diag : null;
+  lastDiag = mine;
+  const running = mine?.state === "running";
+  const report = mine?.state === "done" ? mine.report : null;
+  $("d2lRun").disabled = running;
+  $("d2lRun").textContent = report || mine?.state === "error" ? "Run the check again" : "Run a 1-minute check";
+  const p = mine?.progress;
+  $("d2lMsg").textContent =
+    running ? (p ? `Checking… ${p.done} of about ${p.total} requests done.` : "Checking…")
+    : mine?.state === "error" ? mine.error
+    : report && report.notes.includes("versions_unavailable") ? "This page didn't answer like a Brightspace site, so there was nothing to check."
+    : report && !report.signed_in ? "Sign in to Brightspace in this tab first, then run the check again."
+    : report?.notes.includes("rate_limited") ? "Brightspace asked us to slow down, so the check stopped early. The report has what it got."
+    : "";
+  $("d2lResult").hidden = !report?.signed_in;
+  if (!report?.signed_in) return;
+  $("d2lSummary").textContent = `${summaryText(report)}.`;
+  $("d2lReport").textContent = JSON.stringify(report, null, 2);
+  const linked = Boolean(settings.endpointUrl && settings.endpointToken);
+  $("d2lSend").disabled = !linked || Boolean(mine.sending || mine.sent);
+  $("d2lSend").textContent = mine.sent ? "Sent" : mine.sending ? "Sending…" : "Send to Homework Hatch";
+  $("d2lSendMsg").textContent = mine.sendError
+    || (mine.sent ? "Thank you! The report reached Homework Hatch."
+      : linked ? "" : "To send it, link the extension to your Homework Hatch account first, or download it and email it to us.");
+}
+
+// Same popup-closing problem as connect(): record the request first (not awaited, so the click's
+// user gesture survives), then ask for access. The worker starts the check when the grant lands.
+$("d2lRun").onclick = () => {
+  if (!brightspace) return;
+  const { origin, tabId } = brightspace;
+  chrome.storage.local.set({ pendingDiag: { origin, tabId, at: Date.now() } });
+  $("d2lMsg").textContent = "Asking for your OK to read this site…";
+  chrome.permissions.request({ origins: [`${origin}/*`] })
+    .then(async (granted) => {
+      if (!granted) {
+        chrome.storage.local.remove("pendingDiag");
+        $("d2lMsg").textContent = "The check needs your OK to read this Brightspace site. Nothing was read.";
+        return;
+      }
+      $("d2lMsg").textContent = "Checking…";
+      $("d2lRun").disabled = true;
+      // Already-granted origins fire no onAdded event, so ask the worker directly.
+      await chrome.runtime.sendMessage({ type: "diag:run", origin, tabId });
+    })
+    .catch((e) => { $("d2lMsg").textContent = `Couldn't ask for access: ${e.message}`; });
+};
+
+$("d2lSend").onclick = () => chrome.runtime.sendMessage({ type: "diag:send" });
+
+$("d2lDownload").onclick = () => {
+  const report = lastDiag?.report;
+  if (!report) return;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+  el("a", { href: url, download: `brightspace-check-${report.host}-${report.ran_at.slice(0, 10)}.json` }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+$("d2lCopy").onclick = async () => {
+  const report = lastDiag?.report;
+  if (!report) return;
+  const text = JSON.stringify(report, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = el("textarea", { value: text });
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  $("d2lCopy").textContent = "Copied";
+  setTimeout(() => { $("d2lCopy").textContent = "Copy"; }, 2000);
+};
+
+$("d2lBack").onclick = () => {
+  showCanvas = true;
+  render();
+};
+
+// Not async, for the same reason as the status listener below.
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type !== "diag" || !brightspace || $("d2l").hidden) return;
+  renderDiag(msg.diag);
+});
+
 async function render() {
-  const stored = await chrome.storage.local.get(["status", "snapshot", "settings", "downloadedKeys"]);
+  const stored = await chrome.storage.local.get(["status", "snapshot", "settings", "downloadedKeys", "diag"]);
   settings = { ...DEFAULTS, ...stored.settings };
   snapshot = stored.snapshot || null;
   savedKeys = new Set(stored.downloadedKeys || []);
   nextSyncAt = (await chrome.alarms.get("sync"))?.scheduledTime || null;
+  brightspace ??= await detectBrightspace();
+  const onCanvas = settings.baseUrl && brightspace && new URL(settings.baseUrl).origin === brightspace.origin;
+  if (brightspace && !showCanvas && !onCanvas) return renderBrightspace(stored.diag);
+  $("d2l").hidden = true;
   if (!settings.baseUrl) return renderSetup();
   if (stored.status?.state === "needs_consent") return renderConsent(new URL(settings.baseUrl).origin);
   $("setup").hidden = true;
