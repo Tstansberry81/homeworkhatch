@@ -50,8 +50,13 @@
   const key = `hh_session_${box.dataset.start}`;
   const load = () => { try { return JSON.parse(localStorage.getItem(key) || "{}"); } catch { return {}; } };
   const st = { phase: "idle", studied: 0, blockStart: 0, restEnd: 0, blocks: 0, chimed: false, started: false, at: 0, ...load() };
-  // Away in Learn or Test with the timer running: that time was studying too (up to 3 hours).
-  if (st.phase === "work" && st.at) st.studied += Math.min(Math.max(0, Date.now() - st.at), 3 * 3600000);
+  // Away in this session's Learn or Test with the timer running: that time was studying too, up to
+  // the planned time. Left any other way (tab closed), the timer comes back paused, not credited.
+  if (st.phase === "work" && st.at) {
+    if (st.away) st.studied = Math.min(st.studied + Math.max(0, Date.now() - st.at), Math.max(st.studied, planned + 10 * 60000));
+    else st.phase = "paused";
+  }
+  st.away = false;
   if (st.phase === "rest" && st.restEnd <= Date.now()) st.phase = "paused";
   const save = () => { st.at = Date.now(); try { localStorage.setItem(key, JSON.stringify(st)); } catch { /* private mode */ } };
   let last = Date.now();
@@ -159,6 +164,10 @@
     clearTimeout(saveTimer); saveTimer = null;
     try { localStorage.removeItem(key); } catch { /* fine */ }
   });
+
+  document.querySelectorAll('a[href*="/study/learn"], a[href*="/study/test"]').forEach((a) => a.addEventListener("click", () => {
+    if (st.phase === "work") { st.away = true; save(); }
+  }));
 
   buttons();
   render();

@@ -44,7 +44,8 @@
       head.append(el("strong", "", `${d.count.toLocaleString()} card${d.count === 1 ? "" : "s"}${cut ? " so far" : ""}`), ` · ${d.label}`);
     }
     out.append(head);
-    if (d.note) out.append(el("p", "flash warning", d.note));
+    // A cut preview only saw the start, so its total would be wrong: say just what's certain.
+    if (d.note) out.append(el("p", "flash warning", cut ? "Only the first 2,000 cards will be imported." : d.note));
     if (cut) {
       out.append(el("p", "small muted", form.dataset.cutNote ||
         "That's a long set, so this preview reads only its beginning. Saving reads all of it."));
@@ -90,7 +91,9 @@
       if (size(lines.slice(0, mid).join("\n")) <= previewMax) lo = mid; else hi = mid - 1;
     }
     // One huge first line: cut it. A UTF-16 unit is at most 6 bytes of JSON (\u00XX).
-    const head = lo ? lines.slice(0, lo).join("\n") : all.slice(0, Math.max(0, Math.floor((previewMax - size("")) / 6)));
+    let head = lo ? lines.slice(0, lo).join("\n") : all.slice(0, Math.max(0, Math.floor((previewMax - size("")) / 6)));
+    const lastUnit = head.charCodeAt(head.length - 1);
+    if (lastUnit >= 0xd800 && lastUnit <= 0xdbff) head = head.slice(0, -1);  // never split an emoji in half
     return { body: { ...body, text: head }, cut: true };
   }
 

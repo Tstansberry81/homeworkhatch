@@ -329,3 +329,20 @@ def test_session_coins_are_capped_per_day(app, synced_user, client):
                                                             CoinTransaction.reason.like("%study session%"))).all()
     assert sum(1 for r in rows if r.amount == 3) == 3 and sum(1 for r in rows if r.amount == 1) == 3
     client.post(f"/study/exams/session/{plan.sessions[-1].id}/done", data={"minutes": "0", "undo": "1"})
+
+
+def test_after_the_exam_nothing_to_start_and_repeat_answers_are_fine(app, synced_user, client):
+    midterm = db.session.scalar(select(Assignment).where(Assignment.name == "Midterm Exam"))
+    client.post("/study/exams/plan", data={"item": f"a:{midterm.id}"})
+    plan = db.session.scalar(select(StudyPlan).where(StudyPlan.user_id == synced_user.id))
+    today = local_now(synced_user).date().isoformat()
+    db.session.add(StudySession(plan_id=plan.id, user_id=synced_user.id, day=today, role="cram", minutes=45))
+    midterm.due_at = plan.exam_at = plan.source_at = utcnow() - timedelta(hours=2)  # under way / just over
+    db.session.commit()
+    assert "today: Quick pass" not in client.get("/dashboard").get_data(as_text=True)
+    # "Not a test" twice (a double tap) is fine.
+    db.session.delete(plan)
+    midterm.due_at = utcnow() + timedelta(days=5)
+    db.session.commit()
+    for _ in range(2):
+        assert client.post("/study/exams/choice", data={"item": f"a:{midterm.id}", "kind": "none"}).status_code == 302

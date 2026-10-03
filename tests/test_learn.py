@@ -989,3 +989,17 @@ def test_practice_quiz_coins_are_capped_at_three_a_day(student, client):
     awards = db.session.scalars(select(CoinTransaction).where(CoinTransaction.ref.like("quiz-day:%"))).all()
     assert sorted(t.ref for t in awards) == [f"quiz-day:{today}:{k}" for k in range(3)]
     assert sum(t.amount for t in awards) == 15
+
+
+def test_headerless_anki_cloze_export_and_half_emoji():
+    from app.services import cards_io
+
+    parsed = cards_io.parse("{{c1::<b>Paris</b>}} is the capital&nbsp;of France\tSee <i>atlas</i>\n"
+                            "{{c1::Rome}} is the capital of<br>Italy\textra")
+    assert parsed.detected == "anki"
+    assert parsed.cards[0] == ("[...] is the capital of France", "Paris is the capital of France\n\nSee atlas")
+    # A cut paste can end in half an emoji: it's replaced, never a 500.
+    parsed = cards_io.parse("#html:true\nuno\t\ud800 one")
+    assert parsed.cards and "\ud800" not in parsed.cards[0][1]
+    many = "".join(f"{{{{c{i}::w{i}}}}} " for i in range(1, 400))
+    assert len(cards_io.cloze_cards(many)) == cards_io.MAX_CLOZES_PER_NOTE

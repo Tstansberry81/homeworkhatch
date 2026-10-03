@@ -179,7 +179,8 @@ def dashboard():
     today_iso = today.isoformat()
     return render_template(
         "dashboard.html", week=week, agenda=agenda, upcoming=upcoming, today=local_now(current_user),
-        exam_plans=soon, study_today={p.id: [s for s in p.sessions if s.day == today_iso] for p in soon},
+        exam_plans=soon, study_today={p.id: [s for s in p.sessions if s.day == today_iso and p.exam_at > utcnow()]
+                                      for p in soon},
         roles=planner.ROLES,
         missing=queries.missing(current_user.id), classes=queries.class_rows(courses),
         announcements=queries.recent_announcements(current_user.id), accounts=accounts,

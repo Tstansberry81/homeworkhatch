@@ -119,7 +119,7 @@ def index():
     today = local_now(current_user).date()
     week = [today + timedelta(days=i) for i in range(7)]
     sessions = db.session.scalars(select(StudySession).join(StudyPlan).where(
-        StudySession.user_id == current_user.id, StudyPlan.status == "active",
+        StudySession.user_id == current_user.id, StudyPlan.status == "active", StudyPlan.exam_at > utcnow(),
         StudySession.day >= today.isoformat(), StudySession.day <= week[-1].isoformat())
         .order_by(StudySession.day, StudySession.position)).all()
     by_day: dict[str, list] = {}

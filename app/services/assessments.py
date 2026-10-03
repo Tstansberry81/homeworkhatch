@@ -778,9 +778,7 @@ def find(user, days: int = 60, back_hours: int = 12, include_none: bool = False)
         seen = set()
         for a_it, e_it in merged:
             if (a_it is not None and id(a_it) in suppressed) or (e_it is not None and id(e_it) in suppressed):
-                if a_it is not None:
-                    seen.add(id(a_it))
-                continue
+                continue  # the student said it isn't a test (with include_none it's listed as such below)
             if a_it is not None:
                 r, nat, a = by_item[id(a_it)]
                 ev = ev_by_item[id(e_it)][2] if e_it is not None else None

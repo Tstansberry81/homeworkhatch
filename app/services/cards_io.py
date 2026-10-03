@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 import nh3
 
 MAX_CARDS = 2000
+MAX_CLOZES_PER_NOTE = 50
 MAX_FRONT = 2000
 MAX_BACK = 4000
 # One Anki field (HTML and all) is cut here before it's read; cards end up trimmed to
@@ -310,6 +311,7 @@ def cloze_cards(text: str, extra: str = "", numbers: list[int] | None = None) ->
     the back is the whole sentence."""
     if numbers is None:
         numbers = sorted({int(m.group(1)) for m in CLOZE.finditer(text)})
+    numbers = numbers[:MAX_CLOZES_PER_NOTE]  # real notes have a handful; this bounds the work per note
     full = CLOZE.sub(lambda m: m.group(2), text).strip()
     back = full + (f"\n\n{extra.strip()}" if extra and extra.strip() else "")
     cards = []
@@ -370,6 +372,7 @@ def parse(text: str | None, term_sep: str | None = None, card_sep: str | None = 
     `term_sep` / `card_sep` are "auto" (or None), a name ("tab", "comma", "newline",
     "semicolon") or a custom string; giving either one means Quizlet-style parsing."""
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿")
+    text = re.sub("[\ud800-\udfff]", "\ufffd", text)  # half an emoji (a cut paste) can't be stored or cleaned
     if not text.strip():
         return Parsed([], [], "empty")
     out = _Out()
@@ -391,8 +394,8 @@ def parse(text: str | None, term_sep: str | None = None, card_sep: str | None = 
         cloze_lines = sum(1 for line, bare in zip(lines, plain) if bare != line)
         tab_lines = sum(1 for bare in plain if "\t" in bare)
         colon_lines = sum(1 for bare in plain if "::" in bare and "\t" not in bare)
-        if cloze_lines * 2 > len(lines) and not tab_lines and not colon_lines:
-            _anki(out, text)  # cloze notes, one per line
+        if cloze_lines * 2 > len(lines) and not colon_lines:
+            _anki(out, text)  # cloze notes, one per line (a tab is Anki's own field separator)
             detected = "anki"
         elif tab_lines > colon_lines:
             _quizlet(out, text, "\t", _auto_card_sep(text, "\t"))
