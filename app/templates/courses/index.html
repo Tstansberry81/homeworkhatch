@@ -22,6 +22,6 @@
   {% endfor %}
 </div>
 {% else %}
-<div class="card">{{ empty("📚", "No classes yet. Connect Canvas to bring them in.", url_for('settings.sync'), "Connect Canvas") }}</div>
+<div class="card">{{ empty("📚", "No classes yet. Connect your school to bring them in.", url_for('settings.sync'), "Connect your school") }}</div>
 {% endif %}
 {% endblock %}
