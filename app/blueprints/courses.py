@@ -8,7 +8,7 @@ from sqlalchemy.orm import undefer_group
 from .. import queries
 from ..extensions import db
 from ..models import Assignment, CanvasFile, Page, Summary, Upload
-from ..services import ai, grades, study
+from ..services import ai, grades, sharing, study
 from ..services.storage import get_storage
 
 bp = Blueprint("courses", __name__, url_prefix="/courses")
@@ -30,8 +30,9 @@ def detail(course_id: int):
     base_url = course.account.base_url if course.account else None
     uploads = db.session.scalars(select(Upload).where(Upload.user_id == current_user.id, Upload.course_id == course.id)
                                  .order_by(Upload.name)).all() if tab == "files" else []
+    class_sets = sharing.class_sets(current_user, course) if tab == "overview" else []
     return render_template("courses/detail.html", course=course, tab=tab, grade=result, base_url=base_url,
-                           upcoming=queries.upcoming_for_course(course), uploads=uploads)
+                           upcoming=queries.upcoming_for_course(course), uploads=uploads, class_sets=class_sets)
 
 
 @bp.route("/<int:course_id>/visibility", methods=["POST"])

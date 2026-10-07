@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Report a shared set{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<div style="max-width:640px">
+  <div class="page-head"><div><div class="small muted"><a href="{{ url_for('shared.view', token=token) }}">{{ item.title }}</a></div><h1>Report this set</h1>
+    <p class="muted">We review every report. Sets reported for copyright or real quiz or exam questions are hidden right away until we do.</p></div></div>
+  <form method="post" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <fieldset style="border:0;padding:0;margin:0"><legend><strong>What's wrong?</strong></legend>
+      {% for key, label in reasons.items() %}<label class="check mt"><input type="radio" name="reason" value="{{ key }}" required> {{ label }}</label>{% endfor %}
+    </fieldset>
+    <label for="details" class="mt">Details <span class="hint">(optional)</span></label>
+    <textarea id="details" name="details" maxlength="2000" rows="4" placeholder="Which cards, and where they come from"></textarea>
+    <p class="help">Instructors and copyright owners can also send a formal notice under our <a href="{{ url_for('main.copyright') }}">copyright policy</a>.</p>
+    <div class="btn-row mt"><button class="btn">Send report</button><a class="btn btn-ghost" href="{{ url_for('shared.view', token=token) }}">Cancel</a></div>
+  </form>
+</div>
+{% endblock %}

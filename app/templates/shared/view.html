@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ item.title }}{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow">{% include "_katex.html" %}{% endblock %}
+{% macro body() %}
+<div class="shared-set" style="max-width:860px;margin:0 auto">
+  <div class="page-head">
+    <div>
+      <div class="small muted">{{ 'Flashcards' if is_deck else 'Practice quiz' }} · {{ total }} {{ ('card' if total == 1 else 'cards') if is_deck else ('question' if total == 1 else 'questions') }} · shared by a Homework Hatch student</div>
+      <h1>{{ item.title }}</h1>
+      {% if is_deck and description %}<p class="muted">{{ description }}</p>{% endif %}
+    </div>
+    {% if signed_in and not own %}
+    <div class="btn-row">
+      <form method="post" action="{{ url_for('shared.copy', token=token) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn">{{ 'Save to my flashcards' if is_deck else 'Save to my quizzes' }}</button></form>
+    </div>
+    {% endif %}
+  </div>
+  {% if own %}<div class="flash info" role="status">This is your set. It's what other people see when they open your link.</div>{% endif %}
+  {% if signed_in and not own %}<p class="small muted">Saving makes your own copy: study it with Learn, Test and spaced repetition, edit it, or play it live with friends.</p>{% endif %}
+
+  <div class="card" data-math>
+    {% if is_deck %}
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th style="width:40%">Term</th><th>Definition</th></tr></thead>
+      <tbody>{% for c in shown %}<tr><td class="md">{{ c.front|md|safe }}</td><td class="md">{{ c.back|md|safe }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}
+    <ol>{% for q in shown %}<li class="mt"><div class="md">{{ q.question|md|safe }}</div>
+      <ul class="small">{% for ch in q.choices %}<li>{{ ch }}</li>{% endfor %}</ul></li>{% endfor %}</ol>
+    {% if signed_in %}<p class="small muted">Answers stay hidden here. Save the quiz to take it.</p>{% endif %}
+    {% endif %}
+    {% if not signed_in and total > shown|length %}
+    <div class="empty mt"><p><strong>{{ total - shown|length }} more {{ ('cards' if is_deck else 'questions') if total - shown|length != 1 else ('card' if is_deck else 'question') }}.</strong> Make a free account to see the whole set and study it with Learn mode, practice tests and spaced repetition.</p>
+      <div class="btn-row" style="justify-content:center"><a class="btn" href="{{ url_for('auth.register') }}" data-keep-text>Sign up free</a><a class="btn btn-ghost" href="{{ url_for('auth.login', next=url_for('shared.view', token=token)) }}" data-keep-text>Sign in</a></div></div>
+    {% elif not signed_in %}
+    <div class="btn-row mt"><a class="btn" href="{{ url_for('auth.register') }}" data-keep-text>Sign up free to study it</a><a class="btn btn-ghost" href="{{ url_for('auth.login', next=url_for('shared.view', token=token)) }}" data-keep-text>Sign in</a></div>
+    {% endif %}
+  </div>
+  <p class="small muted mt">Shared sets are made by students and aren't checked by their schools. Homework Hatch isn't affiliated with any school.
+    {% if signed_in and not own %}<a href="{{ url_for('shared.report', token=token) }}">Report this set</a>.{% elif not signed_in %}Instructors and copyright owners: see our <a href="{{ url_for('main.copyright') }}">copyright policy</a> to have something removed.{% endif %}</p>
+</div>
+{% endmacro %}
+{% block content %}{{ body() }}{% endblock %}
+{% block public %}
+<nav class="landing-nav">
+  <a class="brand" href="/"><img src="{{ url_for('static', filename='img/logo.svg') }}" alt=""><span>Homework Hatch</span></a>
+  <div class="btn-row"><a class="btn btn-ghost" href="{{ url_for('auth.login', next=url_for('shared.view', token=token)) }}" data-keep-text>Sign in</a><a class="btn" href="{{ url_for('auth.register') }}" data-keep-text>Get started</a></div>
+</nav>
+<div style="padding:24px 16px">{{ body() }}</div>
+{% endblock %}

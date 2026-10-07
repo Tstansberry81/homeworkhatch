@@ -72,6 +72,10 @@ class User(UserMixin, db.Model):
     extension_ids: Mapped[list | None] = mapped_column(JSON)
     # Exam planner: the most study time to schedule on one day, across every plan.
     study_minutes_per_day: Mapped[int] = mapped_column(Integer, default=120, server_default="120")
+    # Shared sets taken down after a report was upheld. At sharing.STRIKES_TO_BLOCK the account can't
+    # share any more (sharing_blocked), and everything it shared goes private.
+    share_strikes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    sharing_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -447,6 +451,9 @@ class ContentChunk(db.Model):
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
     text: Mapped[str] = mapped_column(EncryptedText("content_chunk.text"))
 
+    # The sharing check reads a student's material in order (services/sharing.py).
+    __table_args__ = (Index("ix_content_chunk_user_source", "user_id", "source_type", "source_id", "ordinal"),)
+
 
 # ---------------------------------------------------------------- study tools
 
@@ -461,9 +468,19 @@ class Deck(db.Model):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     # The exam this deck is for (SET NULL: plans are deleted when the student drops them).
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("study_plan.id", ondelete="SET NULL"), index=True)
+    # Opt-in sharing (services/sharing.py): private, link (anyone with the link) or class (also
+    # listed for classmates). Only cards that pass the sharing checks are ever shown to others.
+    share_mode: Mapped[str] = mapped_column(String(10), default="private", server_default="private")
+    share_token: Mapped[str | None] = mapped_column(String(32), unique=True)
+    shared_at: Mapped[datetime | None] = mapped_column(DateTime)
+    share_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # reported, awaiting review
+    taken_down_at: Mapped[datetime | None] = mapped_column(DateTime)  # removed after a report; can't be shared again
+    copied_from_id: Mapped[int | None] = mapped_column(ForeignKey("deck.id", ondelete="SET NULL"), index=True)
 
     course: Mapped[Course | None] = relationship()
-    cards: Mapped[list[Card]] = relationship(back_populates="deck", cascade="all, delete-orphan", order_by="Card.position")
+    # passive_deletes: the database deletes a deck's cards (ON DELETE CASCADE), without loading them first.
+    cards: Mapped[list[Card]] = relationship(back_populates="deck", cascade="all, delete-orphan", order_by="Card.position",
+                                             passive_deletes=True)
 
 
 class Card(db.Model):
@@ -481,6 +498,17 @@ class Card(db.Model):
     due_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
     starred: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Who wrote it: student (typed or imported), ai (from the student's pasted notes), ai_files (from
+    # synced class files or uploads), copy (saved from someone else's shared set), or removed (matches a
+    # set taken down after a report). Only student and ai cards are the student's to share until the
+    # others are rewritten: origin_text keeps the text the card started as, and rewritten says whether
+    # the current text is far enough from it (services/sharing.py), so undoing an edit puts it back on hold.
+    origin: Mapped[str] = mapped_column(String(10), default="student", server_default="student")
+    origin_text: Mapped[str | None] = mapped_column(EncryptedText("card.origin_text"))
+    rewritten: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Why the card isn't shown when its deck is shared: None (shown), ai_unedited, not_yours, verbatim,
+    # or unchecked (changed while the deck was private; checked again when it's shared).
+    share_block: Mapped[str | None] = mapped_column(String(20), default="unchecked", server_default="unchecked")
 
     deck: Mapped[Deck] = relationship(back_populates="cards")
 
@@ -499,6 +527,20 @@ class PracticeQuiz(db.Model):
     seconds_per_question: Mapped[int] = mapped_column(Integer, default=20)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("study_plan.id", ondelete="SET NULL"), index=True)
+    # Opt-in sharing, as on Deck. A quiz is shared whole or not at all: it can't be shared while any
+    # question copies class materials word for word (share_blocked lists those questions' indexes).
+    share_mode: Mapped[str] = mapped_column(String(10), default="private", server_default="private")
+    share_token: Mapped[str | None] = mapped_column(String(32), unique=True)
+    shared_at: Mapped[datetime | None] = mapped_column(DateTime)
+    share_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    taken_down_at: Mapped[datetime | None] = mapped_column(DateTime)
+    copied_from_id: Mapped[int | None] = mapped_column(ForeignKey("practice_quiz.id", ondelete="SET NULL"), index=True)
+    share_blocked: Mapped[list | None] = mapped_column(JSON)
+    # A live game made from a deck (source "deck"): taken down with its deck, and never shared itself.
+    from_deck_id: Mapped[int | None] = mapped_column(ForeignKey("deck.id", ondelete="SET NULL"), index=True)
+    # Recomputed on every save: some question repeats one from the student's AI quiz from class files
+    # ("files"), a set saved from someone else ("copy"), or a set taken down after a report ("removed").
+    pasted_from: Mapped[str | None] = mapped_column(String(10))
 
     course: Mapped[Course | None] = relationship()
 
@@ -635,6 +677,27 @@ class ChatReport(db.Model):
     message: Mapped[ChatMessage] = relationship()
 
     __table_args__ = (UniqueConstraint("message_id", "reporter_id"),)
+
+
+class ShareReport(db.Model):
+    """A signed-in user's report of a shared deck or quiz (exactly one of deck_id / quiz_id). A set with
+    an open report can't be deleted until it's reviewed; a report outlives its reporter's account,
+    without their name."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    deck_id: Mapped[int | None] = mapped_column(ForeignKey("deck.id", ondelete="CASCADE"), index=True)
+    quiz_id: Mapped[int | None] = mapped_column(ForeignKey("practice_quiz.id", ondelete="CASCADE"), index=True)
+    reporter_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"), index=True)
+    reason: Mapped[str] = mapped_column(String(20))  # copyright / exam / personal / other
+    details: Mapped[str | None] = mapped_column(EncryptedText("share_report.details"))
+    # What was shared when it was reported, so editing or emptying the set can't hide it from review.
+    snapshot: Mapped[list | None] = mapped_column(EncryptedJSON("share_report.snapshot"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    outcome: Mapped[str | None] = mapped_column(String(20))  # removed / dismissed
+
+    deck: Mapped[Deck | None] = relationship()
+    quiz: Mapped[PracticeQuiz | None] = relationship()
+    reporter: Mapped[User | None] = relationship()
 
 
 # ---------------------------------------------------------------- coins

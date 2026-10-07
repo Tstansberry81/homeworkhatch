@@ -1,0 +1,36 @@
+{# The Share panel on a deck or quiz the student owns. Needs: item, kind ("deck" | "quiz"), share (study._share_info). #}
+<section class="card" id="share" aria-labelledby="share-h">
+  <h2 id="share-h">Share</h2>
+  {% if item.taken_down_at %}
+    <p><span class="badge err">Taken down</span> This set was removed from sharing after a report, so it can't be shared again. It's still yours to study. If you think that was a mistake, write to us from the <a href="{{ url_for('main.support') }}">Help page</a>.</p>
+  {% elif share.blocked_account %}
+    <p class="muted">Sharing is turned off for your account after repeated takedowns. Your sets are still yours to study.</p>
+  {% elif share.quiz_refusal %}
+    <p class="muted">{{ share.quiz_refusal }}</p>
+  {% else %}
+    {% if item.share_mode != 'private' %}
+      {% if share.reports_hidden %}<p><span class="badge warn">Hidden</span> Someone reported this set, so it's hidden until we review it.</p>{% endif %}
+      <p class="small muted">{{ 'Shared with your class and by link' if item.share_mode == 'class' else 'Shared by link' }}{% if share.copies %} · saved by {{ share.copies }} {{ 'person' if share.copies == 1 else 'people' }}{% endif %}</p>
+      <div class="btn-row"><code id="share-url" style="overflow-wrap:anywhere">{{ share.url }}</code><button type="button" class="btn btn-ghost btn-sm" data-copy="#share-url">Copy link</button></div>
+    {% else %}
+      <p class="small muted">Only you can see this {{ 'deck' if kind == 'deck' else 'quiz' }}.</p>
+    {% endif %}
+    {% if kind == 'deck' and share.counts %}
+      <p class="small">{{ share.shown }} of {{ item.cards|length }} cards {{ 'are shared' if item.share_mode != 'private' else 'can be shared' }}.
+        {% for block, n in share.counts.items() %}{{ n }} {{ 'is' if n == 1 else 'are' }} held back ({{ share.notes[block] }}){{ '; ' if not loop.last else '.' }}{% endfor %}
+        {% if share.counts.get('ai_unedited') or share.counts.get('not_yours') %}Rewrite those cards in your own words to include them.{% endif %}</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('shared.share', kind=kind, item_id=item.id) }}" class="mt">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <fieldset class="chip-row"><legend class="sr-only">Who can see it</legend>
+        <label class="chip-radio"><input type="radio" name="mode" value="private" {{ 'checked' if item.share_mode == 'private' }}> Just me</label>
+        <label class="chip-radio"><input type="radio" name="mode" value="link" {{ 'checked' if item.share_mode == 'link' }}> Anyone with the link</label>
+        {% if share.class_course %}<label class="chip-radio"><input type="radio" name="mode" value="class" {{ 'checked' if item.share_mode == 'class' }}> My class ({{ share.class_course.code or share.class_course.name }})</label>{% endif %}
+      </fieldset>
+      <label class="check mt small"><input type="checkbox" name="own_work" value="1" {{ 'checked' if item.share_mode != 'private' }}>
+        I made this myself or from my own notes. It doesn't copy slides, readings or answer keys word for word, and it has no questions from a real quiz or exam.</label>
+      <button class="btn btn-sm mt">Save</button>
+    </form>
+    <p class="help">Signed-out visitors see a short preview; the rest needs a free account. Your name is never shown. Turning sharing off kills the link, and sharing again makes a new one. When you share or edit, we hold back cards in the AI's wording of your class files, cards you saved from someone else, and anything that copies your synced class materials word for word. Shared sets follow our <a href="{{ url_for('main.terms') }}#sharing">sharing rules</a>.</p>
+  {% endif %}
+</section>

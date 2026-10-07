@@ -31,6 +31,16 @@
   </div>
   <div>
     {% if course.account.lms != 'ics' %}<div class="card stat"><div class="value">{{ grade_text(course) }}</div><div class="label">current grade in Canvas</div></div>{% endif %}
+    {% if course.account.lms != 'ics' %}
+    <div class="card"><h2>Shared by classmates</h2>
+      {% if class_sets %}
+      <ul class="list">{% for kind, x in class_sets %}
+        <li><div class="grow"><a class="title" href="{{ url_for('shared.view', token=x.share_token) }}">{{ x.title }}</a>
+          <div class="small muted">{{ 'Flashcards' if kind == 'deck' else 'Practice quiz' }} · shared {{ x.shared_at|ago }}</div></div></li>
+      {% endfor %}</ul>
+      {% else %}<p class="small muted">No shared sets for this class yet. Share one of your own from its Share panel, with “My class”.</p>{% endif %}
+    </div>
+    {% endif %}
     {% if course.syllabus_html %}
     <div class="card"><h2>Syllabus</h2><div class="prose small" style="max-height:340px;overflow:auto">{{ course.syllabus_html|canvas_html(base_url)|safe }}</div></div>
     {% endif %}

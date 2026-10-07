@@ -4,7 +4,7 @@
 {% macro body() %}
 <div class="card prose" style="max-width:820px;margin:0 auto">
   <h1>Terms of Service</h1>
-  <p class="muted small">Effective September 30, 2026. These terms are an agreement between you and Homework Hatch L.L.C., a Maryland limited liability company ("we"). Contact: {{ contact() }}.</p>
+  <p class="muted small">Effective September 30, 2026; updated October 6, 2026 (sharing). These terms are an agreement between you and Homework Hatch L.L.C., a Maryland limited liability company ("we"). Contact: {{ contact() }}.</p>
 
   <h2>1. The service</h2>
   <p>Homework Hatch ("the Service") helps students organize and study their own coursework. A browser extension you install and control reads your Canvas while you're signed in, and syncs your coursework to your Homework Hatch account. It syncs course files only for the classes you choose. The Service isn't provided by or for your school.</p>
@@ -14,13 +14,25 @@
 
   <h2>3. Course materials and your school's rules</h2>
   <p>Files and content from your classes belong to your instructors, your school or their publishers, not to you or us. You may sync them to Homework Hatch only if you're allowed to access them, and only for your own studying.</p>
-  <p>You agree not to use the Service to reproduce, share, sell, post or distribute course materials, or anything made from them, beyond what your school's policies and copyright law allow. For example: don't post slides, readings, answer keys or exam content in class chat, in a live quiz, or anywhere public. Don't use the Service to access anything you aren't permitted to see.</p>
+  <p>You agree not to use the Service to reproduce, share, sell, post or distribute course materials, or anything made from them, beyond what your school's policies and copyright law allow. For example: don't post slides, readings, answer keys or exam content in class chat, in a live quiz, in a shared set, or anywhere public. Don't use the Service to access anything you aren't permitted to see. Your school's rules apply to you even where the Service allows something; if you're not sure what your school allows, don't share it.</p>
 
   <h2>4. Academic integrity and AI</h2>
   <p>The AI tools are learning aids. Follow your school's honor code and each course's AI policy. Don't submit AI output as your own work where that isn't allowed. The tutor is designed to explain and guide, not to complete graded work. AI output can be wrong or incomplete; check it against your materials before relying on it.</p>
 
   <h2>5. Your content</h2>
-  <p>What you create (notes, flashcards, quizzes, messages) stays yours. You give us permission to host, copy, process and display your content only to run the Service for you and as you direct, for example to show your chat messages to the chat you joined. That includes sending it to our AI and hosting providers. You promise you have the right to add what you add.</p>
+  <p>What you create (notes, flashcards, quizzes, messages) stays yours. You give us permission to host, copy, process and display your content only to run the Service for you and as you direct, for example to show your chat messages to the chat you joined, or a set you share to the people you share it with. That includes sending it to our AI and hosting providers. You promise you have the right to add what you add.</p>
+
+  <h2 id="sharing">5a. Sharing flashcards and quizzes</h2>
+  <p>Your flashcard decks and practice quizzes are private unless you share one. You can share a set by link (anyone with the link can open it) or with your class (it's also listed for other Homework Hatch users who synced the same Canvas class). Signed-out visitors see a short preview; the rest needs an account. Your name isn't shown. You can stop sharing at any time, and the link stops working; sharing again makes a new link.</p>
+  <p>Only share your own work: cards and questions you wrote, or made from your own notes, in your own words. Don't share:</p>
+  <ul>
+    <li>slides, readings, handouts, answer keys or other course materials, copied word for word or close to it;</li>
+    <li>questions from a real quiz, test or exam, or anything else your instructor hasn't allowed you to share;</li>
+    <li>other people's personal information.</li>
+  </ul>
+  <p>To help, when you share, edit or host a set live, we automatically hold back cards the AI wrote from your class files or uploads, and cards you saved from someone else's set, until you rewrite them in your own words, and cards or questions that copy the class materials you've synced to Homework Hatch word for word (ten or more words in a row). Quizzes the AI made from class files, quizzes you saved from someone else, and live games made from a deck can't be shared, and cards or questions pasted from any of these, or from a set that was taken down, stay held back too. These checks can't catch everything, so the rules above are still yours to follow.</p>
+  <p>When someone saves a copy of a set you shared, the copy is theirs to keep, edit, study and play as a live game, even if you stop sharing or delete yours, unless we take your set down after a report. When you save someone else's set, you get only what they shared, for your own studying and live games; you can't share it again until you've rewritten it in your own words. We record which shared set each copy came from, so we can remove copies, and live games made from them, when a set is taken down.</p>
+  <p>Signed-in users can report a shared set. A set reported for copyright or exam content is hidden at once until we review it; for other reasons, once two people report it. A set with a report we haven't reviewed can't be deleted until we do (deleting your whole account still deletes it). If we uphold a report, we take the set down for good, along with any live game made from it, delete the copies people saved from it, and count a strike against the account that shared it. Sets that are taken down or waiting for review, and copies and live games that came from them, can't be hosted live. After three strikes an account can no longer share or host live games, and we may close accounts that keep breaking these rules.</p>
 
   <h2>6. Acceptable use</h2>
   <p>Don't:</p>
@@ -35,7 +47,7 @@
   <p>We may remove content and suspend or close accounts that break these terms.</p>
 
   <h2>7. Copyright</h2>
-  <p>We respond to copyright complaints under our <a href="{{ url_for('main.copyright') }}">Copyright policy</a>, and we close the accounts of repeat infringers.</p>
+  <p>We respond to copyright complaints under our <a href="{{ url_for('main.copyright') }}">Copyright policy</a>. Accounts with three upheld takedowns can no longer share, and we close the accounts of repeat infringers.</p>
 
   <h2>8. Plans and payments</h2>
   <p>Everything that doesn't use AI is free. The free plan includes 5 AI actions to try it. When paid plans are offered:</p>

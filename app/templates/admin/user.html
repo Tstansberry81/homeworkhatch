@@ -15,6 +15,7 @@
       {% if user.id != current_user.id %}
         {{ action("toggle_active", "Disable account" if user.active else "Re-enable account", "btn-danger" if user.active else "") }}
         {{ action("toggle_admin", "Remove admin" if user.is_admin else "Make admin", confirm="Change admin rights for this user?") }}
+        {{ action("toggle_sharing", ("Allow sharing again" if user.sharing_blocked else "Turn off sharing") ~ " (" ~ user.share_strikes ~ " strike" ~ ("" if user.share_strikes == 1 else "s") ~ ")", confirm="Change whether this user can share sets?") }}
       {% endif %}
       {{ action("reset_password", "Reset password", confirm="Generate a temporary password for this user?") }}
     </div>

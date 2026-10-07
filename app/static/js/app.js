@@ -37,6 +37,8 @@
         window.renderMathInElement(el, {
           delimiters: [{ left: "$$", right: "$$", display: true }, { left: "$", right: "$", display: false }],
           throwOnError: false,
+          maxExpand: 200, // shared sets show other people's math: keep a crafted macro from hanging the tab
+          maxSize: 20,
         });
       }
     },
