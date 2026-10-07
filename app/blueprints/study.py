@@ -19,7 +19,7 @@ from werkzeug.utils import secure_filename
 from .. import queries
 from ..extensions import db
 from ..models import Card, Deck, DeckTest, PracticeQuiz, QuizAttempt, StudyPlan, utcnow
-from ..services import ai, cards_io, coins, learn as learn_service, sources, srs, study
+from ..services import ai, cards_io, coins, learn as learn_service, sharing, sources, srs, study
 from ..utils import body_limit, local_now, parse_id, to_local, user_zone
 
 bp = Blueprint("study", __name__, url_prefix="/study")
@@ -119,7 +119,7 @@ def generate():
         if output == "quiz":
             data = study.generate_quiz(current_user, material, count)
             quiz = PracticeQuiz(user_id=current_user.id, course_id=material.course_id, source="ai",
-                                title=data["title"] or f"Quiz: {material.title}"[:200], questions=data["questions"],
+                                title=(data["title"] or "Practice quiz")[:200], questions=data["questions"],
                                 from_course_files=mode != "paste", plan_id=plan.id if plan else None)
             db.session.add(quiz)
             db.session.commit()
@@ -127,9 +127,14 @@ def generate():
         else:
             data = study.generate_flashcards(current_user, material, count)
             deck = Deck(user_id=current_user.id, course_id=material.course_id, source="ai",
-                        title=data["title"] or f"Cards: {material.title}"[:200],
-                        description=f"Generated from {material.title}"[:1000], plan_id=plan.id if plan else None)
-            deck.cards = [Card(front=c["front"], back=c["back"], position=i) for i, c in enumerate(data["cards"])]
+                        title=(data["title"] or "Flashcards")[:200],
+                        description=f"{sharing.AUTO_DESCRIPTION}{material.title}"[:1000], plan_id=plan.id if plan else None)
+            # Cards from the student's own pasted notes are theirs to share; the AI's wording of class
+            # files and uploads isn't, until they rewrite it (services/sharing.py).
+            origin = "ai" if mode == "paste" else "ai_files"
+            deck.cards = [Card(front=c["front"], back=c["back"], position=i, origin=origin,
+                               origin_text=sharing.card_text(c["front"], c["back"]) if origin == "ai_files" else None)
+                          for i, c in enumerate(data["cards"])]
             db.session.add(deck)
             db.session.commit()
             target = url_for("study.deck", deck_id=deck.id)
@@ -197,6 +202,7 @@ def new_deck():
                     description=request.form.get("description", "").strip()[:1000] or None,
                     plan_id=plan.id if plan else None)
         deck.cards = [Card(front=f, back=b, position=i) for i, (f, b) in enumerate(parsed.cards)]
+        sharing.tag_known_copies(current_user.id, deck.cards)
         db.session.add(deck)
         db.session.commit()
         notes = _parse_notes(parsed, "were added")
@@ -223,8 +229,13 @@ def deck(deck_id: int):
                 return redirect(url_for("study.deck", deck_id=d.id))
             parsed = cards_io.parse(text)
             start = len(d.cards)
-            for i, (front, back) in enumerate(parsed.cards):
-                d.cards.append(Card(front=front, back=back, position=start + i))
+            new_cards = [Card(front=front, back=back, position=start + i) for i, (front, back) in enumerate(parsed.cards)]
+            sharing.tag_known_copies(current_user.id, new_cards)
+            d.cards.extend(new_cards)
+            for card in new_cards:
+                card.share_block = "unchecked"
+            if d.share_mode != "private" and new_cards:
+                sharing.check_cards(d, new_cards)
             added = len(parsed.cards)
             flash(f"Added {added} card{'s' if added != 1 else ''}.{_parse_notes(parsed, 'were added')}",
                   "warning" if parsed.dropped else "success")
@@ -232,8 +243,11 @@ def deck(deck_id: int):
             card_id = parse_id(request.form.get("card_id"))
             card = db.session.get(Card, card_id) if card_id else None
             if card and card.deck_id == d.id:
+                before = (card.front, card.back)
                 card.front = request.form.get("front", card.front).strip()[:2000] or card.front
                 card.back = request.form.get("back", card.back).strip()[:4000] or card.back
+                if (card.front, card.back) != before:
+                    sharing.card_changed(d, card, before)
         elif action == "delete_card":
             card_id = parse_id(request.form.get("card_id"))
             card = db.session.get(Card, card_id) if card_id else None
@@ -241,6 +255,15 @@ def deck(deck_id: int):
                 db.session.delete(card)
         elif action == "rename":
             d.title = request.form.get("title", d.title).strip()[:200] or d.title
+            if "description" in request.form:
+                d.description = request.form["description"].strip()[:1000] or None
+        elif action == "course":
+            d.course_id = _course_id(request.form.get("course_id"))
+            db.session.flush()
+            db.session.refresh(d, ["course"])
+            if d.share_mode == "class" and sharing.class_course(d) is None:
+                d.share_mode = "link"
+                flash("This deck isn't for a Canvas class now, so it's shared by link only.", "info")
         elif action == "plan":
             plan = _plan_from_form(request.form.get("plan_id"))
             d.plan_id = plan.id if plan else None
@@ -252,13 +275,38 @@ def deck(deck_id: int):
         current = db.session.get(StudyPlan, d.plan_id)
         if current is not None and current.user_id == current_user.id:
             plans.append(current)
-    return render_template("study/deck.html", deck=d, plans=plans)
+    return render_template("study/deck.html", deck=d, plans=plans, share=_share_info(d), courses=_course_options(d))
+
+
+def _course_options(item=None) -> list:
+    """Classes to file a set under: the visible ones, plus the set's own class if it's hidden or past."""
+    courses = list(queries.visible_courses(current_user.id))
+    if item is not None and item.course is not None and all(c.id != item.course_id for c in courses):
+        courses.append(item.course)
+    return courses
+
+
+def _share_info(item) -> dict:
+    """What the Share panel shows for a deck or quiz the student owns."""
+    info = {"class_course": sharing.class_course(item), "copies": sharing.copy_count(item) if item.share_token else 0,
+            "url": url_for("shared.view", token=item.share_token, _external=True) if item.share_token else None,
+            "reports_hidden": item.share_hidden, "blocked_account": current_user.sharing_blocked,
+            "notes": sharing.BLOCK_NOTES, "live_refusal": sharing.live_refusal(current_user, item),
+            "quiz_refusal": sharing.quiz_refusal(item) if isinstance(item, PracticeQuiz) else None}
+    if isinstance(item, Deck):
+        info["counts"] = sharing.block_counts(item)
+        info["shown"] = sum(1 for c in item.cards if c.share_block is None)
+    return info
 
 
 @bp.route("/decks/<int:deck_id>/delete", methods=["POST"])
 @login_required
 def delete_deck(deck_id: int):
-    db.session.delete(_deck(deck_id))
+    d = _deck(deck_id)
+    if refusal := sharing.deletion_refusal(d):
+        flash(refusal, "error")
+        return redirect(url_for("study.deck", deck_id=d.id))
+    db.session.delete(d)
     db.session.commit()
     flash("Deck deleted.", "info")
     return redirect(url_for("study.index"))
@@ -402,6 +450,7 @@ def import_deck():
         deck = Deck(user_id=current_user.id, title=title[:200], course_id=course_id, source="import",
                     plan_id=plan.id if plan else None)
         deck.cards = [Card(front=front, back=back, position=i) for i, (front, back) in enumerate(parsed.cards)]
+        sharing.tag_known_copies(current_user.id, deck.cards)
         db.session.add(deck)
         db.session.commit()
         count = len(parsed.cards)
@@ -862,7 +911,8 @@ def new_quiz():
             return render_template("study/quiz_edit.html", quiz=None, courses=courses, body=request.form.get("body", ""),
                                    title=title), 400
         quiz = PracticeQuiz(user_id=current_user.id, title=title[:200], questions=questions,
-                            course_id=_course_id(request.form.get("course_id")))
+                            course_id=_course_id(request.form.get("course_id")),
+                            pasted_from=sharing.quiz_origin(current_user.id, questions))  # pasted from an AI or saved quiz
         db.session.add(quiz)
         db.session.commit()
         return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
@@ -873,7 +923,7 @@ def new_quiz():
 @login_required
 def edit_quiz(quiz_id: int):
     quiz = _quiz(quiz_id)
-    courses = queries.visible_courses(current_user.id)
+    courses = _course_options(quiz)
     if request.method == "POST":
         questions = parse_quiz_text(request.form.get("body"))
         if not questions:
@@ -882,10 +932,30 @@ def edit_quiz(quiz_id: int):
                                    title=request.form.get("title", quiz.title)), 400
         quiz.title = request.form.get("title", quiz.title).strip()[:200] or quiz.title
         quiz.questions = questions
+        quiz.pasted_from = sharing.quiz_origin(current_user.id, questions, exclude_id=quiz.id)
+        if "course_id" in request.form:
+            quiz.course_id = _course_id(request.form.get("course_id"))
+            db.session.flush()
+            db.session.refresh(quiz, ["course"])
+            if quiz.share_mode == "class" and sharing.class_course(quiz) is None:
+                quiz.share_mode = "link"
         try:
             quiz.seconds_per_question = max(5, min(int(request.form.get("seconds", 20)), 120))
         except ValueError:
             pass
+        if quiz.share_mode != "private" and sharing.quiz_refusal(quiz):
+            quiz.share_mode = "private"
+            db.session.commit()
+            flash(f"Saved, and sharing is off: {sharing.quiz_refusal(quiz)}", "warning")
+            return redirect(url_for("study.take_quiz", quiz_id=quiz.id) + "#share")
+        if quiz.share_mode != "private":
+            sharing.check_quiz(quiz)
+            if quiz.share_blocked:
+                quiz.share_mode = "private"  # shared whole or not at all
+                db.session.commit()
+                flash("Saved, and sharing is off: some questions now copy your class materials word for word. "
+                      "Put them in your own words to share it again.", "warning")
+                return redirect(url_for("study.take_quiz", quiz_id=quiz.id) + "#share")
         db.session.commit()
         flash("Quiz saved.", "success")
         return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
@@ -895,7 +965,11 @@ def edit_quiz(quiz_id: int):
 @bp.route("/quizzes/<int:quiz_id>/delete", methods=["POST"])
 @login_required
 def delete_quiz(quiz_id: int):
-    db.session.delete(_quiz(quiz_id))
+    quiz = _quiz(quiz_id)
+    if refusal := sharing.deletion_refusal(quiz):
+        flash(refusal, "error")
+        return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
+    db.session.delete(quiz)
     db.session.commit()
     flash("Quiz deleted.", "info")
     return redirect(url_for("study.index"))
@@ -936,4 +1010,4 @@ def take_quiz(quiz_id: int):
                 flash("+5 Buddy Coins for scoring 80% or better!", "success")
         db.session.commit()
         return render_template("study/quiz_result.html", quiz=quiz, attempt=attempt)
-    return render_template("study/quiz_take.html", quiz=quiz)
+    return render_template("study/quiz_take.html", quiz=quiz, share=_share_info(quiz))

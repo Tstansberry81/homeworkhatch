@@ -9,10 +9,10 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_, select
 
 from ..extensions import db
-from ..models import (ActivityLog, AIUsage, CalendarFeed, ChatMessage, ChatReport, CoinTransaction, Course, LmsDiagnostic,
-                      SyncRun, User, utcnow)
-from ..services import ai, billing, coins, diagnostics
-from ..utils import admin_required, log_activity
+from ..models import (ActivityLog, AIUsage, CalendarFeed, ChatMessage, ChatReport, CoinTransaction, Course, Deck, LmsDiagnostic,
+                      PracticeQuiz, ShareReport, SyncRun, User, utcnow)
+from ..services import ai, billing, coins, diagnostics, sharing
+from ..utils import admin_required, log_activity, parse_id
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -37,7 +37,8 @@ def overview():
         "spend_month": db.session.scalar(select(func.coalesce(func.sum(AIUsage.cost_usd), 0))
                                          .where(AIUsage.created_at >= ai.month_start())),
         "coins": db.session.scalar(select(func.coalesce(func.sum(CoinTransaction.amount), 0))),
-        "open_reports": db.session.scalar(select(func.count(ChatReport.id)).where(ChatReport.resolved.is_(False))),
+        "open_reports": (db.session.scalar(select(func.count(ChatReport.id)).where(ChatReport.resolved.is_(False))) or 0)
+                        + (db.session.scalar(select(func.count(ShareReport.id)).where(ShareReport.resolved.is_(False))) or 0),
     }
     plans = dict(db.session.execute(select(User.plan, func.count(User.id)).group_by(User.plan)).all())
     pending = db.session.scalars(select(User).where(User.is_approved.is_(False)).order_by(User.created_at)).all()
@@ -108,6 +109,11 @@ def user_detail(user_id: int):
             user.active = not user.active
         elif action == "toggle_admin" and user.id != current_user.id:
             user.is_admin = not user.is_admin
+        elif action == "toggle_sharing":
+            if user.sharing_blocked:
+                user.sharing_blocked = False  # their sets stay private until they share them again
+            else:
+                sharing.block_sharing(user)
         elif action == "plan":
             plan = request.form.get("plan")
             if plan in billing.PLANS:
@@ -145,6 +151,21 @@ def user_detail(user_id: int):
 
 @bp.route("/reports", methods=["GET", "POST"])
 def reports():
+    if request.method == "POST" and request.form.get("kind") in ("deck", "quiz"):
+        model = Deck if request.form["kind"] == "deck" else PracticeQuiz
+        item_id = parse_id(request.form.get("item_id"))
+        item = db.session.get(model, item_id) if item_id else None
+        if item is not None:
+            if request.form.get("action") == "take_down":
+                removed = sharing.take_down(item)
+                flash(f"Taken down{f', with {removed} saved copies' if removed else ''}. The owner now has "
+                      f"{db.session.get(User, item.user_id).share_strikes} strike(s).", "success")
+            elif request.form.get("action") == "dismiss":
+                sharing.dismiss(item)
+                flash("Dismissed; the set is visible again if its owner still shares it.", "info")
+            log_activity(item.user_id, f"admin:share_{request.form.get('action')}", current_user.username)
+            db.session.commit()
+        return redirect(url_for("admin.reports"))
     if request.method == "POST":
         report = db.session.get(ChatReport, int(request.form.get("report_id", 0)))
         if report:
@@ -158,7 +179,22 @@ def reports():
         return redirect(url_for("admin.reports"))
     rows = db.session.scalars(select(ChatReport).where(ChatReport.resolved.is_(False))
                               .order_by(ChatReport.created_at.desc())).all()
-    return render_template("admin/reports.html", reports=rows)
+    # Reported shared sets, one entry per set with all its open reports, oldest report first.
+    sets: dict = {}
+    for r in db.session.scalars(select(ShareReport).where(ShareReport.resolved.is_(False)).order_by(ShareReport.created_at)):
+        item = r.deck or r.quiz
+        key = ("deck" if r.deck_id else "quiz", item.id)
+        entry = sets.setdefault(key, {"kind": key[0], "item": item, "reports": [], "owner": db.session.get(User, item.user_id),
+                                      "copies": sharing.copy_count(item)})
+        entry["reports"].append(r)
+    for kind, item in sharing.hidden_without_reports():  # hidden, but every report went with its reporter
+        sets.setdefault((kind, item.id), {"kind": kind, "item": item, "reports": [], "copies": sharing.copy_count(item),
+                                          "owner": db.session.get(User, item.user_id)})
+    for entry in sets.values():
+        if entry["kind"] == "deck":
+            entry["cards"] = sharing.shown_cards(entry["item"])
+    return render_template("admin/reports.html", reports=rows, sets=list(sets.values()), reasons=sharing.REASONS,
+                           strikes_to_block=sharing.STRIKES_TO_BLOCK)
 
 
 @bp.route("/diagnostics")

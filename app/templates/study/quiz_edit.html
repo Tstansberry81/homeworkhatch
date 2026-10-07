@@ -6,11 +6,10 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="form-row">
     <div><label for="title">Title</label><input id="title" name="title" type="text" value="{{ title }}" maxlength="200" required></div>
+    <div><label for="course_id">Class <span class="hint">(optional)</span></label>
+      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if quiz and quiz.course_id == c.id }}>{{ c.label }}</option>{% endfor %}</select></div>
     {% if quiz %}
     <div><label for="seconds">Seconds per question <span class="hint">(live mode)</span></label><input id="seconds" name="seconds" type="number" min="5" max="120" value="{{ quiz.seconds_per_question }}"></div>
-    {% else %}
-    <div><label for="course_id">Class <span class="hint">(optional)</span></label>
-      <select id="course_id" name="course_id"><option value="">—</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select></div>
     {% endif %}
   </div>
   <label for="body">Questions</label>

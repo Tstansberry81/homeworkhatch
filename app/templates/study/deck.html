@@ -4,13 +4,14 @@
 {% block content %}
 {% set starred = deck.cards|selectattr('starred')|list|length %}
 <div class="page-head">
-  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · {{ deck.course.name }}{% endif %}{% if deck.source == 'import' %} · imported{% endif %}</div><h1>{{ deck.title }}</h1>
+  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · {{ deck.course.name }}{% endif %}{% if deck.source == 'import' %} · imported{% elif deck.source == 'copy' %} · saved from a shared set{% endif %}{% if deck.share_mode != 'private' %} · <a href="#share">shared</a>{% endif %}</div><h1>{{ deck.title }}</h1>
     {% if deck.description %}<p class="muted">{{ deck.description }}</p>{% endif %}</div>
   <div class="btn-row">
     {% if deck.cards %}
     <a class="btn" href="{{ url_for('study.learn', deck=deck.id) }}">Learn</a>
     <a class="btn btn-ghost" href="{{ url_for('study.review', deck_id=deck.id) }}">Flip</a>
     {% if deck.cards|length >= 2 %}<a class="btn btn-ghost" href="{{ url_for('study.test_mode', deck=deck.id) }}">Test</a>{% endif %}
+    {% if deck.cards|length >= 4 and not share.live_refusal %}<form method="post" action="{{ url_for('live.create_from_deck', deck_id=deck.id) }}" class="inline" data-confirm="Host these cards as a live game? Only your own cards are used: never ones copied from course files, answer keys or exams."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="own_material" value="1"><button class="btn btn-ghost" title="Play these cards live with classmates">Host live</button></form>{% endif %}
     {% endif %}
   </div>
 </div>
@@ -25,6 +26,7 @@
       <tr>
         <td class="star-col"><button type="button" class="star-btn" data-star-url="{{ url_for('study.star_card', card_id=c.id) }}" aria-pressed="{{ 'true' if c.starred else 'false' }}" aria-label="{{ 'Unstar' if c.starred else 'Star' }} card {{ loop.index }}">{{ '★' if c.starred else '☆' }}</button></td>
         <td colspan="2">
+          {% if c.share_block and (deck.share_mode != 'private' or c.share_block != 'unchecked') %}<div class="small muted">Not shared: {{ share.notes[c.share_block] }}</div>{% endif %}
           <form method="post" class="form-row" style="grid-template-columns:1fr 1.4fr auto;align-items:start">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="card_id" value="{{ c.id }}">
             <textarea name="front" style="min-height:44px" aria-label="Front of card {{ loop.index }}">{{ c.front }}</textarea>
@@ -39,6 +41,7 @@
   </table>
   </div>
 </div>
+{% with item=deck, kind='deck' %}{% include "shared/_panel.html" %}{% endwith %}
 <div class="grid grid-2">
   <form method="post" class="card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="add">
@@ -49,8 +52,20 @@
   </form>
   <div class="card">
     <h2>Deck settings</h2>
-    <form method="post" class="btn-row"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="rename">
-      <input name="title" type="text" value="{{ deck.title }}" style="flex:1" aria-label="Deck title"><button class="btn btn-ghost">Rename</button></form>
+    <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="rename">
+      <label for="deck_title">Title</label>
+      <input id="deck_title" name="title" type="text" value="{{ deck.title }}" maxlength="200">
+      <label for="deck_description" class="mt">Description <span class="hint">(optional)</span></label>
+      <input id="deck_description" name="description" type="text" value="{{ deck.description or '' }}" maxlength="1000">
+      <button class="btn btn-ghost btn-sm mt">Save</button></form>
+    <form method="post" class="mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="course">
+      <label for="deck_course">Class</label>
+      <div class="btn-row">
+        <select id="deck_course" name="course_id" style="flex:1"><option value="">Not for a particular class</option>
+          {% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if deck.course_id == c.id }}>{{ c.label }}</option>{% endfor %}</select>
+        <button class="btn btn-ghost">Save</button>
+      </div>
+    </form>
     {% if plans %}
     <form method="post" class="mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="plan">
       <label for="plan_id">Which exam is this for?</label>

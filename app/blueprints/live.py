@@ -1,7 +1,9 @@
 """Live quizzes: a host runs one of their quizzes; signed-in players join with a code and nickname.
 
 Only quizzes the host wrote or made from their own pasted notes can go live: a quiz generated from
-course files carries instructors' and publishers' material, which isn't the host's to hand out.
+course files carries instructors' and publishers' material, which isn't the host's to hand out, and
+a quiz with questions copied word for word from class materials can't go live either. A deck can be
+played live too, built from the cards that pass the same checks as sharing (services/sharing.py).
 State lives in the database and clients poll once a second, so it works on any number
 of server workers without WebSockets. Faster correct answers earn more points (up to 1000).
 """
@@ -17,8 +19,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
-from ..models import LiveAnswer, LivePlayer, LiveSession, PracticeQuiz, utcnow
-from ..services import coins, moderation
+from ..models import Deck, LiveAnswer, LivePlayer, LiveSession, PracticeQuiz, utcnow
+from ..services import coins, moderation, sharing
 
 bp = Blueprint("live", __name__, url_prefix="/live")
 
@@ -96,6 +98,22 @@ def create(quiz_id: int):
         return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
     if request.form.get("own_material") != "1":  # the host confirms it's their own material
         abort(400)
+    if refusal := sharing.live_refusal(current_user, quiz):
+        flash(refusal, "error")
+        return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
+    sharing.check_quiz(quiz)
+    if quiz.share_blocked:
+        quiz.share_mode = "private"  # shared whole or not at all
+        db.session.commit()
+        n = len(quiz.share_blocked)
+        flash(f"{n} question{'s' if n != 1 else ''} copy your class materials word for word "
+              f"(number{'s' if n != 1 else ''} {', '.join(str(i + 1) for i in quiz.share_blocked)}). "
+              "Put them in your own words to host this quiz live.", "error")
+        return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
+    return _start(quiz)
+
+
+def _start(quiz: PracticeQuiz):
     for _ in range(10):
         code = "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
         if not db.session.scalar(select(LiveSession.id).where(LiveSession.code == code)):
@@ -104,6 +122,34 @@ def create(quiz_id: int):
     db.session.add(s)
     db.session.commit()
     return redirect(url_for("live.host", code=s.code))
+
+
+@bp.route("/host-deck/<int:deck_id>", methods=["POST"])
+@login_required
+def create_from_deck(deck_id: int):
+    """A live game from a deck: multiple choice from the cards that could be shared, saved as a quiz
+    the host can edit and host again."""
+    deck = db.session.get(Deck, deck_id)
+    if deck is None or deck.user_id != current_user.id:
+        abort(404)
+    if request.form.get("own_material") != "1":
+        abort(400)
+    if refusal := sharing.live_refusal(current_user, deck):
+        flash(refusal, "error")
+        return redirect(url_for("study.deck", deck_id=deck.id))
+    try:
+        questions = sharing.live_questions(deck)
+    except sharing.ShareError as exc:
+        db.session.commit()  # the check's results, so the deck page shows which cards were held back
+        flash(str(exc), "error")
+        return redirect(url_for("study.deck", deck_id=deck.id))
+    quiz = PracticeQuiz(user_id=current_user.id, course_id=deck.course_id, source="deck", from_deck_id=deck.id,
+                        title=f"Live: {deck.title}"[:200], questions=questions,
+                        # cards saved from someone else's set: pasting this game into a quiz doesn't make them yours
+                        pasted_from="copy" if any(c.share_block == "not_yours" for c in deck.cards) else None)
+    db.session.add(quiz)
+    db.session.flush()
+    return _start(quiz)
 
 
 @bp.route("/<code>/host")

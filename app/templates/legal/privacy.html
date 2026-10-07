@@ -4,7 +4,7 @@
 {% macro body() %}
 <div class="card prose" style="max-width:820px;margin:0 auto">
   <h1>Privacy Policy</h1>
-  <p class="muted small">Effective September 30, 2026. Homework Hatch is run by Homework Hatch L.L.C., a Maryland limited liability company ("we"). Questions or requests: {{ contact() }}.</p>
+  <p class="muted small">Effective September 30, 2026; updated October 6, 2026 (sharing). Homework Hatch is run by Homework Hatch L.L.C., a Maryland limited liability company ("we"). Questions or requests: {{ contact() }}.</p>
   <p>Homework Hatch is a study tool you choose to use with your own accounts. It isn't provided by or for your school, and we don't share your data with your school, teachers or parents.</p>
 
   <h2>What we collect</h2>
@@ -27,10 +27,11 @@
     <li><strong>A Brightspace check, only if you run it and click Send:</strong> on a D2L Brightspace page, which we can't sync yet, the extension can run a check to help us add Brightspace. The report records your school's Brightspace address, the extension version, which Brightspace features answered (how fast, how many items), and the names and types of their fields. It contains no names, grades, course titles or course content, and our server drops anything else. You see the whole report before sending it.</li>
     <li><strong>Course files, only for classes you choose:</strong> for each class you tick under "Which classes' files should we keep?" (or every class, if you choose that), the extension uploads that class's files (slides, readings, handouts) so you can open and study from them here. We skip audio and video. We extract the files' text so search, the tutor and study-set tools can use it. Untick a class, including a past one, and we delete the copies we stored.</li>
     <li><strong>What you make and add:</strong> flashcards, quizzes, summaries, tutor conversations and the files you attach to them, files you upload or pick from Google Drive, class chat messages, and live-quiz nicknames, answers and scores.</li>
+    <li><strong>Sharing, if you use it:</strong> which of your sets you share and how (by link or with your class); when you save someone's shared set, which set your copy came from (so we can remove it if that set is taken down; the person who shared it sees only a count); and reports: when you report a set we keep the reason, what you wrote, a copy of what the set showed at that moment, and your account; when your set is reported we keep the report and any strike against your account.</li>
     <li><strong>Study plans:</strong> the tests you plan for (taken from your synced assignments and calendar, or added by hand), your answers to "is this a test?", the study sessions we schedule and the minutes you log, practice-test scores, and what you write on a session's blank page. We work out which items are tests from your own synced data; nothing about it is sent to an AI.</li>
     <li><strong>Google, if you connect it:</strong> we connect through Composio, which holds your Google sign-in for us. Composio passes the calendar events and Drive files involved between Google and us. For Google Calendar, we create, update and delete the due-date events we add. For Google Drive, we search your Drive when you look for a file and download only the files you pick. You can also remove access at myaccount.google.com/permissions.</li>
     <li><strong>Payments, when paid plans are offered:</strong> Stripe collects your card details; we never see them. We keep your plan, its dates, and Stripe's customer and subscription IDs, and share your email with Stripe for receipts.</li>
-    <li><strong>Usage and technical data:</strong> sync history, sign-in events (failed sign-ins record the IP address, to stop password guessing), how many AI actions you use and what they cost, and the standard request logs kept by our host (which include IP addresses). We use cookies only to keep you signed in, protect forms, and remember your seat in a live quiz. No advertising or cross-site tracking cookies.</li>
+    <li><strong>Usage and technical data:</strong> sync history, sign-in events (failed sign-ins record the IP address, to stop password guessing), how many AI actions you use and what they cost, and the standard request logs kept by our host (which include IP addresses). We use cookies only to keep you signed in, protect forms, remember your seat in a live quiz, and bring you back to a shared set after you sign up. No advertising or cross-site tracking cookies.</li>
   </ul>
 
   <h2>How we use it</h2>
@@ -39,10 +40,11 @@
 
   <h2>Who can see what</h2>
   <ul>
-    <li><strong>Your synced data, files and study materials are private to your account.</strong> Nothing you generate from your course files is shown to other users.</li>
+    <li><strong>Your synced data, files and study materials are private to your account</strong> unless you share a flashcard deck or quiz. Your synced Canvas data and files are never shared.</li>
+    <li><strong>Sets you share (opt-in):</strong> anyone with the link sees the set's title, the description you wrote, and the cards or questions that passed our checks (signed-out visitors see only the first few; quiz answers aren't shown on the page, but signed-in users who save a quiz get all of it, answers included). If you share with your class, other Homework Hatch users who synced the same Canvas class also see it listed on that class's page. Your name and account are never shown with a shared set. People who save a copy keep it in their account; you see only how many people saved one. When you share, edit or host a set live, we hold back cards the AI wrote from your class files or uploads and cards you saved from someone else (until you rewrite them), and anything that copies the class materials you've synced to Homework Hatch word for word. That check can't catch everything, so share only your own work. Pages for shared sets ask search engines not to index them.</li>
     <li><strong>Class chat (opt-in):</strong> if you join a class's chat, other Homework Hatch users who joined that class's chat see your display name and messages. We can't confirm who is really enrolled, so don't share personal information there.</li>
     <li><strong>Leaderboard (opt-in):</strong> shows your display name and coins only if you turn it on in your profile.</li>
-    <li><strong>Live quizzes:</strong> signed-in players who join with your code see the quiz you host. Players in a game see each other's nicknames and scores. Quizzes our AI made from your course files or uploads can't be hosted, and the <a href="{{ url_for('main.terms') }}">Terms</a> forbid hosting course materials.</li>
+    <li><strong>Live quizzes:</strong> signed-in players who join with your code see the quiz you host. Players in a game see each other's nicknames and scores. Quizzes our AI made from your course files or uploads can't be hosted, nor can quizzes with questions copied word for word from your class materials, and the <a href="{{ url_for('main.terms') }}">Terms</a> forbid hosting course materials. A game made from your flashcards uses only your own cards and cards you saved from someone's shared set, never the AI's wording of your class files or anything copied word for word from your class materials. Sets taken down or waiting for review after a report, and copies and games that came from them, can't be hosted.</li>
     <li><strong>Your calendar feed link:</strong> anyone who has it can see your class and assignment names, due dates and statuses, and your Canvas calendar events (titles, times and locations). Keep it private; you can reset it on the Calendar page.</li>
     <li><strong>Our service providers,</strong> only to run the service:
       <ul>
@@ -59,7 +61,7 @@
   </ul>
 
   <h2>How long we keep it</h2>
-  <p>Until you delete it or your account. Stored files stay until you untick their class or delete your account, including files your instructor later removes from Canvas. Chat messages you delete are hidden from everyone at once and erased when your account is deleted. Our providers may keep backups for a short period after deletion.</p>
+  <p>Until you delete it or your account. Stored files stay until you untick their class or delete your account, including files your instructor later removes from Canvas. Chat messages you delete are hidden from everyone at once and erased when your account is deleted. Copies other people saved from a set you shared stay in their accounts after you stop sharing or delete yours, unless we take the set down after a report, which deletes those copies too. A set with a report we haven't reviewed can't be deleted until we do, unless you delete your whole account. Reports are deleted with the reported set; if the person who reported it deletes their account, the report stays without their name. Our providers may keep backups for a short period after deletion.</p>
 
   <h2>Your choices</h2>
   <ul>

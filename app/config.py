@@ -180,6 +180,9 @@ def load_config(env_name: str) -> dict:
         # Shown on /support (and used as the Chrome Web Store support contact). Without it the
         # page points to GitHub issues.
         "SUPPORT_EMAIL": os.environ.get("SUPPORT_EMAIL", "").strip(),
+        # The DMCA designated agent as registered at copyright.gov/dmca-directory: name, mailing address,
+        # phone and email, one per line ("\n" in the env var). Shown on the Copyright policy page.
+        "DMCA_AGENT": os.environ.get("DMCA_AGENT", "").replace("\\n", "\n").strip(),
         # A form for suggestions and bug reports (e.g. a Google Form), linked from Account and
         # Support. Only https links are shown.
         "FEEDBACK_URL": (lambda u: u if u.startswith("https://") else "")(os.environ.get("FEEDBACK_URL", "").strip()),

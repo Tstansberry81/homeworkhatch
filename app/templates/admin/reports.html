@@ -2,7 +2,7 @@
 {% block title %}Reports · Admin{% endblock %}
 {% block content %}
 {% include "_account_tabs.html" %}
-<div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.overview') }}">Admin</a></div><h1>Reported chat messages</h1>
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('admin.overview') }}">Admin</a></div><h1>Reports</h1><h2>Reported chat messages</h2>
   <p class="muted">Messages with 3 reports in a day are hidden automatically until reviewed.</p></div></div>
 <div class="card">
   {% if reports %}
@@ -17,5 +17,31 @@
         {% endfor %}
       </div></li>{% endfor %}</ul>
   {% else %}<div class="empty"><div class="big">🧹</div><p>No open reports.</p></div>{% endif %}
+</div>
+<div class="page-head mt"><div><h2>Reported shared sets</h2>
+  <p class="muted">Copyright and exam reports hide a set at once; other reasons after two people report it. <strong>Take down</strong> ends sharing for that set (and live games made from it) for good, deletes copies people saved from it, and gives the owner a strike ({{ strikes_to_block }} strikes end their sharing). <strong>Dismiss</strong> makes it visible again.</p></div></div>
+<div class="card">
+  {% if sets %}
+  <ul class="list">{% for s in sets %}
+    <li style="align-items:flex-start;flex-wrap:wrap"><div class="grow">
+      <div class="small muted">{{ 'Deck' if s.kind == 'deck' else 'Quiz' }} by <a href="{{ url_for('admin.user_detail', user_id=s.owner.id) }}">{{ s.owner.username }}</a> ({{ s.owner.share_strikes }} strike{{ '' if s.owner.share_strikes == 1 else 's' }}) · {{ s.item.share_mode }}{% if s.item.share_hidden %} · <span class="badge warn">hidden</span>{% endif %}{% if s.copies %} · {{ s.copies }} saved cop{{ 'y' if s.copies == 1 else 'ies' }}{% endif %}</div>
+      <strong>{{ s.item.title }}</strong>
+      {% if not s.reports %}<div class="small muted">Hidden, with no open reports.</div>{% endif %}
+      {% for r in s.reports %}<div class="small">{{ reasons.get(r.reason, r.reason) }} · {{ r.reporter.username if r.reporter else 'deleted account' }} · {{ r.created_at|ago }}{% if r.details %}<div class="muted" style="white-space:pre-wrap">{{ r.details }}</div>{% endif %}</div>{% endfor %}
+      {% set snap = (s.reports|selectattr('snapshot')|list|first).snapshot if s.reports|selectattr('snapshot')|list else none %}
+      {% if snap %}<details class="mt"><summary class="small">What was shared when first reported</summary>
+        {% if s.kind == 'deck' %}<ul class="small">{% for fb in snap %}<li>{{ fb[0] }} — {{ fb[1] }}</li>{% endfor %}</ul>
+        {% else %}<ol class="small">{% for q in snap %}<li>{{ q.question }}</li>{% endfor %}</ol>{% endif %}
+      </details>{% endif %}
+      <details class="mt"><summary class="small">What's shared now</summary>
+        {% if s.kind == 'deck' %}<ul class="small">{% for c in s.cards %}<li>{{ c.front }} — {{ c.back }}</li>{% endfor %}</ul>
+        {% else %}<ol class="small">{% for q in s.item.questions %}<li>{{ q.question }}</li>{% endfor %}</ol>{% endif %}
+      </details></div>
+      <div class="btn-row">
+        <form method="post" data-confirm="Take this set down and give its owner a strike?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="kind" value="{{ s.kind }}"><input type="hidden" name="item_id" value="{{ s.item.id }}"><input type="hidden" name="action" value="take_down">
+          <button class="btn btn-danger btn-sm">Take down</button></form>
+        <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="kind" value="{{ s.kind }}"><input type="hidden" name="item_id" value="{{ s.item.id }}"><input type="hidden" name="action" value="dismiss"><button class="btn btn-ghost btn-sm">Dismiss</button></form>
+      </div></li>{% endfor %}</ul>
+  {% else %}<div class="empty"><p>No reported shared sets.</p></div>{% endif %}
 </div>
 {% endblock %}

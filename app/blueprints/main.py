@@ -155,6 +155,9 @@ def onboarding():
         current_user.timezone = valid_timezone(f.get("timezone"))
         current_user.onboarded = True
         db.session.commit()
+        shared_next = session.pop("shared_next", None)  # signed up from a shared set's link
+        if isinstance(shared_next, str) and shared_next.startswith("/s/") and "//" not in shared_next:
+            return redirect(shared_next)
         return redirect(url_for("settings.sync"))
     return render_template("onboarding.html")
 
