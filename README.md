@@ -47,7 +47,7 @@ admin automatically: set `ADMIN_EMAIL`, or run `flask create-admin`.
 
 ### Connect a real Canvas
 
-1. Sign in, then open **Connect Canvas**. Download the extension zip and load it unpacked
+1. Sign in, then open **Account → School links**. Download the extension zip and load it unpacked
    at `chrome://extensions` (Developer mode → Load unpacked).
 2. Open your school's Canvas, click the extension icon, then **Connect**.
 3. On the site, create a **server token**. In the extension's Settings, paste the server

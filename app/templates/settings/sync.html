@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Connect Canvas{% endblock %}
+{% block title %}School links{% endblock %}
 {% block content %}
 {% include "_account_tabs.html" %}
-<div class="page-head"><div><h1>Connect Canvas</h1><p class="muted">Homework Hatch reads your Canvas through a small browser extension that runs in your browser while you're signed in to Canvas. Your school password never reaches us. On Brightspace, Blackboard, Moodle or Schoology? <a href="#calendar-links">Add your calendar link</a>.</p></div></div>
+<div class="page-head"><div><h1>Connect your school</h1><p class="muted">On Canvas, Homework Hatch reads your classes through a small browser extension that runs in your browser while you're signed in to Canvas. On Brightspace, Blackboard, Moodle or Schoology, <a href="#calendar-links">add your calendar link</a> to bring in your due dates. Your school password never reaches us.</p></div></div>
 
 {% if accounts %}
 <div class="card mb" style="border-color:var(--ok)">
@@ -84,7 +84,7 @@
       </div>
       <p id="ext-hint" class="small muted" hidden></p>
       {% if link_elsewhere %}
-      <p id="ext-elsewhere" class="small muted" hidden>Already installed, but it isn't found here? Older versions of the extension only talk to <a href="{{ link_elsewhere }}{{ url_for('settings.sync') }}">{{ link_elsewhere.split('://')[1] }}</a>: open Connect Canvas there to link it (you may need to sign in there once).</p>
+      <p id="ext-elsewhere" class="small muted" hidden>Already installed, but it isn't found here? Older versions of the extension only talk to <a href="{{ link_elsewhere }}{{ url_for('settings.sync') }}">{{ link_elsewhere.split('://')[1] }}</a>: open open School links there to link it (you may need to sign in there once).</p>
       {% endif %}
     </div>
     <div class="card" id="install">
