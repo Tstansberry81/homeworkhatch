@@ -42,7 +42,7 @@
         <button type="button" class="btn btn-sm mt" id="attach-done">Done</button>
       </div>
       <form class="composer" id="composer">
-        <textarea id="input" placeholder="{{ 'Ask about the attached files…' if attached else 'Ask a question…' }} (Enter to send, Shift+Enter for a new line)" {{ 'disabled' if not ai_available }}></textarea>
+        <textarea id="input" placeholder="{{ 'Ask about the attached files…' if attached else 'Ask a question…' }}" {{ 'disabled' if not ai_available }}></textarea>
         <button class="btn" id="send" {{ 'disabled' if not ai_available }}>Send</button>
       </form>
     </div>
@@ -51,6 +51,12 @@
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/sources.js') }}"></script>
+<script>
+// Phones have no Shift+Enter, so they get no keyboard hint and Return makes a new line.
+const coarse = matchMedia("(pointer: coarse)").matches;
+const keysHint = coarse ? "" : " (Enter to send, Shift+Enter for a new line)";
+document.getElementById("input").placeholder += keysHint;
+</script>
 <script>
 (() => {
   const panel = document.getElementById("attach-panel"), chips = document.getElementById("chips");
@@ -66,12 +72,15 @@
         const data = await hh.post(url, { refs });
         chips.innerHTML = data.sources.map(chip).join("");
         document.getElementById("attach-toggle").textContent = data.sources.length ? "Change files" : "Attach files";
-        document.getElementById("input").placeholder = (data.sources.length ? "Ask about the attached files…" : "Ask a question…") + " (Enter to send, Shift+Enter for a new line)";
+        document.getElementById("input").placeholder = (data.sources.length ? "Ask about the attached files…" : "Ask a question…") + keysHint;
       } catch (e) { /* the next change retries */ }
     }, 300);
   };
   picker.addEventListener("picker:change", (e) => { if (first) { first = false; return; } save(e.detail.refs); });
-  document.getElementById("attach-toggle").onclick = () => { panel.hidden = !panel.hidden; };
+  document.getElementById("attach-toggle").onclick = () => {
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  };
   document.getElementById("attach-done").onclick = () => { panel.hidden = true; };
   chips.addEventListener("click", (e) => { const b = e.target.closest("[data-unattach]"); if (b) picker.picker.remove(b.dataset.unattach); });
 })();
@@ -127,7 +136,8 @@
   }
 
   document.getElementById("composer").addEventListener("submit", (e) => { e.preventDefault(); ask(input.value); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(input.value); } });
+  // On a keyboard, Enter sends and Shift+Enter makes a new line; on a phone, Return is a new line and Send sends.
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !coarse) { e.preventDefault(); ask(input.value); } });
   document.querySelectorAll("[data-suggest]").forEach((b) => b.addEventListener("click", () => ask(b.dataset.suggest)));
 })();
 </script>

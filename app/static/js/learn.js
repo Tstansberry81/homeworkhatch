@@ -113,7 +113,7 @@
     current.kind = choices && choices.length >= 2 ? "mc" : "typed";
     current.answered = false;
     const label = current.kind === "mc" ? "Multiple choice" : "Type the answer";
-    let html = `<div class="card learn-q" tabindex="-1"><div class="learn-q-head"><span class="kicker">${label}${current.kind === "mc" ? " · keys 1–" + choices.length : ""}</span>${starButton(i)}</div>
+    let html = `<div class="card learn-q" tabindex="-1"><div class="learn-q-head"><span class="kicker">${label}${current.kind === "mc" ? `<span class="keys-hint"> · keys 1–${choices.length}</span>` : ""}</span>${starButton(i)}</div>
       <div class="learn-prompt prose">${promptHtml(i)}</div>`;
     if (current.kind === "mc") {
       current.choices = choices;

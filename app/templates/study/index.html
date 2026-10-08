@@ -19,7 +19,7 @@
     <ul class="list">
       {% for d in decks %}
       <li><div class="grow"><a class="title" href="{{ url_for('study.deck', deck_id=d.id) }}">{{ d.title }}</a>
-        <div class="small muted">{{ card_counts.get(d.id, 0) }} cards{% if d.course %} · {{ d.course.name }}{% endif %}{% if d.source == 'ai' %} · AI-made{% elif d.source == 'import' %} · imported{% elif d.source == 'copy' %} · saved from a shared set{% endif %}{% if d.share_mode != 'private' %} · <span class="badge info">shared</span>{% endif %}</div></div>
+        <div class="small muted">{{ card_counts.get(d.id, 0) }} cards{% if d.course %} · <span class="cdot" style="--c: {{ course_color(d.course_id) }}"></span>{{ d.course.name }}{% endif %}{% if d.source == 'ai' %} · AI-made{% elif d.source == 'import' %} · imported{% elif d.source == 'copy' %} · saved from a shared set{% endif %}{% if d.share_mode != 'private' %} · <span class="badge info">shared</span>{% endif %}</div></div>
         {% if card_counts.get(d.id) %}<div class="btn-row"><a class="btn btn-ghost btn-sm" href="{{ url_for('study.review', deck_id=d.id) }}">Flip</a><a class="btn btn-sm" href="{{ url_for('study.learn', deck=d.id) }}">Learn</a></div>{% endif %}</li>
       {% endfor %}
     </ul>
@@ -31,7 +31,7 @@
     <ul class="list">
       {% for q in quizzes %}
       <li><div class="grow"><a class="title" href="{{ url_for('study.take_quiz', quiz_id=q.id) }}">{{ q.title }}</a>
-        <div class="small muted">{{ q.questions|length }} questions{% if q.course %} · {{ q.course.name }}{% endif %}{% if best.get(q.id) is not none %} · best {{ best[q.id]|round|int }}%{% endif %}{% if q.share_mode != 'private' %} · <span class="badge info">shared</span>{% endif %}</div></div>
+        <div class="small muted">{{ q.questions|length }} questions{% if q.course %} · <span class="cdot" style="--c: {{ course_color(q.course_id) }}"></span>{{ q.course.name }}{% endif %}{% if best.get(q.id) is not none %} · best {{ best[q.id]|round|int }}%{% endif %}{% if q.share_mode != 'private' %} · <span class="badge info">shared</span>{% endif %}</div></div>
         {% if not q.from_course_files and q.pasted_from not in ('files', 'removed') and not q.taken_down_at and not q.share_hidden and not current_user.sharing_blocked %}<form method="post" action="{{ url_for('live.create', quiz_id=q.id) }}" class="inline" data-confirm="Host this quiz live? Only host your own material: never questions copied from course files, answer keys or exams."><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="own_material" value="1"><button class="btn btn-ghost btn-sm" title="Host it live for classmates">Host live</button></form>{% endif %}</li>
       {% endfor %}
     </ul>

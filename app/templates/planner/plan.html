@@ -65,12 +65,12 @@
           <input type="radio" name="method" value="{{ key }}" {{ 'checked' if plan.method == key }}>
           <span class="name">{{ m.name }}{% if key == recommended %} <span class="badge upcoming">Suggested</span>{% endif %}</span>
           <span class="small">{{ m.blurb }}</span>
-          <span class="small muted">Why: {{ m.evidence }}</span>
+          <span class="small muted why">Why: {{ m.evidence }}</span>
           <span class="small muted">Best for: {{ m.best_for }}</span>
         </label>
         {% endfor %}
         </fieldset>
-        <button class="btn btn-sm mt">Use this method</button> <span class="small muted">Your sessions update to match.</span>
+        <div class="method-save"><button class="btn btn-sm">Use this method</button> <span class="small muted">Your sessions update to match.</span></div>
       </form>
     </section>
   </div>

@@ -56,7 +56,18 @@
 
   // Mobile sidebar.
   document.querySelectorAll("[data-toggle-sidebar]").forEach((btn) =>
-    btn.addEventListener("click", (e) => { e.stopPropagation(); document.getElementById("sidebar")?.classList.toggle("open"); }));
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = document.getElementById("sidebar")?.classList.toggle("open");
+      btn.setAttribute("aria-expanded", String(Boolean(open)));
+    }));
+
+  // Tab strips that scroll sideways on phones: bring the current tab into view.
+  document.querySelectorAll(".tabs, .convo-list").forEach((strip) => {
+    const on = strip.querySelector("a.active");
+    if (on && strip.scrollWidth > strip.clientWidth)
+      strip.scrollLeft += on.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - on.offsetWidth) / 2;
+  });
   document.addEventListener("click", (e) => {  // tap outside the open menu closes it
     const rail = document.getElementById("sidebar");
     if (rail?.classList.contains("open") && !rail.contains(e.target)) rail.classList.remove("open");

@@ -20,7 +20,7 @@ from .. import queries
 from ..extensions import db
 from ..models import Card, Deck, DeckTest, PracticeQuiz, QuizAttempt, StudyPlan, utcnow
 from ..services import ai, cards_io, coins, learn as learn_service, sharing, sources, srs, study
-from ..utils import body_limit, local_now, parse_id, to_local, user_zone
+from ..utils import body_limit, lasting_url, local_now, parse_id, to_local, user_zone
 
 bp = Blueprint("study", __name__, url_prefix="/study")
 
@@ -289,7 +289,7 @@ def _course_options(item=None) -> list:
 def _share_info(item) -> dict:
     """What the Share panel shows for a deck or quiz the student owns."""
     info = {"class_course": sharing.class_course(item), "copies": sharing.copy_count(item) if item.share_token else 0,
-            "url": url_for("shared.view", token=item.share_token, _external=True) if item.share_token else None,
+            "url": lasting_url("shared.view", token=item.share_token) if item.share_token else None,
             "reports_hidden": item.share_hidden, "blocked_account": current_user.sharing_blocked,
             "notes": sharing.BLOCK_NOTES, "live_refusal": sharing.live_refusal(current_user, item),
             "quiz_refusal": sharing.quiz_refusal(item) if isinstance(item, PracticeQuiz) else None}

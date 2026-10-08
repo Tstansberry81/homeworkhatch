@@ -4,7 +4,7 @@
 {% include "_study_tabs.html" %}
 <div class="page-head"><div><h1>Citation generator</h1><p class="muted">MLA 9, APA 7 and Chicago 17 from one form. Double-check capitalization against your teacher's rules.</p></div></div>
 <div class="grid grid-main">
-  <form method="post" class="card">
+  <form method="post" action="#results" class="card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Source type</label>
     <div class="btn-row">{% for k, label in [("website", "Website"), ("book", "Book"), ("article", "Journal article")] %}
@@ -16,10 +16,10 @@
       <div><label for="container">Website / journal name</label><input id="container" name="container" type="text" value="{{ form.get('container', '') }}"></div>
       <div><label for="publisher">Publisher</label><input id="publisher" name="publisher" type="text" value="{{ form.get('publisher', '') }}"></div>
     </div>
-    <div class="form-row">
-      <div><label for="year">Year</label><input id="year" name="year" type="number" value="{{ form.get('year', '') }}"></div>
-      <div><label for="month">Month</label><input id="month" name="month" type="number" min="1" max="12" value="{{ form.get('month', '') }}"></div>
-      <div><label for="day">Day</label><input id="day" name="day" type="number" min="1" max="31" value="{{ form.get('day', '') }}"></div>
+    <div class="form-row ymd">
+      <div><label for="year">Year</label><input id="year" name="year" type="number" inputmode="numeric" value="{{ form.get('year', '') }}"></div>
+      <div><label for="month">Month</label><input id="month" name="month" type="number" inputmode="numeric" min="1" max="12" value="{{ form.get('month', '') }}"></div>
+      <div><label for="day">Day</label><input id="day" name="day" type="number" inputmode="numeric" min="1" max="31" value="{{ form.get('day', '') }}"></div>
     </div>
     <label for="url">URL</label><input id="url" name="url" type="url" value="{{ form.get('url', '') }}">
     <details {{ 'open' if form.get('volume') or form.get('doi') or form.get('edition') }}><summary class="small">More fields (articles, books)</summary>
@@ -37,7 +37,7 @@
     <label for="accessed">Date accessed <span class="hint">(websites)</span></label><input id="accessed" name="accessed" type="date" value="{{ form.get('accessed', today) }}">
     <button class="btn btn-block mt">Format citations</button>
   </form>
-  <div>
+  <div id="results">
     {% if results %}
     {% for label, html in results %}
     <div class="card">

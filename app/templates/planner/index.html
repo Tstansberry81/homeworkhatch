@@ -125,7 +125,7 @@
     <details class="card" {% if not plans and not sure and not ask %}open{% endif %}>
       <summary><strong>Add a test by hand</strong></summary>
       <form method="post" action="{{ url_for('planner.create') }}" class="mt">{{ csrf() }}
-        <label for="t-title">Name</label><input id="t-title" name="title" maxlength="200" placeholder="Bio midterm 2" required>
+        <label for="t-title">Name</label><input id="t-title" type="text" name="title" maxlength="200" placeholder="Bio midterm 2" required>
         <div class="grid grid-2">
           <div><label for="t-date">Date</label><input id="t-date" name="date" type="date" required min="{{ today.isoformat() }}"></div>
           <div><label for="t-time">Time</label><input id="t-time" name="time" type="time" value="09:00"></div>

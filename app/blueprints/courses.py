@@ -8,8 +8,9 @@ from sqlalchemy.orm import undefer_group
 from .. import queries
 from ..extensions import db
 from ..models import Assignment, CanvasFile, Page, Summary, Upload
-from ..services import ai, grades, sharing, study
+from ..services import ai, gcal, grades, sharing, study
 from ..services.storage import get_storage
+from ..utils import CLASS_COLORS, course_color
 
 bp = Blueprint("courses", __name__, url_prefix="/courses")
 
@@ -32,7 +33,35 @@ def detail(course_id: int):
                                  .order_by(Upload.name)).all() if tab == "files" else []
     class_sets = sharing.class_sets(current_user, course) if tab == "overview" else []
     return render_template("courses/detail.html", course=course, tab=tab, grade=result, base_url=base_url,
-                           upcoming=queries.upcoming_for_course(course), uploads=uploads, class_sets=class_sets)
+                           upcoming=queries.upcoming_for_course(course), uploads=uploads, class_sets=class_sets,
+                           colors=CLASS_COLORS, current_color=course_color(course.id))
+
+
+@bp.route("/<int:course_id>/customize", methods=["POST"])
+@login_required
+def customize(course_id: int):
+    """The student's own name, short code and color for a class. Everything that shows the class
+    (calendar, flashcards, quizzes, planner, tutor, Google Calendar) reads them from the course."""
+    course = queries.owned_course(current_user.id, course_id)
+    f = request.form
+    if f.get("action") == "reset":
+        course.custom_name = course.custom_code = course.color = None
+    else:
+        name = " ".join((f.get("name") or "").split())[:300]
+        code = " ".join((f.get("code") or "").split())[:200]
+        course.custom_name = name if name and name != course.canvas_name else None
+        course.custom_code = code if code and code != (course.canvas_code or "") else None
+        color = (f.get("color") or "").lower()
+        course.color = color if color in CLASS_COLORS else None
+        if "hidden" in f:
+            course.hidden = "1" in f.getlist("hidden")
+    course.apply_custom()
+    db.session.commit()
+    if gcal.enabled(current_user):
+        gcal.kick(current_user.id)  # due-date events show the class's new name
+    flash("Saved. The new name and color show everywhere this class appears." if f.get("action") != "reset"
+          else "Back to the name and color from your school.", "success")
+    return redirect(url_for("courses.detail", course_id=course.id, tab="customize"))
 
 
 @bp.route("/<int:course_id>/visibility", methods=["POST"])

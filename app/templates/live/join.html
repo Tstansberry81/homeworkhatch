@@ -6,9 +6,9 @@
   <h1 class="center">Join a live quiz</h1>
   {% if not current_user.is_authenticated %}{% include "_flashes.html" %}{% endif %}
   <label for="code">Game code</label>
-  <input id="code" name="code" type="text" value="{{ code }}" maxlength="6" autocomplete="off" style="text-transform:uppercase;font:700 1.4rem var(--mono);letter-spacing:.15em;text-align:center" required>
+  <input id="code" name="code" type="text" value="{{ code }}" maxlength="6" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="K7PX2M" style="text-transform:uppercase;font:700 1.4rem var(--mono);letter-spacing:.15em;text-align:center" required>
   <label for="nickname">Nickname</label>
-  <input id="nickname" name="nickname" type="text" maxlength="40" value="{{ current_user.display_name if current_user.is_authenticated else '' }}" required>
+  <input id="nickname" name="nickname" type="text" maxlength="40" enterkeyhint="go" value="{{ current_user.display_name if current_user.is_authenticated else '' }}" required>
   <button class="btn btn-block mt" type="submit">Join</button>
   <p class="small muted mt center">Want to host? Open a practice quiz you wrote (or made from your own notes) and hit “Host live”. Quizzes made from course files stay private.</p>
 </form>

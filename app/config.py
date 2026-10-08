@@ -186,6 +186,10 @@ def load_config(env_name: str) -> dict:
         # A form for suggestions and bug reports (e.g. a Google Form), linked from Account and
         # Support. Only https links are shown.
         "FEEDBACK_URL": (lambda u: u if u.startswith("https://") else "")(os.environ.get("FEEDBACK_URL", "").strip()),
+        # The address to print in links people keep or pass on (calendar feed, shared sets, live-game joins):
+        # the custom domain on Render, where both addresses serve the same site. Sign-in flows keep using
+        # the address in use, since login cookies are per address.
+        "CANONICAL_URL": (os.environ.get("CANONICAL_URL") or ("https://homeworkhatch.com" if os.environ.get("RENDER") else "")).rstrip("/"),
         # Render's own address for this service. It keeps working after a custom domain is added,
         # and extensions too old to know the custom domain can only link from it.
         "RENDER_URL": os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/"),

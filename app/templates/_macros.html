@@ -19,7 +19,7 @@
     <a class="title" href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a>
     <div class="small muted">{% if show_course %}{{ a.course.name }} · {% endif %}{% if a.due_at %}due {{ a.due_at|dt }} ({{ a.due_at|ago }}){% else %}no due date{% endif %}{% if a.points_possible %} · {{ '%g' % a.points_possible }} pts{% endif %}</div>
   </div>
-  <div class="btn-row">
+  <div class="btn-row row-actions">
     {{ status_badge(a) }}
     {% if a.effective_status in ('upcoming', 'past_due', 'missing', 'no_submission', 'done') %}
     <form method="post" action="{{ url_for('main.toggle_done', assignment_id=a.id) }}" class="inline">

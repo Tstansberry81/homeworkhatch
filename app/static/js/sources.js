@@ -26,13 +26,28 @@
       return items.filter((s) => !q || s.title.toLowerCase().includes(q));
     }
 
+    // Sections (folders, pages, uploads) start folded so a big class stays one short list; a section
+    // opens when it's the only one, while filtering, when it has picks, or once the student opens it.
+    const opened = new Set();
+    const row = (s) => {
+      const on = selected.has(s.ref), ok = s.status === "ready";
+      return `<li class="${ok ? "" : "muted"}"><label class="check grow"><input type="checkbox" value="${hh.escape(s.ref)}"
+        ${on ? "checked" : ""} ${ok || on ? "" : "disabled"}> ${hh.escape(s.title)}${KIND[s.kind] ? ` <span class="kind">${KIND[s.kind]}</span>` : ""}</label>
+        <span class="small muted">${hh.escape(ok ? kb(s.size) : s.note)}</span></li>`;
+    };
+
     function render() {
       const list = visible();
-      $("[data-list]").innerHTML = list.map((s) => {
-        const on = selected.has(s.ref), ok = s.status === "ready";
-        return `<li class="${ok ? "" : "muted"}"><label class="check grow"><input type="checkbox" value="${hh.escape(s.ref)}"
-          ${on ? "checked" : ""} ${ok || on ? "" : "disabled"}> ${hh.escape(s.title)}${KIND[s.kind] ? ` <span class="kind">${KIND[s.kind]}</span>` : ""}</label>
-          <span class="small muted">${hh.escape(ok ? kb(s.size) : s.note)}</span></li>`;
+      const filtering = Boolean(($("[data-filter]").value || "").trim());
+      const groups = new Map();
+      list.forEach((s) => { const g = s.group || "Files"; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(s); });
+      $("[data-list]").innerHTML = [...groups].map(([g, rows]) => {
+        const picked = rows.filter((s) => selected.has(s.ref)).length;
+        const open = groups.size === 1 || filtering || picked || opened.has(g);
+        return `<li class="picker-group"><details data-group="${hh.escape(g)}" ${open ? "open" : ""}>
+          <summary><span class="grow">${hh.escape(g)}</span> <span class="small muted">${rows.length}${picked ? ` · ${picked} picked` : ""}</span></summary>
+          <div class="small picker-group-tools"><button type="button" class="linklike" data-group-all="${hh.escape(g)}">Select all in ${hh.escape(g)}</button></div>
+          <ul class="list">${rows.map(row).join("")}</ul></details></li>`;
       }).join("") || `<li class="muted">${items.length ? "Nothing matches that filter." :
         courseId() ? "No files or pages synced for this class yet." : "No files of your own yet. Upload some below."}</li>`;
     }
@@ -49,6 +64,17 @@
       } catch (e) { msg(e.message, true); }
     }
 
+    $("[data-list]").addEventListener("toggle", (e) => {
+      const g = e.target.dataset?.group;
+      if (g != null) e.target.open ? opened.add(g) : opened.delete(g);
+    }, true);
+    $("[data-list]").addEventListener("click", (e) => {
+      const g = e.target.closest("[data-group-all]")?.dataset.groupAll;
+      if (g == null) return;
+      visible().filter((s) => (s.group || "Files") === g && s.status === "ready").forEach((s) => selected.add(s.ref));
+      opened.add(g);
+      render(); emit();
+    });
     $("[data-list]").addEventListener("change", (e) => {
       if (e.target.type !== "checkbox") return;
       e.target.checked ? selected.add(e.target.value) : selected.delete(e.target.value);

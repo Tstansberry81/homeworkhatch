@@ -70,10 +70,11 @@
 </form>
 {% endif %}
 
+<div class="card mb touch-only"><h2>Canvas sync</h2><p class="small muted">The Canvas extension runs in Chrome on a laptop or Chromebook. Open this page there once to set it up; your classes then show up here on your phone too.</p></div>
 <div class="grid grid-main">
   <div>
     {% set link_elsewhere = config.RENDER_URL if config.RENDER_URL and config.RENDER_URL.split('://')[-1] != request.host else '' %}
-    <div class="card" id="ext" data-ids='{{ (config.EXTENSION_IDS + (current_user.extension_ids or []))|unique|list|tojson }}' data-link-elsewhere="{{ link_elsewhere }}" data-token-url="{{ url_for('settings.extension_token') }}"
+    <div class="card ext-setup" id="ext" data-ids='{{ (config.EXTENSION_IDS + (current_user.extension_ids or []))|unique|list|tojson }}' data-link-elsewhere="{{ link_elsewhere }}" data-token-url="{{ url_for('settings.extension_token') }}"
          data-canvas='{{ (accounts|rejectattr("lms", "equalto", "ics")|map(attribute="host")|list)[:1]|tojson }}'>
       <h2>Chrome extension</h2>
       <p id="ext-status" class="muted">Looking for the extension…</p>
@@ -87,7 +88,7 @@
       <p id="ext-elsewhere" class="small muted" hidden>Already installed, but it isn't found here? Older versions of the extension only talk to <a href="{{ link_elsewhere }}{{ url_for('settings.sync') }}">{{ link_elsewhere.split('://')[1] }}</a>: open open School links there to link it (you may need to sign in there once).</p>
       {% endif %}
     </div>
-    <div class="card" id="install">
+    <div class="card ext-setup" id="install">
       <h2>Install the extension</h2>
       <ol class="small">
         <li>Open <a href="https://chromewebstore.google.com/detail/{{ config.EXTENSION_IDS[0] }}" target="_blank" rel="noopener">Homework Hatch on the Chrome Web Store</a> and click <strong>Add to Chrome</strong> &rarr; <strong>Add extension</strong>. It works in Google Chrome 109 or newer on Chromebooks, Windows and Mac.</li>
@@ -116,7 +117,7 @@
         <p>In the extension's <em>Settings</em>, the server is <code id="server">{{ server_url }}</code> <button class="btn btn-ghost btn-sm" data-copy="#server">Copy</button>; paste a <em>server token</em> from the box on the right, click <em>Save</em>, then <em>Sync now</em>.</p>
       </details>
     </div>
-    <p class="small muted">Once set up it syncs every hour while Chrome is open: new files, grades and announcements, and never a file it already has. Hidden tabs, locked files and outside tools (WebAssign, Gradescope…) can't be read.</p>
+    <p class="small muted ext-setup">Once set up it syncs every hour while Chrome is open: new files, grades and announcements, and never a file it already has. Hidden tabs, locked files and outside tools (WebAssign, Gradescope…) can't be read.</p>
   </div>
   <div>
     <form method="post" action="{{ url_for('settings.create_token') }}" class="card">

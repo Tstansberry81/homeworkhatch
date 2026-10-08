@@ -20,7 +20,7 @@
     {% elif f.storage_key and (f.content_type or '').startswith('image/') %}
       <img src="{{ url_for('courses.download', file_id=f.id, inline=1) }}" alt="{{ f.name }}">
     {% elif f.text %}
-      <pre style="white-space:pre-wrap;max-height:70vh;overflow:auto">{{ f.text[:20000] }}{% if f.text|length > 20000 %}…{% endif %}</pre>
+      <pre class="file-text">{{ f.text[:20000] }}{% if f.text|length > 20000 %}…{% endif %}</pre>
     {% elif not f.storage_key %}
       <p class="muted">This file hasn't been uploaded yet. It'll arrive with the next sync from the extension.</p>
     {% else %}

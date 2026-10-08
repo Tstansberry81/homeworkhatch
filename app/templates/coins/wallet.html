@@ -5,7 +5,7 @@
 <div class="page-head">
   <div><h1>Buddy Coins</h1><p class="muted">Earned by turning in work (assignment 10, quiz 20, test 30, plus a bonus for your grade; half for late work), studying, live-quiz wins and daily check-ins. They track your progress, unlock achievements and put you on the leaderboard{% if feature_simulations and current_user.is_adult %}, and you can try them in the <a href="{{ url_for('coins.lab') }}">Probability Lab</a>{% endif %}.</p></div>
 </div>
-<div class="grid grid-3 mb">
+<div class="grid grid-3 mb stat-row">
   <div class="card stat"><div class="value">{{ coin_balance }}</div><div class="label">balance</div></div>
   <div class="card stat"><div class="value">{{ lifetime }}</div><div class="label">earned all time</div></div>
   <div class="card stat"><div class="value">{{ achievements|selectattr('earned')|list|length }} / {{ achievements|length }}</div><div class="label">achievements</div></div>
@@ -14,7 +14,7 @@
   <div>
     <div class="card">
       <h2>Achievements</h2>
-      <div class="grid grid-2">
+      <div class="grid grid-2 ach-grid">
         {% for a in achievements %}
         <div class="card-flat" style="{{ '' if a.earned else 'opacity:.55' }}">
           <div style="font-size:1.6rem">{{ a.icon }}</div><strong>{{ a.name }}</strong>
@@ -26,7 +26,7 @@
     </div>
     <div class="card">
       <h2>History</h2>
-      <table class="table"><tbody>
+      <table class="table coin-history"><tbody>
         {% for t in history %}<tr><td>{{ t.reason }}</td><td class="small muted nowrap">{{ t.created_at|ago }}</td><td class="right nowrap" style="color:{{ 'var(--ok)' if t.amount > 0 else 'var(--err)' }}">{{ '+' if t.amount > 0 }}{{ t.amount }}</td></tr>
         {% else %}<tr><td class="muted">No coins yet. Turn in some work!</td></tr>{% endfor %}
       </tbody></table>
