@@ -85,11 +85,24 @@ def shared_room(a_id: int, b_id: int) -> str | None:
                              .where(Course.user_id == b_id, Course.chat_key.in_(mine)).limit(1))
 
 
-def needs_update(user_id: int) -> bool:
-    """Has Canvas classes but no rooms yet because their extension is older than 1.5.2."""
-    rows = db.session.scalars(select(Course).join(CanvasAccount, CanvasAccount.id == Course.account_id).where(
-        Course.user_id == user_id, Course.active.is_(True), CanvasAccount.lms != "ics")).all()
-    return bool(rows) and not any(c.chat_key for c in rows)
+def room_status(user_id: int) -> str:
+    """Why a student has no class rooms, for the Chat page to say so (never "connect Canvas" to someone
+    who has):
+    "none": nothing connected yet; "not_canvas": only Brightspace or calendar-link classes (rooms are
+    Canvas only for now); "update": Canvas classes synced by an extension older than 1.5.2, which sends
+    neither the course ID rooms need nor the student's role (the extension syncs as soon as Chrome
+    updates it, so rooms then appear on their own); "no_proof": a newer extension synced but Canvas gave
+    no course ID; "not_student": rooms exist for none of their classes (hidden, or not taken as a student)."""
+    rows = db.session.execute(select(Course, CanvasAccount.lms).join(CanvasAccount, CanvasAccount.id == Course.account_id)
+                              .where(Course.user_id == user_id, Course.active.is_(True))).all()
+    if not rows:
+        return "none"
+    canvas = [c for c, lms in rows if lms == "canvas"]
+    if not canvas:
+        return "not_canvas"
+    if any(c.chat_key for c in canvas):
+        return "not_student"
+    return "update" if all(c.enrollment_role is None for c in canvas) else "no_proof"
 
 
 # ---------------------------------------------------------------- who can message whom

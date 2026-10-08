@@ -31,7 +31,7 @@
   </div>
   <div>
     {% if course.account.lms != 'ics' %}<div class="card stat"><div class="value">{{ grade_text(course) }}</div><div class="label">current grade in Canvas</div></div>{% endif %}
-    {% if course.account.lms != 'ics' %}
+    {% if course.account.lms == 'canvas' %}
     <div class="card"><h2>Shared by classmates</h2>
       {% if class_sets %}
       <ul class="list">{% for kind, x in class_sets %}

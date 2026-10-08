@@ -66,7 +66,7 @@ def index():
                            muted=[c for c in courses if c.chat_muted], counts=counts, last=last, convos=convos,
                            people=people, is_unread=dms.is_unread, blocked=blocked,
                            blocked_threads={u.id: getattr(dms.thread_between(current_user.id, u.id), "id", None) for u in blocked},
-                           needs_update=dms.needs_update(current_user.id))
+                           room_status=None if courses else dms.room_status(current_user.id))
 
 
 @bp.route("/rules", methods=["POST"])

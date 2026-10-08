@@ -179,7 +179,7 @@ def test_rooms_need_proof_of_being_in_the_class(app, snapshot, manifest):
     no_proof = [{k: v for k, v in snapshot["courses"][0].items() if k != "uuid_hash"}]
     mal, cm = _student(app, snapshot, manifest, "mal", "752", birth_year=utcnow().year - 15, courses=no_proof)
     assert _calc(mal).chat_key is None and cm.get(f"/chat/course/{_calc(mal).id}/messages").status_code == 404
-    assert "Update the Homework Hatch extension" in cm.get("/chat/").get_data(as_text=True)
+    assert "didn't share the class ID" in cm.get("/chat/").get_data(as_text=True)
     guessed = [dict(snapshot["courses"][0], uuid_hash="0" * 64)]
     max_, cx = _student(app, snapshot, manifest, "max", "753", birth_year=utcnow().year - 15, courses=guessed)
     assert _calc(max_).chat_key != _calc(alice).chat_key
@@ -444,3 +444,43 @@ def test_moderator_removal_and_honest_block_and_report(app, snapshot, manifest):
     assert ca.post(f"/chat/dm/{thread.id}/messages", json=["x"]).status_code == 400
     assert ca.post(f"/chat/dm/messages/{bad.id}/report", json={"reason": 5}).status_code == 200
     assert ca.post(f"/chat/course/{_calc(alice).id}/messages", json={"body": ["x"]}).status_code == 400
+
+
+def test_chat_page_explains_missing_rooms(app, snapshot, manifest):
+    """Someone who connected Canvas is never told to connect Canvas; each reason for no rooms is named."""
+    nobody = make_user("nina")
+    cn = app.test_client()
+    login(cn, nobody)
+    assert "Connect Canvas and your class rooms appear" in cn.get("/chat/").get_data(as_text=True)
+    # An extension older than 1.5.2 sends neither the role nor the class ID: rooms open after it updates.
+    old = [{k: v for k, v in c.items() if k not in ("uuid_hash", "enrollment_role")} for c in snapshot["courses"]]
+    olga, co = _student(app, snapshot, manifest, "olga", "901", courses=old)
+    page = co.get("/chat/").get_data(as_text=True)
+    assert "Your Canvas is connected" in page and "1.5.2" in page and "Connect Canvas and your" not in page
+    assert dms.room_status(olga.id) == "update"
+    # Rooms only for classes taken as a student, and not hidden ones.
+    teach = [dict(c, enrollment_role="teacher") for c in snapshot["courses"]]
+    tess, ct = _student(app, snapshot, manifest, "tess", "902", courses=teach)
+    assert "Rooms are for classes you take as a student" in ct.get("/chat/").get_data(as_text=True)
+    # All rooms muted is not "no rooms".
+    alice, ca = _student(app, snapshot, manifest, "alice", "903")
+    for c in dms.room_courses(alice.id):
+        ca.post(f"/chat/course/{c.id}/mute", data={"mute": "1"})
+    assert "All your class rooms are muted" in ca.get("/chat/").get_data(as_text=True)
+
+
+def test_calendar_link_only_students_hear_rooms_are_canvas_only(app):
+    from app.services import ingest
+
+    user = make_user("ivy")
+    snap = {"schema_version": 1, "base_url": "https://lms.district.example", "user": {"id": f"feed-{user.id}"},
+            "courses": [{"id": "abc", "name": "Biology", "assignments": [], "assignment_groups": []}], "calendar_events": []}
+    ingest.ingest_snapshot(user, snap, [])
+    from app.models import CanvasAccount
+
+    db.session.scalar(select(CanvasAccount).where(CanvasAccount.user_id == user.id)).lms = "ics"  # as feeds.py does
+    db.session.commit()
+    c = app.test_client()
+    login(c, user)
+    assert dms.room_status(user.id) == "not_canvas"
+    assert "Class rooms are for Canvas classes for now" in c.get("/chat/").get_data(as_text=True)
