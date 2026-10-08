@@ -23,7 +23,7 @@
       <p class="small muted ai-note">You're chatting with an AI (Claude, by Anthropic), not a person. It can be wrong, so check answers against your materials, and follow your course's AI policy. Anthropic doesn't train its models on this chat.</p>
       <div class="chat-log" id="log">
         {% for m in conv.messages %}
-        <div class="msg {{ 'mine' if m.role == 'user' else 'assistant' }}"><div class="prose" data-math>{{ tutor_render(m)|safe }}</div></div>
+        <div class="msg {{ 'mine' if m.role == 'user' else 'assistant' }}"{% if m.role == 'assistant' %} data-id="{{ m.id }}" data-calendar='{{ cal_items.get(m.id, [])|tojson }}' data-added="{{ cal_added.get(m.id, 0) }}"{% endif %}><div class="prose" data-math>{{ tutor_render(m)|safe }}</div></div>
         {% else %}
         <div class="empty" id="starter"><p>Ask anything. Try:</p>
           <div class="btn-row" style="justify-content:center">
@@ -51,6 +51,11 @@
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/sources.js') }}"></script>
+<script>
+window.HH_CAL = {courses: {{ cal_courses|tojson }}, course: {{ conv.course_id|tojson }}, today: {{ cal_today|tojson }},
+                 open: {{ cal_open|tojson }}, addUrl: {{ url_for('tutor.add_to_calendar', message_id=0)|tojson }}};
+</script>
+<script src="{{ url_for('static', filename='js/tutor_calendar.js') }}"></script>
 <script>
 // Phones have no Shift+Enter, so they get no keyboard hint and Return makes a new line.
 const coarse = matchMedia("(pointer: coarse)").matches;
@@ -121,9 +126,13 @@ document.getElementById("input").placeholder += keysHint;
         while ((idx = buffer.indexOf("\n\n")) >= 0) {
           const block = buffer.slice(0, idx); buffer = buffer.slice(idx + 2);
           const event = /^event: (.*)$/m.exec(block)?.[1], data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] || "{}");
-          if (event === "delta") { raw += data.text; out.textContent = raw; scroll(); }
+          if (event === "delta") { raw += data.text; out.textContent = hhCalVisible(raw); scroll(); }
           else if (event === "done") {
-            out.innerHTML = data.html; hh.renderMath(out); scroll();
+            out.innerHTML = data.html; hh.renderMath(out);
+            const msg = out.parentElement;
+            msg.dataset.id = data.id; msg.dataset.calendar = JSON.stringify(data.calendar || []);
+            hhCalAttach(msg, { open: (data.calendar || []).length > 0 });
+            scroll();
             const rem = document.getElementById("remaining"); if (rem && data.remaining != null) rem.textContent = data.remaining;
           } else if (event === "error") { throw new Error(data.message); }
         }

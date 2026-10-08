@@ -17,8 +17,8 @@ login, so no school password or API key is ever involved.
 | **Home** | Today view: a week strip of what's due, an agenda grouped by day with countdowns, what's missing (per Canvas), grade bars by class (lecture and discussion sections merged), recent announcements. |
 | **Classes** | Assignments with rubrics and teacher feedback, modules, pages (sanitized), files with in-app preview, announcements. |
 | **Grades** | Canvas-accurate calculator (weighted groups, optimal drop lowest/highest, extra credit), what-if scores, and "what do I need on X". |
-| **Calendar** | Month view, a private iCal feed for any calendar app, and a Google Calendar toggle that adds every upcoming due date and keeps it updated (through Composio). |
-| **AI tutor** | Streaming chat per class or across all classes, grounded in synced materials with `[S1]` citations. Attach files (Canvas, uploads, Google Drive) to a chat and it answers from them. Built to teach rather than do the work. |
+| **Calendar** | Day, week and month views, your own items (added by hand or from the tutor), a private iCal feed for any calendar app, and a Google Calendar toggle that adds every upcoming due date and keeps it updated (through Composio). |
+| **AI tutor** | Streaming chat per class or across all classes, grounded in synced materials with `[S1]` citations. Attach files (Canvas, uploads, Google Drive) to a chat and it answers from them. Built to teach rather than do the work. Knows today's date, what's due and what's on your calendar; dated plans it suggests can be added to the calendar under the answer, at no extra cost. |
 | **Study sets** | AI-generated flashcards and practice quizzes from any files and pages you tick in a class (plus your own uploads), a topic, or pasted notes. Flip through a deck card by card (arrows, x / n), and edit cards by hand. |
 | **My files** | Upload notes and readings from your computer or pick them from Google Drive (through Composio); file them under a class and study from them like Canvas files. |
 | **Live quiz** | Kahoot-style: the host shows questions, classmates join with a code (no account needed), and faster correct answers score more. |

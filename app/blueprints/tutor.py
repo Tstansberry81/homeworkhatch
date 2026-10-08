@@ -4,6 +4,10 @@ Answers stream to the browser as server-sent events. Relevant course material is
 retrieved per question and passed in with numbered labels [S1], [S2]..., which the answer
 cites and the page turns into links back to the source. Files the student attaches to a chat
 go with every question, in the system prompt so follow-ups reuse the prompt cache.
+
+Each question also carries the date, time zone, due dates and calendar (services/myevents.py), so
+the tutor can plan with real dates; dated suggestions come back in a hidden block the student can
+add to their calendar under the answer, at no extra cost.
 """
 
 from __future__ import annotations
@@ -19,8 +23,9 @@ from sqlalchemy import select
 from .. import queries
 from ..extensions import db
 from ..models import AIUsage, ContentChunk, TutorConversation, TutorMessage, User, utcnow
-from ..services import ai, retrieval, sources
+from ..services import ai, myevents, retrieval, sources
 from ..services.study import render_markdown
+from ..utils import local_now
 
 bp = Blueprint("tutor", __name__, url_prefix="/tutor")
 
@@ -39,7 +44,23 @@ How to help:
   so and answer from general knowledge, marked as such. Never invent course policies, due dates, or grades.
 - Attached files: when the student attached files to this chat they appear below in <attached>, also labeled
   [S1], [S2]... Treat them as the main material for their questions and cite them the same way.
-- Format with Markdown. Use LaTeX between $...$ (inline) or $$...$$ (display) for math. Keep answers focused."""
+- Format with Markdown. Use LaTeX between $...$ (inline) or $$...$$ (display) for math. Keep answers focused.
+- Dates and planning: the user message starts with <today>: the current date, time and time zone, the
+  student's classes, what's due soon and what's already on their Homework Hatch calendar. Use it whenever
+  days or times come up ("tomorrow", "before the midterm"), plan around those due dates and existing items,
+  and keep sessions realistic (breaks, sleep, nothing in the past).
+- Calendar: when your answer schedules specific things on specific days (a study plan, a schedule, "do X on
+  Tuesday"), end it with a block the student can add to their calendar with one tap. Write the plan in your
+  answer as usual, then add on new lines:
+  <hh-calendar>
+  [{"title": "Review chapter 3 notes", "date": "2026-10-12", "start": "19:00", "end": "20:00", "class": "Calculus I", "notes": "Redo the chain rule examples"}]
+  </hh-calendar>
+  It's a JSON list, at most 30 items. "date" is YYYY-MM-DD in the student's time zone; "start" and "end" are
+  24-hour HH:MM local times (leave both out for something that's just for that day); "class" is one of the
+  class names in <today> (or leave it out); "notes" is optional and short. Titles say what to do, briefly.
+  Only include items with a real date. Leave the block out when nothing is being scheduled, and don't mention
+  it or show it as code: the student sees it as a list to add. If they ask to change a plan, send the whole
+  corrected list again."""
 
 
 def _conversation(conversation_id: int) -> TutorConversation:
@@ -110,9 +131,17 @@ def conversation(conversation_id: int):
     conv = _conversation(conversation_id)
     conversations = db.session.scalars(select(TutorConversation).where(TutorConversation.user_id == current_user.id)
                                        .order_by(TutorConversation.updated_at.desc()).limit(50)).all()
+    courses = queries.visible_courses(current_user.id)
+    answers = [m for m in conv.messages if m.role == "assistant"]
+    with_items = [m for m in answers if m.calendar]
     return render_template("tutor/chat.html", conv=conv, conversations=conversations,
-                           courses=queries.visible_courses(current_user.id), remaining=ai.remaining(current_user),
-                           attached=sources.describe(current_user, conv.attachments or []))
+                           courses=courses, remaining=ai.remaining(current_user),
+                           attached=sources.describe(current_user, conv.attachments or []),
+                           cal_courses=[{"id": c.id, "name": c.name, "label": c.label, "code": c.code} for c in courses],
+                           cal_items={m.id: myevents.mark_existing(current_user, m.calendar) for m in with_items},
+                           cal_added=myevents.added_counts([m.id for m in answers]),
+                           cal_open=with_items[-1].id if with_items else None,
+                           cal_today=local_now(current_user).date().isoformat())
 
 
 @bp.route("/<int:conversation_id>/attachments", methods=["POST"])
@@ -133,6 +162,29 @@ def delete(conversation_id: int):
     db.session.commit()
     flash("Conversation deleted.", "info")
     return redirect(url_for("tutor.index"))
+
+
+@bp.route("/messages/<int:message_id>/calendar", methods=["POST"])
+@login_required
+def add_to_calendar(message_id: int):
+    """Add the items the student kept from an answer (edited or not) to their calendar. Free."""
+    msg = db.session.get(TutorMessage, message_id)
+    if msg is None or msg.role != "assistant":
+        abort(404)
+    _conversation(msg.conversation_id)
+    data = request.get_json(silent=True)
+    try:
+        added, skipped = myevents.add_from_tutor(current_user, msg, data.get("items") if isinstance(data, dict) else None)
+    except myevents.ItemError as exc:
+        return jsonify({"error": str(exc)}), 400
+    db.session.commit()
+    first = min(myevents.local_day(e, current_user) for e in added) if added else None
+    earlier = myevents.left_from_earlier(current_user, msg)
+    return jsonify({"added": len(added), "skipped": skipped,
+                    "url": url_for("main.calendar_view", view="week", d=first.isoformat()) if first
+                    else url_for("main.calendar_view"),
+                    "earlier": [{"id": e.id, "title": e.title, "when": myevents.label(e, current_user)} for e in earlier],
+                    "remove_url": url_for("myevents.remove")})
 
 
 def _sse(event: str, data: dict) -> str:
@@ -166,7 +218,8 @@ def message(conversation_id: int):
                       for i, c in enumerate(chunks, len(attached) + 1)]
     materials = "\n\n".join(f"[S{i}] {c.title} ({c.source_type})\n{c.text}" for i, c in enumerate(chunks, len(attached) + 1))
     scope = conv.course.name if conv.course else "all of the student's classes"
-    prompt = (f"<materials scope=\"{scope}\">\n{materials or 'No matching course material was found.'}\n</materials>\n\n"
+    prompt = (f"{myevents.context(current_user, course_ids)}\n\n"
+              f"<materials scope=\"{scope}\">\n{materials or 'No matching course material was found.'}\n</materials>\n\n"
               f"{text}")
     system: str | list = SYSTEM
     if attached:
@@ -174,7 +227,7 @@ def message(conversation_id: int):
         block = "\n\n".join(f"[S{i}] {src.title}\n{body[:cap]}" for i, ((src, body), cap) in enumerate(zip(attached, caps), 1))
         system = [{"type": "text", "text": SYSTEM},
                   {"type": "text", "text": f"<attached>\n{block}\n</attached>", "cache_control": {"type": "ephemeral"}}]
-    messages = [{"role": m.role, "content": m.content} for m in history] + [{"role": "user", "content": prompt}]
+    messages = [{"role": m.role, "content": myevents.for_history(m)} for m in history] + [{"role": "user", "content": prompt}]
 
     db.session.add(TutorMessage(conversation_id=conv.id, role="user", content=text))
     if conv.title == "New conversation":
@@ -186,6 +239,7 @@ def message(conversation_id: int):
     # By the time the answer streams, this request's database session has been closed, so the
     # generator works from ids and loads what it needs itself.
     conv_id, usage_id, user_id = conv.id, usage.id, current_user.id
+    today = local_now(current_user).date()
 
     def generate():
         parts: list[str] = []
@@ -202,12 +256,15 @@ def message(conversation_id: int):
                     ai.release(usage)
             yield _sse("error", {"message": str(exc)})
             return
-        answer = "".join(parts).strip() or "(No answer.)"
+        answer, items = myevents.split_answer("".join(parts).strip(), today)
+        answer = answer or ("Here's a plan you can add to your calendar." if items else "(No answer.)")
         cited = {int(n) for n in re.findall(r"\[S(\d+)\]", answer)}
         used = [s for s in cited_sources if s["n"] in cited]
-        db.session.add(TutorMessage(conversation_id=conv_id, role="assistant", content=answer, sources=used))
+        msg = TutorMessage(conversation_id=conv_id, role="assistant", content=answer, sources=used, calendar=items or None)
+        db.session.add(msg)
         ai.finish(db.session.get(AIUsage, usage_id), handle.result)
-        yield _sse("done", {"html": render_answer(answer, used), "sources": used,
+        yield _sse("done", {"html": render_answer(answer, used), "sources": used, "id": msg.id,
+                            "calendar": myevents.mark_existing(db.session.get(User, user_id), items),
                             "remaining": ai.remaining(db.session.get(User, user_id))})
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream",

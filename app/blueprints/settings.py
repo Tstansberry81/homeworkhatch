@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from .. import queries
 from ..extensions import db
 from ..models import (ApiToken, CalendarFeed, ChatMessage, DirectMessage, CoinTransaction, Course, Deck, DeckTest, LivePlayer,
-                      PracticeQuiz, StudyPlan, SyncRun, TutorConversation, User, utcnow)
+                      PracticeQuiz, StudyPlan, SyncRun, TutorConversation, User, UserEvent, utcnow)
 from ..services import feeds, gcal, integrations
 from ..services.storage import get_storage
 from .api import hash_token
@@ -312,8 +312,15 @@ def export():
         } for p in db.session.scalars(select(StudyPlan).where(StudyPlan.user_id == u.id))],
         "practice_tests": [{"score": t.score, "total": t.total, "at": t.created_at.isoformat()}
                            for t in db.session.scalars(select(DeckTest).where(DeckTest.user_id == u.id))],
-        "tutor": [{"title": t.title, "messages": [{"role": m.role, "content": m.content} for m in t.messages]}
+        "tutor": [{"title": t.title, "messages": [{"role": m.role, "content": m.content, **({"calendar": m.calendar} if m.calendar else {})}
+                                                  for m in t.messages]}
                   for t in db.session.scalars(select(TutorConversation).where(TutorConversation.user_id == u.id))],
+        "calendar_items": [{"title": e.title, "notes": e.notes, "class": e.course.name if e.course else None,
+                            "start_at": None if e.all_day else e.start_at.isoformat() + "Z",
+                            "end_at": e.end_at.isoformat() + "Z" if e.end_at and not e.all_day else None,
+                            "all_day_date": e.all_day_date.isoformat() if e.all_day and e.all_day_date else None,
+                            "from": e.source, "done": e.done_at is not None}
+                           for e in db.session.scalars(select(UserEvent).where(UserEvent.user_id == u.id).order_by(UserEvent.start_at))],
         "chat_messages": [{"body": m.body, "at": m.created_at.isoformat()}
                           for m in db.session.scalars(select(ChatMessage).where(ChatMessage.user_id == u.id))],
         # Your side of your private conversations (what others sent you is theirs).

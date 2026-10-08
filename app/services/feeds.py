@@ -1214,9 +1214,10 @@ def _id(*parts: str) -> str:
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:40]
 
 
-# Our ICS export names its entries "assignment-<id>@<our host>" / "event-<id>@<our host>"
-# (app/services/ics.py); a calendar app that re-publishes a subscription can keep those UIDs.
-OWN_UID = re.compile(r"^(?:assignment|event)-\d+@(\S+)$", re.I)
+# Our ICS export names its entries "assignment-<id>@<our host>", "event-<id>@<our host>" and
+# "mine-<id>@<our host>" (app/services/ics.py); a calendar app that re-publishes a subscription can keep
+# those UIDs.
+OWN_UID = re.compile(r"^(?:assignment|event|mine)-\d+@(\S+)$", re.I)
 
 
 def _made_by_us(item: Item, ours: set[str]) -> bool:

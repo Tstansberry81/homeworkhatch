@@ -17,7 +17,8 @@ from sqlalchemy.orm import selectinload
 from .. import queries
 from ..config import BASE_DIR
 from ..extensions import csrf, db
-from ..models import Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, calendar_token_hash, utcnow
+from ..models import (Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, UserEvent, calendar_token_hash,
+                      utcnow)
 from ..services import cards_io, feeds, ics, integrations, planner, split
 from ..utils import lasting_url, local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
@@ -192,11 +193,17 @@ def dashboard():
     last_sync = pill.last_sync_at if pill else None
     soon = [p for p in planner.active_plans(current_user.id) if p.exam_at and p.exam_at <= utcnow() + timedelta(days=21)]
     today_iso = today.isoformat()
+    zone = user_zone(current_user)
+    day_start = datetime.combine(today, time.min, tzinfo=zone).astimezone(timezone.utc).replace(tzinfo=None)
+    planned_today = [e for e in db.session.scalars(select(UserEvent).options(selectinload(UserEvent.course)).where(
+        UserEvent.user_id == current_user.id, UserEvent.start_at >= day_start - timedelta(days=1),
+        UserEvent.start_at < day_start + timedelta(days=2)).order_by(UserEvent.start_at))
+        if (e.all_day_date if e.all_day and e.all_day_date else to_local(e.start_at).date()) == today]
     table = split.points_on_the_table(current_user.id)
     return render_template(
         "dashboard.html", week=week, agenda=agenda, upcoming=upcoming, today=local_now(current_user),
         table=table, table_ids=[f.assignment.id for _c, f in table],
-        exam_plans=soon, study_today={p.id: [s for s in p.sessions if s.day == today_iso and p.exam_at > utcnow()]
+        exam_plans=soon, planned_today=planned_today, study_today={p.id: [s for s in p.sessions if s.day == today_iso and p.exam_at > utcnow()]
                                       for p in soon},
         roles=planner.ROLES,
         missing=queries.missing(current_user.id), classes=queries.class_rows(courses),
@@ -284,7 +291,8 @@ def _event_days(e: CalendarEvent, zone) -> list[tuple[date, datetime, str, str]]
 
 
 def _calendar_items(first: date, last: date) -> dict[date, list]:
-    """Assignments due and Canvas events on each local day from first to last, in time order."""
+    """Assignments due, Canvas events, planned study sessions and the student's own items on each local
+    day from first to last, in time order."""
     course_ids = [c.id for c in queries.visible_courses(current_user.id)]
     zone = user_zone(current_user)
     # Stored times are UTC; a day of padding each side covers every time zone, then each item is
@@ -307,6 +315,12 @@ def _calendar_items(first: date, last: date) -> dict[date, list]:
             func.coalesce(CalendarEvent.end_at, CalendarEvent.start_at) >= lo)):
         for day, when, short, long in _event_days(e, zone):
             add(day, "event", DayEvent(e, short, long), when)
+    # The student's own items (from the tutor or added by hand), laid out like events.
+    for e in db.session.scalars(select(UserEvent).options(selectinload(UserEvent.course)).where(
+            UserEvent.user_id == current_user.id, UserEvent.start_at < hi,
+            func.coalesce(UserEvent.end_at, UserEvent.start_at) >= lo)):
+        for day, when, short, long in _event_days(e, zone):
+            add(day, "mine", DayEvent(e, short, long), when)
     # Planned study sessions, first thing on their day.
     for s in db.session.scalars(select(StudySession).join(StudyPlan).options(selectinload(StudySession.plan)).where(
             StudySession.user_id == current_user.id, StudyPlan.status == "active",
@@ -374,7 +388,9 @@ def ics_feed(token: str):
                                                               Assignment.due_at >= since)).all() if course_ids else []
     events = db.session.scalars(select(CalendarEvent).where(CalendarEvent.user_id == user.id,
                                                             CalendarEvent.start_at >= since)).all()
-    body = ics.build(assignments, events, request.host)
+    mine = db.session.scalars(select(UserEvent).options(selectinload(UserEvent.course)).where(
+        UserEvent.user_id == user.id, UserEvent.start_at >= since)).all()
+    body = ics.build(assignments, events, request.host, mine)
     return Response(body, mimetype="text/calendar", headers={"Content-Disposition": "inline; filename=homeworkhatch.ics"})
 
 

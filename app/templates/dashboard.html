@@ -55,6 +55,24 @@
 
 <div class="grid grid-main">
   <div>
+    {% if planned_today %}
+    <div class="card">
+      <h2>On your calendar today <a href="{{ url_for('main.calendar_view', view='day') }}">Calendar {{ icon('arrow', 14) }}</a></h2>
+      {% for e in planned_today %}
+      <div class="task" style="--c: {{ course_color(e.course_id) if e.course_id else 'var(--yolk)' }}">
+        <span class="bar"></span>
+        <div>
+          <a class="title" href="{{ url_for('myevents.edit', event_id=e.id) }}"{% if e.done_at %} style="text-decoration:line-through;color:var(--muted)"{% endif %}>{{ e.title }}</a>
+          <div class="meta">{{ 'All day' if e.all_day else e.start_at|dt('time') }}{% if e.course %} · {{ e.course.code or e.course.name }}{% endif %}</div>
+        </div>
+        <form method="post" action="{{ url_for('myevents.done', event_id=e.id) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-ghost btn-sm" aria-pressed="{{ 'true' if e.done_at else 'false' }}" aria-label="Done: {{ e.title }}">{{ icon('check', 14) }}</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
     {% if exam_plans %}
     <div class="card">
       <h2>Exams coming up <a href="{{ url_for('planner.index') }}">Exams {{ icon('arrow', 14) }}</a></h2>
