@@ -23,6 +23,7 @@ class FakeAI:
         # A streamed *response* (the tutor) outlives the request's database session in production,
         # but not in the test client; tests of streamed responses turn this on to match.
         self.close_session_before_streaming = False
+        self.answer = "The chain rule multiplies derivatives [S1]. Try it on $\\sin(x^2)$."  # what stream() says
 
     def complete(self, *, system, messages, max_tokens, effort, schema=None, model=None):
         self.calls.append({"system": system, "messages": messages, "effort": effort, "schema": schema, "model": model})
@@ -45,14 +46,14 @@ class FakeAI:
     def stream(self, *, system, messages, max_tokens, effort, model=None):
         self.calls.append({"system": system, "messages": messages, "effort": effort, "stream": True, "model": model})
         handle = StreamHandle(chunks=iter(()))
-        answer = "The chain rule multiplies derivatives [S1]. Try it on $\\sin(x^2)$."
+        answer = self.answer
 
         def gen():
             if self.close_session_before_streaming:
                 from app.extensions import db
 
                 db.session.remove()  # what Flask's teardown has done by now in production
-            for piece in re.findall(r".{1,12}", answer):
+            for piece in re.findall(r".{1,12}", answer, re.S):
                 yield piece
             handle.result = AIResult(answer, 900, 60, "fake-model")
 

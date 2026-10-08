@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}{{ 'Edit' if event else 'Add to calendar' }}{% endblock %}
+{% block content %}
+<div class="page-head"><div>
+  <div class="small muted"><a href="{{ url_for('main.calendar_view') }}">Calendar</a></div>
+  <h1>{{ 'Edit calendar item' if event else 'Add to your calendar' }}</h1>
+  {% if event and event.source == 'tutor' %}<p class="small muted">Suggested by the tutor.</p>{% endif %}
+</div></div>
+<form method="post" class="card" style="max-width:560px">
+  {{ csrf() }}
+  <label for="title">What</label>
+  <input id="title" name="title" maxlength="120" required value="{{ values.title }}" placeholder="Review chapter 3 notes">
+  <div class="grid grid-2 mt">
+    <div><label for="date">Date</label><input id="date" name="date" type="date" required value="{{ values.date }}"></div>
+    <div><label for="course_id">Class <span class="hint">(optional)</span></label>
+      <select id="course_id" name="course_id"><option value="">None</option>
+        {% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if values.course_id|string == c.id|string }}>{{ c.label }}</option>{% endfor %}</select></div>
+  </div>
+  <label class="check mt"><input type="checkbox" name="all_day" value="1" id="all_day" {{ 'checked' if values.all_day }}> All day</label>
+  <div class="grid grid-2" id="times" {{ 'hidden' if values.all_day }}>
+    <div><label for="start">Starts</label><input id="start" name="start" type="time" value="{{ values.start }}"></div>
+    <div><label for="end">Ends <span class="hint">(optional)</span></label><input id="end" name="end" type="time" value="{{ values.end }}"></div>
+  </div>
+  <label for="notes" class="mt">Notes <span class="hint">(optional)</span></label>
+  <textarea id="notes" name="notes" maxlength="500" rows="3">{{ values.notes }}</textarea>
+  <p class="help">Without a start time it's an all-day item. Without an end time it lasts an hour.</p>
+  <div class="btn-row mt"><button class="btn">{{ 'Save' if event else 'Add' }}</button><a class="btn btn-ghost" href="{{ url_for('main.calendar_view') }}">Cancel</a></div>
+</form>
+{% if event %}
+<form method="post" action="{{ url_for('myevents.delete', event_id=event.id) }}" class="mt" data-confirm="Delete “{{ event.title }}” from your calendar?">
+  {{ csrf() }}<button class="btn btn-ghost btn-sm">Delete</button>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("all_day").addEventListener("change", (e) => { document.getElementById("times").hidden = e.target.checked; });
+</script>
+{% endblock %}

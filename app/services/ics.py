@@ -1,4 +1,5 @@
-"""iCalendar feed of due dates and Canvas events, for Google/Apple/Outlook calendars."""
+"""iCalendar feed of due dates, Canvas events and the student's own calendar items, for
+Google/Apple/Outlook calendars."""
 
 from __future__ import annotations
 
@@ -8,7 +9,8 @@ from ..models import utcnow
 
 
 def _esc(text: str) -> str:
-    return (text or "").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")  # a textarea's CRLF; a bare CR would break the line
+    return text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
 
 
 def _dt(value: datetime) -> str:
@@ -31,7 +33,7 @@ def _fold(line: str) -> str:
     return "\r\n ".join(out)
 
 
-def build(assignments, events, host: str) -> str:
+def build(assignments, events, host: str, mine=()) -> str:
     stamp = _dt(utcnow())
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Homework Hatch//Due dates//EN", "CALSCALE:GREGORIAN",
              "METHOD:PUBLISH", "X-WR-CALNAME:Homework Hatch", "X-PUBLISHED-TTL:PT1H"]
@@ -55,6 +57,17 @@ def build(assignments, events, host: str) -> str:
             lines.append(f"LOCATION:{_esc(e.location)}")
         if e.html_url:
             lines.append(f"URL:{e.html_url}")
+        lines.append("END:VEVENT")
+    for e in mine:  # items the student added (from the tutor or by hand)
+        if e.all_day and e.all_day_date:
+            span = [f"DTSTART;VALUE=DATE:{e.all_day_date:%Y%m%d}", f"DTEND;VALUE=DATE:{e.all_day_date + timedelta(days=1):%Y%m%d}"]
+        else:
+            end = e.end_at if e.end_at and e.end_at > e.start_at else e.start_at + timedelta(hours=1)
+            span = [f"DTSTART:{_dt(e.start_at)}", f"DTEND:{_dt(end)}"]
+        summary = ("✓ " if e.done_at else "") + (f"{e.title} ({e.course.name})" if e.course else e.title)
+        lines += ["BEGIN:VEVENT", f"UID:mine-{e.id}@{host}", f"DTSTAMP:{stamp}", *span, f"SUMMARY:{_esc(summary)}"]
+        if e.notes:
+            lines.append(f"DESCRIPTION:{_esc(e.notes)}")
         lines.append("END:VEVENT")
     lines.append("END:VCALENDAR")
     return "\r\n".join(_fold(line) for line in lines) + "\r\n"

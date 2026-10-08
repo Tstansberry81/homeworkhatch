@@ -27,6 +27,18 @@
       <div class="meta">{{ study_roles.get(item.role, (item.role,))[0] }}{% if item.done_at %} · done{% endif %}</div>
     </div>
   </div>
+{% elif kind == 'mine' %}
+  <div class="cal-entry mine{{ ' wide' if wide }}{{ ' done' if item.done_at }}" style="--c: {{ course_color(item.course_id) if item.course_id else 'var(--yolk)' }}">
+    <span class="when">{{ item.long if wide else item.short }}</span>
+    <div class="what">
+      <a href="{{ url_for('myevents.edit', event_id=item.id) }}">{{ item.title }}</a>
+      <div class="meta">{% if item.course %}{{ item.course.code or item.course.name }} · {% endif %}{{ 'From the tutor' if item.source == 'tutor' else 'Yours' }}{% if wide and item.notes %} · {{ item.notes|truncate(80) }}{% endif %}</div>
+    </div>
+    <form method="post" action="{{ url_for('myevents.done', event_id=item.id) }}" class="inline">
+      {{ csrf() }}
+      <button class="btn btn-ghost btn-sm" title="{{ 'Mark not done' if item.done_at else 'Mark done' }}" aria-label="Done: {{ item.title }}" aria-pressed="{{ 'true' if item.done_at else 'false' }}">{{ icon('check', 14) }}</button>
+    </form>
+  </div>
 {% else %}
   <div class="cal-entry event{{ ' wide' if wide }}">
     <span class="when">{{ item.long if wide else item.short }}</span>
@@ -49,6 +61,7 @@
       <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view) }}">Today</a>
       <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=nxt.isoformat()) }}" aria-label="Next {{ view }}">→</a>
     </div>
+    <a class="btn" href="{{ url_for('myevents.new', d=anchor.isoformat() if view == 'day' else none) }}">+ Add</a>
     <nav class="tabs cal-views" aria-label="Calendar view">
       {% for v, label in [('day', 'Day'), ('week', 'Week'), ('month', 'Month')] %}
       <a href="{{ url_for('main.calendar_view', view=v, d=anchor.isoformat()) }}" class="{{ 'active' if v == view }}"{% if v == view %} aria-current="page"{% endif %}>{{ label }}</a>
@@ -72,6 +85,8 @@
               <a class="item {{ item.effective_status }}" style="--c: {{ course_color(item.course_id) }}" href="{{ url_for('courses.assignment', assignment_id=item.id) }}" title="{{ item.name }} — {{ item.course.name }} ({{ item.due_at|dt('time') }})">{{ item.name }}</a>
             {% elif kind == 'study' %}
               <a class="item study {{ 'done' if item.done_at }}" style="--c: {{ course_color(item.plan.course_id) if item.plan.course_id else 'var(--lilac)' }}" href="{{ url_for('planner.session', session_id=item.id) }}" title="Study for {{ item.plan.title }}: {{ study_roles.get(item.role, (item.role,))[0] }}, {{ item.minutes }} min">Study: {{ item.plan.title }}</a>
+            {% elif kind == 'mine' %}
+              <a class="item mine {{ 'done' if item.done_at }}" style="--c: {{ course_color(item.course_id) if item.course_id else 'var(--yolk)' }}" href="{{ url_for('myevents.edit', event_id=item.id) }}" title="{{ item.title }} ({{ item.long }})">{{ item.title }}</a>
             {% else %}
               <span class="item event" title="{{ item.title }} ({{ item.long }}){% if item.location %} @ {{ item.location }}{% endif %}">{{ item.title }}</span>
             {% endif %}
@@ -104,7 +119,7 @@
      {% if d == anchor %}aria-current="page"{% endif %} title="{{ items|length }} on {{ d.strftime('%A') }}">
     <span class="dow">{{ 'Today' if d == today else d.strftime('%a') }}</span>
     <span class="date">{{ d.day }}</span>
-    <span class="dots">{% for kind, item in items[:8] if kind != 'study' %}<i style="--c: {{ course_color(item.course_id) if kind == 'assignment' else 'var(--lilac)' }}"></i>{% endfor %}</span>
+    <span class="dots">{% for kind, item in items[:8] if kind != 'study' %}<i style="--c: {{ course_color(item.course_id) if kind == 'assignment' or (kind == 'mine' and item.course_id) else 'var(--yolk)' if kind == 'mine' else 'var(--lilac)' }}"></i>{% endfor %}</span>
   </a>
   {% endfor %}
 </div>
@@ -121,7 +136,7 @@
 {% if integrations_available %}{{ gcal_card(gcal, url_for('main.calendar_view')) }}{% endif %}
 <div class="card">
   <h2>{{ 'Or subscribe from any calendar app' if integrations_available else "Add to your phone's calendar" }}</h2>
-  <p class="small muted">Subscribe to this private link in Google Calendar ("From URL"), Apple Calendar ("New Calendar Subscription") or Outlook. It updates on its own. Anyone with the link can see your due dates, so keep it to yourself.</p>
+  <p class="small muted">Subscribe to this private link in Google Calendar ("From URL"), Apple Calendar ("New Calendar Subscription") or Outlook. It updates on its own, including what you add here. Anyone with the link can see your due dates and calendar items, so keep it to yourself.</p>
   <div class="btn-row"><code id="feed" style="overflow-wrap:anywhere">{{ feed_url }}</code><button class="btn btn-ghost btn-sm" data-copy="#feed">Copy</button></div>
   <form method="post" action="{{ url_for('main.reset_feed') }}" class="mt" data-confirm="Reset the link? Calendars using the old one will stop updating.">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="linklike small">Reset link</button>

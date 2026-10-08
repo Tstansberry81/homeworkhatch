@@ -381,6 +381,38 @@ a.cite { display: inline-block; font: 700 .7rem var(--mono); padding: 0 6px; bor
 .cal-entry.study { border-style: dashed; border-left-style: solid; }
 .cal-entry.study.done .what > a { text-decoration: line-through; color: var(--muted); }
 .cal .item.study { border-left-style: dashed; font-style: italic; }
+/* "Add to calendar" under tutor answers (js/tutor_calendar.js) */
+.msg-actions { margin-top: 6px; }
+.msg.assistant:has(.calcard:not([hidden])) { max-width: 100%; width: 100%; }
+.msg-actions .linklike { font-size: .8rem; }
+.calcard { margin-top: 10px; padding: 12px; border: 2px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.calcard-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.calrows { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
+.calrow { display: grid; grid-template-columns: auto 10rem auto minmax(0, 1fr); grid-template-areas: "on title title title" ". date times class" ". notes notes notes";
+  gap: 6px 8px; align-items: center; padding-bottom: 8px; border-bottom: 1.5px dashed var(--hair); }
+.calrow:last-child { border-bottom: 0; padding-bottom: 0; }
+.calrow input, .calrow select { margin: 0; padding: 6px 8px; min-width: 0; }
+.calrow-on { grid-area: on; width: 18px; height: 18px; }
+.calrow-title { grid-area: title; font-weight: 600; }
+.calrow-date { grid-area: date; }
+.calrow-times { grid-area: times; display: flex; align-items: center; gap: 4px; }
+.calrow-times input { width: 8.6rem; }
+.calrow-class { grid-area: class; }
+.calrow-notes { grid-area: notes; font-size: .85rem; }
+.calcard.added .calrow { opacity: .7; }
+.calrow-have { grid-column: 2 / -1; }
+.calcard-earlier { margin-top: 6px; }
+@media (max-width: 900px) {
+  .calrow { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "on title title" ". date class" ". times times" ". notes notes"; }
+  .calrow-times input { flex: 1; width: auto; }
+}
+@media (max-width: 640px) {
+  .msg.assistant:has(.calcard:not([hidden])) { padding: 10px; }
+  .calcard { padding: 10px; }
+  .calrow { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "on title" ". date" ". times" ". class" ". notes"; }
+}
+.cal .item.mine.done, .cal-entry.mine.done .what > a { text-decoration: line-through; color: var(--muted); }
+.cal-entry.mine.done .btn { background: var(--mint); color: #141311; border-color: var(--line); }
 .cal .item.study.done { text-decoration: line-through; color: var(--muted); }
 .cal-entry.done, .cal-entry.submitted, .cal-entry.submitted_late, .cal-entry.graded { background: var(--mint-soft); border-left-color: var(--mint); }
 .cal-entry.done .what > a, .cal-entry.submitted .what > a, .cal-entry.submitted_late .what > a, .cal-entry.graded .what > a { text-decoration: line-through; color: var(--muted); }

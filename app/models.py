@@ -680,6 +680,8 @@ class TutorMessage(db.Model):
     role: Mapped[str] = mapped_column(String(12))  # user / assistant
     content: Mapped[str] = mapped_column(EncryptedText("tutor_message.content"))
     sources: Mapped[list | None] = mapped_column(EncryptedJSON("tutor_message.sources"))
+    # Dated items the tutor suggested in this answer, for "Add to calendar" (services/myevents.py).
+    calendar: Mapped[list | None] = mapped_column(EncryptedJSON("tutor_message.calendar"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -923,6 +925,36 @@ class StudySession(db.Model):
     notes: Mapped[str | None] = mapped_column(EncryptedText("study_session.notes"))
 
     plan: Mapped[StudyPlan] = relationship(back_populates="sessions")
+
+
+class UserEvent(db.Model):
+    """Something the student put on their own Homework Hatch calendar: a study block or task the tutor
+    suggested, or one added by hand. Times are naive UTC like CalendarEvent's (same field names, so the
+    calendar lays them out the same way); an all-day item is a local date."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    course_id: Mapped[int | None] = mapped_column(ForeignKey("course.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(EncryptedText("user_event.title"))
+    notes: Mapped[str | None] = mapped_column(EncryptedText("user_event.notes"))
+    start_at: Mapped[datetime] = mapped_column(DateTime, index=True)  # local midnight for all-day items
+    end_at: Mapped[datetime | None] = mapped_column(DateTime)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    all_day_date: Mapped[date | None] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(10), default="manual")  # tutor / manual
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("tutor_message.id", ondelete="SET NULL"), index=True)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    course: Mapped[Course | None] = relationship()
+
+    @property
+    def html_url(self) -> None:  # the calendar's event layout links out when an item has one
+        return None
+
+    @property
+    def location(self) -> None:
+        return None
 
 
 class DeckTest(db.Model):
