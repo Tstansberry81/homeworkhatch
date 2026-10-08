@@ -12,7 +12,6 @@
     <button class="btn btn-sm">Save</button></div>
 </form>
 {% endif %}
-{% if needs_update %}<div class="flash">Update the Homework Hatch extension (version 1.5.2 or newer) and sync once to join your class chats. Newer versions show that you're really in each class, which keeps strangers out of class rooms.</div>{% endif %}
 <div class="grid grid-main mt">
   <div class="card">
     <h2>Messages</h2>
@@ -40,6 +39,16 @@
         <div class="small muted">{{ counts.get(c.chat_key, 0) }} classmate{{ 's' if counts.get(c.chat_key, 0) != 1 }} on Homework Hatch{% if last.get(c.chat_key) %} · last message {{ last[c.chat_key]|ago }}{% endif %}</div></div></li>
       {% endfor %}
     </ul>
+    {% elif muted %}<p class="small muted">All your class rooms are muted. Open one below to unmute it.</p>
+    {% elif room_status == 'update' %}
+    <div class="empty"><p>Your Canvas is connected. Class rooms open after its next sync with the Homework Hatch extension 1.5.2 or newer, which shows you're really in each class so strangers stay out.</p>
+      <p class="small muted">Chrome updates the extension on its own and it syncs right away, so your rooms will appear here by themselves. Installed it from a zip? <a href="{{ url_for('settings.sync') }}">Get the new version</a>.</p></div>
+    {% elif room_status == 'no_proof' %}
+    <div class="empty"><p>Your classes synced, but Canvas didn't share the class ID that rooms use to check who's in each class, so there are no rooms for them yet.</p></div>
+    {% elif room_status == 'not_student' %}
+    <div class="empty"><p>None of your classes has a room. Rooms are for classes you take as a student, and classes you've hidden on the Classes page are left out.</p></div>
+    {% elif room_status == 'not_canvas' %}
+    <div class="empty"><p>Class rooms are for Canvas classes for now. Classes from Brightspace or a calendar link don't have one yet.</p></div>
     {% else %}{{ empty("💬", "Connect Canvas and your class rooms appear automatically.", url_for('settings.sync'), "Connect Canvas") }}{% endif %}
     {% if muted %}<details class="mt"><summary class="small">Muted rooms ({{ muted|length }})</summary>
       <ul class="list">{% for c in muted %}<li><a class="title" href="{{ url_for('chat.room', course_id=c.id) }}">{{ c.name }}</a></li>{% endfor %}</ul></details>{% endif %}

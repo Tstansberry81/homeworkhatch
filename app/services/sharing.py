@@ -293,12 +293,12 @@ def public_description(item) -> str | None:
 
 
 def class_course(item) -> Course | None:
-    """The course whose classmates see a "class" set: a Canvas class (calendar-link classes never get
-    one). It's listed only to classmates matched by Course.chat_key, the proof of being in the class
+    """The course whose classmates see a "class" set: a Canvas class (other LMSs and calendar links
+    have no class ID to match classmates by, so their classes can't share with a class yet). It's listed only to classmates matched by Course.chat_key, the proof of being in the class
     that class chat uses, so a hand-made sync can't read a real class's sets; until the owner's
     extension sends that proof (1.5.2), the set stays "class" but isn't listed yet."""
     course = item.course
-    if course is None or course.account is None or course.account.lms == "ics":
+    if course is None or course.account is None or course.account.lms != "canvas":
         return None
     return course
 
