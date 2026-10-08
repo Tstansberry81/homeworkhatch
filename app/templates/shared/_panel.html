@@ -10,7 +10,7 @@
   {% else %}
     {% if item.share_mode != 'private' %}
       {% if share.reports_hidden %}<p><span class="badge warn">Hidden</span> Someone reported this set, so it's hidden until we review it.</p>{% endif %}
-      <p class="small muted">{{ 'Shared with your class and by link' if item.share_mode == 'class' else 'Shared by link' }}{% if share.copies %} · saved by {{ share.copies }} {{ 'person' if share.copies == 1 else 'people' }}{% endif %}</p>
+      <p class="small muted">{{ 'Shared with your class and by link' if item.share_mode == 'class' else 'Shared by link' }}{% if item.share_mode == 'class' and share.class_course and not share.class_course.chat_key %} (classmates see it once you update the Homework Hatch extension to 1.5.2 and sync){% endif %}{% if share.copies %} · saved by {{ share.copies }} {{ 'person' if share.copies == 1 else 'people' }}{% endif %}</p>
       <div class="btn-row"><code id="share-url" style="overflow-wrap:anywhere">{{ share.url }}</code><button type="button" class="btn btn-ghost btn-sm" data-copy="#share-url">Copy link</button></div>
     {% else %}
       <p class="small muted">Only you can see this {{ 'deck' if kind == 'deck' else 'quiz' }}.</p>

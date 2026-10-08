@@ -133,6 +133,7 @@ def age():
             logout_user()
             return render_template("age.html", blocked=True), 403
         current_user.birth_year = int(request.form["birth_year"])
+        current_user.birth_month = int(request.form["birth_month"])
         db.session.commit()
         nxt = request.args.get("next") or ""
         return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("main.dashboard"))

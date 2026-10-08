@@ -18,6 +18,21 @@
       </div></li>{% endfor %}</ul>
   {% else %}<div class="empty"><div class="big">🧹</div><p>No open reports.</p></div>{% endif %}
 </div>
+<div class="page-head mt"><div><h2>Reported direct messages</h2>
+  <p class="muted">You see only the reported message and a few around it. Remove hides it from both people; to stop a sender, disable their account from their user page.</p></div></div>
+<div class="card">
+  {% if dm_reports %}
+  <ul class="list">{% for r, context, sender in dm_reports %}
+    <li style="align-items:flex-start;flex-wrap:wrap"><div class="grow">
+      <div class="small muted">From {% if sender %}<a href="{{ url_for('admin.user_detail', user_id=sender.id) }}">{{ sender.username }}</a>{% else %}{{ r.sender_name or 'someone' }} (account deleted){% endif %}{% if r.sender_band %} · {{ {'adult': 'adult', 'minor': 'under 18', 'edge': 'age unclear'}[r.sender_band] }}{% endif %} · reported {{ r.created_at|ago }}{% if r.reason %} · “{{ r.reason }}”{% endif %}{% if r.message and r.message.deleted %} · <span class="badge warn">deleted</span>{% endif %}</div>
+      <ol class="small">{% for m in context %}<li{% if m.reported %} style="font-weight:700"{% endif %}>{{ m['from'] }}{% if m.deleted %} (deleted){% endif %}: {{ m.body }}</li>{% endfor %}</ol></div>
+      <div class="btn-row">
+        {% for act, label, cls in [("remove", "Remove", "btn-danger"), ("dismiss", "Dismiss", "btn-ghost")] %}
+        <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="kind" value="dm"><input type="hidden" name="report_id" value="{{ r.id }}"><input type="hidden" name="action" value="{{ act }}"><button class="btn {{ cls }} btn-sm">{{ label }}</button></form>
+        {% endfor %}
+      </div></li>{% endfor %}</ul>
+  {% else %}<div class="empty"><p>No reported messages.</p></div>{% endif %}
+</div>
 <div class="page-head mt"><div><h2>Reported shared sets</h2>
   <p class="muted">Copyright and exam reports hide a set at once; other reasons after two people report it. <strong>Take down</strong> ends sharing for that set (and live games made from it) for good, deletes copies people saved from it, and gives the owner a strike ({{ strikes_to_block }} strikes end their sharing). <strong>Dismiss</strong> makes it visible again.</p></div></div>
 <div class="card">

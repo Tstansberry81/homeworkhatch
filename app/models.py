@@ -45,6 +45,7 @@ class User(UserMixin, db.Model):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     grade_level: Mapped[str | None] = mapped_column(String(40))
     birth_year: Mapped[int | None] = mapped_column(Integer)
+    birth_month: Mapped[int | None] = mapped_column(Integer)  # None for accounts from before it was kept
     onboarded: Mapped[bool] = mapped_column(Boolean, default=False)
 
     plan: Mapped[str] = mapped_column(String(20), default="free")
@@ -76,6 +77,10 @@ class User(UserMixin, db.Model):
     # share any more (sharing_blocked), and everything it shared goes private.
     share_strikes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     sharing_blocked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Chat (blueprints/chat.py, services/dms.py): agreed to the chat rules (needed to post or message),
+    # and whether classmates may send this student direct-message requests.
+    chat_agreed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    allow_dms: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -94,6 +99,21 @@ class User(UserMixin, db.Model):
     @property
     def age(self) -> int | None:
         return utcnow().year - self.birth_year if self.birth_year else None
+
+    @property
+    def age_band(self) -> str:
+        """"adult" (certainly 18+), "minor" (certainly under 18) or "edge" (could be either: the day of
+        birth is never known, and the month only for newer accounts). Direct messages stay within a band."""
+        if self.birth_year is None:
+            return "minor"
+        today = utcnow()
+        years = today.year - self.birth_year
+        if self.birth_month:
+            low = years - (1 if today.month <= self.birth_month else 0)   # birthday not reached yet
+            high = years - (1 if today.month < self.birth_month else 0)   # reached, if it's this month
+        else:
+            low, high = years - 1, years
+        return "adult" if low >= 18 else "minor" if high < 18 else "edge"
 
     @property
     def is_adult(self) -> bool:
@@ -212,7 +232,15 @@ class Course(db.Model):
     files_tab_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     # Canvas's "weight final grade based on assignment groups" setting (None if unknown).
     group_weighting: Mapped[bool | None] = mapped_column(Boolean)
-    chat_joined: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # opt-in class chat
+    chat_joined: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # unused since rooms are automatic
+    chat_muted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # hides this class's room
+    # The student's role in the course as Canvas reports it ("student", "teacher", "ta", "designer",
+    # "observer"); None from extensions before 1.5.2. Only students (or unknown) are in class chat.
+    enrollment_role: Mapped[str | None] = mapped_column(String(20))
+    # The class's chat room: "<host>:<course id>:<hash of the course's Canvas uuid>". Canvas shows the
+    # uuid only to people in the course, so a made-up sync can't land in a real class's room. Set only
+    # by extension 1.5.2+; without it there's no room.
+    chat_key: Mapped[str | None] = mapped_column(String(120), index=True)
     # Whether the student chose to keep this class's files here: None until they decide, and
     # files are only requested when True (the student directs every copy that's made).
     sync_files: Mapped[bool | None] = mapped_column(Boolean)
@@ -714,6 +742,70 @@ class ShareReport(db.Model):
     deck: Mapped[Deck | None] = relationship()
     quiz: Mapped[PracticeQuiz | None] = relationship()
     reporter: Mapped[User | None] = relationship()
+
+
+class DirectThread(db.Model):
+    """A private conversation between two classmates (services/dms.py). user_a_id < user_b_id, one
+    thread per pair. It starts as a request from `started_by` and becomes active when the other
+    student accepts; declined requests stay closed."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_a_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    user_b_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    started_by: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(10), default="request")  # request / active / declined
+    room_key: Mapped[str | None] = mapped_column(String(300))  # the shared class it started from
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    last_sender_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
+    a_read_at: Mapped[datetime | None] = mapped_column(DateTime)
+    b_read_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (UniqueConstraint("user_a_id", "user_b_id"),)
+
+    def other(self, user_id: int) -> int:
+        return self.user_b_id if user_id == self.user_a_id else self.user_a_id
+
+
+class DirectMessage(db.Model):
+    id: Mapped[int] = mapped_column(primary_key=True)
+    thread_id: Mapped[int] = mapped_column(ForeignKey("direct_thread.id", ondelete="CASCADE"), index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    body: Mapped[str] = mapped_column(EncryptedText("direct_message.body"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    removed: Mapped[bool] = mapped_column(Boolean, default=False)  # deleted by a moderator, not its sender
+
+
+class UserBlock(db.Model):
+    """`blocker` never hears from `blocked` again: no messages, requests or new threads either way."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    blocker_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    blocked_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("blocker_id", "blocked_id"),)
+
+
+class DirectReport(db.Model):
+    """A reported direct message. Admins see the reported message and a little of the conversation
+    around it, and nothing else of anyone's DMs."""
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("direct_message.id", ondelete="SET NULL"), index=True)
+    reporter_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"))
+    sender_id: Mapped[int | None] = mapped_column(ForeignKey("user.id", ondelete="SET NULL"), index=True)
+    # Who sent it and their age band then, kept if they delete their account.
+    sender_name: Mapped[str | None] = mapped_column(String(40))
+    sender_band: Mapped[str | None] = mapped_column(String(10))
+    # What was said, copied when it was reported, so deleting the message or the account can't erase
+    # the evidence: [{"id", "from": "sender"|"reporter", "body", "at", "deleted"}].
+    snapshot: Mapped[list | None] = mapped_column(EncryptedJSON("direct_report.snapshot"))
+    reason: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    message: Mapped[DirectMessage | None] = relationship()
+
+    __table_args__ = (UniqueConstraint("message_id", "reporter_id"),)
 
 
 # ---------------------------------------------------------------- coins

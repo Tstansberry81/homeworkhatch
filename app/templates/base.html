@@ -29,13 +29,14 @@
     <nav class="nav" aria-label="Main">
       {% for endpoint, label, ico, active in [
         ("main.dashboard", "Home", "home", ep == "main.dashboard"),
-        ("courses.index", "Classes", "classes", ep.startswith("courses.") or ep.startswith("chat.")),
+        ("courses.index", "Classes", "classes", ep.startswith("courses.")),
         ("main.calendar_view", "Calendar", "calendar", ep == "main.calendar_view"),
         ("study.index", "Study", "study", ep.startswith("study.") or ep.startswith("planner.") or ep.startswith("live.") or ep.startswith("tools.") or ep == "coins.lab"),
         ("tutor.index", "Tutor", "tutor", ep.startswith("tutor.")),
+        ("chat.index", "Chat", "chat", ep.startswith("chat.")),
         ("uploads.index", "Files", "files", ep.startswith("uploads.")),
       ] %}
-      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if active }}"{% if active %} aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ label }}</span></a>
+      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if active }}"{% if active %} aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ label }}</span>{% if endpoint == 'chat.index' and dm_unread %}<span class="badge accent nav-badge" aria-label="{{ dm_unread }} unread">{{ dm_unread }}</span>{% endif %}</a>
       {% endfor %}
     </nav>
     <div class="rail-foot">

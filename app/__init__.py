@@ -138,6 +138,9 @@ def _register_template_helpers(app: Flask) -> None:
                "integrations_available": integration_service.available()}
         if current_user.is_authenticated:
             ctx["coin_balance"] = coin_service.balance(current_user.id)
+            from .services import dms
+
+            ctx["dm_unread"] = dms.unread_count(current_user.id)
         return ctx
 
 

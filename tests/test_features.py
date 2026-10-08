@@ -278,13 +278,13 @@ def test_class_chat_membership_and_moderation(app, client, snapshot, manifest):
     login(ca, alice), login(cb, bob), login(ce, eve)
     a_course = db.session.scalar(select(Course).where(Course.user_id == alice.id, Course.canvas_id == "101"))
     b_course = db.session.scalar(select(Course).where(Course.user_id == bob.id, Course.canvas_id == "101"))
-    # Chat is opt-in: nothing is readable or postable before joining, and the room lists no names.
-    assert ca.get(f"/chat/course/{a_course.id}/messages").status_code == 403
+    # Rooms are automatic for everyone who synced the class: readable at once, with no member list.
+    assert ca.get(f"/chat/course/{a_course.id}/messages").status_code == 200
     page = ca.get(f"/chat/course/{a_course.id}").get_data(as_text=True)
-    assert "Join chat" in page and "Bob" not in page
-    ca.post(f"/chat/course/{a_course.id}/join"), cb.post(f"/chat/course/{b_course.id}/join")
-    page = ca.get(f"/chat/course/{a_course.id}").get_data(as_text=True)
-    assert "2 members" in page and "Bob" not in page and "Enrollment isn't confirmed" in page
+    assert "2 classmates" in page and "Bob" not in page and "I agree" in page
+    # Posting needs the one-time rules agreement.
+    assert ca.post(f"/chat/course/{a_course.id}/messages", json={"body": "hi"}).status_code == 403
+    ca.post("/chat/rules"), cb.post("/chat/rules")
     assert ca.post(f"/chat/course/{a_course.id}/messages", json={"body": "anyone done HW 3? this is shit"}).status_code == 200
     msgs = cb.get(f"/chat/course/{b_course.id}/messages").get_json()["messages"]
     assert [m["body"] for m in msgs] == ["anyone done HW 3? this is s***"] and msgs[0]["author"] == "Alice"
@@ -297,8 +297,8 @@ def test_class_chat_membership_and_moderation(app, client, snapshot, manifest):
     assert cb.post(f"/chat/messages/{mid}/delete").status_code == 403, "can't delete someone else's message"
     assert ca.post(f"/chat/messages/{mid}/delete").status_code == 200
     assert db.session.get(ChatMessage, mid).deleted is True
-    cb.post(f"/chat/course/{b_course.id}/join", data={"leave": "1"})
-    assert cb.get(f"/chat/course/{b_course.id}/messages").status_code == 403, "leaving closes the room"
+    cb.post(f"/chat/course/{b_course.id}/mute", data={"mute": "1"})
+    assert db.session.get(Course, b_course.id).chat_muted is True
 
 
 def test_scanned_pdf_can_be_read_with_ai(synced_user, client, fake_ai):

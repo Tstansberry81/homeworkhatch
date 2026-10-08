@@ -229,7 +229,7 @@ def test_class_sharing_lists_sets_for_classmates_only(app, synced_user, client, 
 
     alice, ac = _classmate(app, snapshot, manifest)
     acourse = db.session.scalar(select(Course).where(Course.user_id == alice.id))
-    assert acourse.room_key == course.room_key
+    assert acourse.chat_key == course.chat_key
     assert "Derivatives" in ac.get(f"/courses/{acourse.id}").get_data(as_text=True)
     assert "Derivatives" not in client.get(f"/courses/{course.id}").get_data(as_text=True), "not your own"
 
@@ -238,6 +238,24 @@ def test_class_sharing_lists_sets_for_classmates_only(app, synced_user, client, 
     bob, bc = _classmate(app, other, manifest, name="bob")
     bcourse = db.session.scalar(select(Course).where(Course.user_id == bob.id))
     assert "Derivatives" not in bc.get(f"/courses/{bcourse.id}").get_data(as_text=True)
+
+    # A hand-made sync without the course's Canvas uuid doesn't either.
+    no_proof = dict(snapshot, courses=[{k: v for k, v in snapshot["courses"][0].items() if k != "uuid_hash"}])
+    mal, mc = _classmate(app, no_proof, manifest, name="mal")
+    mcourse = db.session.scalar(select(Course).where(Course.user_id == mal.id))
+    assert "Derivatives" not in mc.get(f"/courses/{mcourse.id}").get_data(as_text=True)
+
+    # A class set whose class hasn't sent proof yet (an older extension) stays "class" through edits,
+    # and is listed once it has.
+    owner_course = db.session.get(Course, course.id)
+    key, owner_course.chat_key = owner_course.chat_key, None
+    db.session.commit()
+    client.post(f"/study/decks/{deck.id}", data={"action": "course", "course_id": course.id})
+    assert db.session.get(Deck, deck.id).share_mode == "class"
+    assert "Derivatives" not in ac.get(f"/courses/{acourse.id}").get_data(as_text=True)
+    db.session.get(Course, course.id).chat_key = key
+    db.session.commit()
+    assert "Derivatives" in ac.get(f"/courses/{acourse.id}").get_data(as_text=True)
 
     # Saving it files the copy under the classmate's own section.
     ac.post(f"/s/{deck.share_token}/copy")

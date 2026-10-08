@@ -293,10 +293,12 @@ def public_description(item) -> str | None:
 
 
 def class_course(item) -> Course | None:
-    """The course whose classmates see a "class" set: a Canvas class (calendar-link classes have
-    private rooms, so they can't be shared with a class)."""
+    """The course whose classmates see a "class" set: a Canvas class (calendar-link classes never get
+    one). It's listed only to classmates matched by Course.chat_key, the proof of being in the class
+    that class chat uses, so a hand-made sync can't read a real class's sets; until the owner's
+    extension sends that proof (1.5.2), the set stays "class" but isn't listed yet."""
     course = item.course
-    if course is None or not course.room_key or course.room_key.startswith("ics/"):
+    if course is None or course.account is None or course.account.lms == "ics":
         return None
     return course
 
@@ -377,14 +379,14 @@ def is_visible(item) -> bool:
 
 def class_sets(viewer: User, course: Course, limit: int = 30) -> list[tuple[str, object]]:
     """("deck" | "quiz", set) for sets classmates shared with this class (same Canvas course at the
-    same school), newest first; never the viewer's own."""
-    if not course.room_key or course.room_key.startswith("ics/"):
+    same school, matched by Course.chat_key), newest first; never the viewer's own."""
+    if not course.chat_key:
         return []
     out = []
     for model in (Deck, PracticeQuiz):
         rows = db.session.scalars(
             select(model).join(Course, Course.id == model.course_id).join(User, User.id == model.user_id)
-            .where(Course.room_key == course.room_key, model.user_id != viewer.id, model.share_mode == "class",
+            .where(Course.chat_key == course.chat_key, model.user_id != viewer.id, model.share_mode == "class",
                    model.share_hidden.is_(False), model.taken_down_at.is_(None), User.active.is_(True),
                    User.sharing_blocked.is_(False))
             .order_by(model.shared_at.desc()).limit(limit)).all()
@@ -409,10 +411,10 @@ def copy_count(item) -> int:
 
 def _viewer_course(viewer: User, item) -> int | None:
     """The viewer's own section of the set's class, if they have one."""
-    room = item.course.room_key if item.course is not None else None
-    if not room or room.startswith("ics/"):
+    key = item.course.chat_key if item.course is not None else None
+    if not key:
         return None
-    return db.session.scalar(select(Course.id).where(Course.user_id == viewer.id, Course.room_key == room).limit(1))
+    return db.session.scalar(select(Course.id).where(Course.user_id == viewer.id, Course.chat_key == key).limit(1))
 
 
 def copy_to(viewer: User, item):

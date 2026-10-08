@@ -2,33 +2,27 @@
 {% block title %}Chat · {{ course.name }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><div class="small muted"><a href="{{ url_for('chat.index') }}">Class chat</a></div><h1>{{ course.name }}</h1>
-    <p class="small muted">{{ members }} member{{ 's' if members != 1 }} · open to Homework Hatch users whose Canvas includes this class. Enrollment isn't confirmed, so don't share personal info, and don't post course files, answer keys or exam content.</p></div>
+  <div><div class="small muted"><a href="{{ url_for('chat.index') }}">Chat</a>{% if course.canvas_name and course.canvas_name != course.name %} · {{ course.canvas_name }}{% endif %}</div><h1>{{ course.name }}</h1>
+    <p class="small muted">{{ members }} classmate{{ 's' if members != 1 }} on Homework Hatch · everyone who synced this class from their own Canvas. We can't confirm enrollment beyond that, so don't share personal info, and don't post course files, answer keys or exam content.</p></div>
   <div class="btn-row"><a class="btn btn-ghost" href="{{ url_for('courses.detail', course_id=course.id) }}">Class page</a>
-  {% if course.chat_joined %}<form method="post" action="{{ url_for('chat.join', course_id=course.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="leave" value="1"><button class="btn btn-ghost">Leave chat</button></form>{% endif %}</div>
+    <form method="post" action="{{ url_for('chat.mute', course_id=course.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="mute" value="{{ '0' if course.chat_muted else '1' }}"><button class="btn btn-ghost">{{ 'Unmute' if course.chat_muted else 'Mute' }}</button></form></div>
 </div>
-{% if not course.chat_joined %}
-<div class="card">
-  <h2>Join this class's chat?</h2>
-  <p>Other members will see your display name next to your messages. You can leave any time.</p>
-  <form method="post" action="{{ url_for('chat.join', course_id=course.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn">Join chat</button></form>
-</div>
-{% else %}
-{% if members < 2 %}<div class="flash">You're the first one here. Classmates can join from their own class chat page.</div>{% endif %}
+{% if not current_user.chat_agreed_at %}{% with next=url_for('chat.room', course_id=course.id) %}{% include "chat/_rules.html" %}{% endwith %}{% endif %}
+{% if members < 2 %}<div class="flash">You're the first one here. Everyone in this class who connects Homework Hatch lands in this room automatically.</div>{% endif %}
 <div class="card chat">
   <div class="chat-log" id="log"><p class="muted center small" id="loading">Loading…</p></div>
+  {% if current_user.chat_agreed_at %}
   <form class="composer" id="composer">
     <textarea id="input" maxlength="1000" placeholder="Message {{ course.name }}… Be kind; reports go to moderators."></textarea>
     <button class="btn">Send</button>
   </form>
+  {% endif %}
   <p class="small" id="err" style="color:var(--err)"></p>
 </div>
-{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>
 (() => {
-  if (!document.getElementById("log")) return;  // not joined yet
   const url = "{{ url_for('chat.messages', course_id=course.id) }}";
   const log = document.getElementById("log"), input = document.getElementById("input"), err = document.getElementById("err");
   let lastId = 0;
@@ -40,7 +34,8 @@
     const div = document.createElement("div");
     div.className = "msg" + (m.mine ? " mine" : "");
     div.dataset.id = m.id;
-    const action = m.mine ? `<button class="linklike" data-del="${m.id}">delete</button>` : `<button class="linklike" data-report="${m.id}">report</button>`;
+    const action = m.mine ? `<button class="linklike" data-del="${m.id}">delete</button>`
+      : `${m.dm ? `<a href="{{ url_for('chat.index') }}dm/from/${m.id}">message</a>` : ""}<button class="linklike" data-report="${m.id}">report</button>`;
     div.innerHTML = `<div class="meta"><strong>${hh.escape(m.author)}</strong><span>${hh.escape(m.date)} ${hh.escape(m.time)}</span>${action}</div>${hh.escape(m.body).replace(/\n/g, "<br>")}`;
     log.appendChild(div);
     lastId = Math.max(lastId, m.id);
@@ -57,7 +52,7 @@
       if (data.messages.length && nearBottom) log.scrollTop = log.scrollHeight;
     } catch { /* keep polling */ } finally { polling = false; }
   }
-  document.getElementById("composer").addEventListener("submit", async (e) => {
+  document.getElementById("composer")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     err.textContent = "";
     const body = input.value.trim();
@@ -65,7 +60,7 @@
     try { await hh.post(url, { body }); input.value = ""; await poll(); log.scrollTop = log.scrollHeight; }
     catch (ex) { err.textContent = ex.message; }
   });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); document.getElementById("composer").requestSubmit(); } });
+  input?.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); document.getElementById("composer").requestSubmit(); } });
   log.addEventListener("click", async (e) => {
     const del = e.target.dataset.del, rep = e.target.dataset.report;
     try {

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import tempfile
 from datetime import date
@@ -321,6 +322,13 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
         term = c.get("term") or {}
         grade = c.get("grade") or {}
         course.canvas_name = (c.get("name") or "Course")[:300]
+        if "enrollment_role" in c:  # older extensions don't send it: keep what a newer one said
+            role = str(c.get("enrollment_role") or "").lower()[:20]
+            course.enrollment_role = role if role in ("student", "teacher", "ta", "designer", "observer") else "other"
+        uuid_hash = str(c.get("uuid_hash") or "").lower()
+        if re.fullmatch(r"[0-9a-f]{64}", uuid_hash) and not canvas_user_id.startswith("feed-"):
+            # The class's chat room: only someone Canvas let into the course knows its uuid.
+            course.chat_key = f"{host}:{cid}:{uuid_hash[:32]}"
         course.canvas_code = (c.get("course_code") or "")[:200] or None
         course.apply_custom()  # the student's own name and code for the class win over the LMS's
         course.term_id = _clip(term.get("id"), 64)

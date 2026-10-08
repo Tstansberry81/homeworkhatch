@@ -1,0 +1,12 @@
+{# The one-time chat rules. Needs: next (where to go back to). #}
+<div class="card">
+  <h2>Before you post: the chat rules</h2>
+  <ul class="small">
+    <li>Be kind. No harassment, hate or threats. Reports go to moderators, and accounts that break the rules are closed.</li>
+    <li>Your display name shows next to your messages. Don't share personal information (phone, address, socials) with people you don't know. We block common forms of phone numbers, emails, social handles and invite links in class rooms and in any conversation with someone under 18.</li>
+    <li>No course files, answer keys, quiz or exam questions, and no doing each other's graded work.</li>
+    <li>Class rooms are for everyone who synced the class to Homework Hatch, checked against a course ID that only people in the class can see. We can't fully confirm enrollment beyond that.</li>
+    <li>Direct messages: only classmates can message you, first as a request you can accept, decline or block. Adults and students under 18 can't message each other; if your birth date doesn't show whether you're 18 yet, direct messages stay off until it does.</li>
+  </ul>
+  <form method="post" action="{{ url_for('chat.agree') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="{{ next }}"><button class="btn">I agree</button></form>
+</div>

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ other.display_name }} · Messages{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><div class="small muted"><a href="{{ url_for('chat.index') }}">Chat</a>{% if course %} · classmates in {{ course.name }}{% endif %}</div><h1>{{ other.display_name }}</h1>
+    <p class="small muted">Private: only the two of you see this. If you report a message, moderators see it and a few messages around it.</p></div>
+  <div class="btn-row">
+    {% if blocked_them %}
+    <form method="post" action="{{ url_for('chat.unblock', user_id=other.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost">Unblock</button></form>
+    {% elif not (thread.status == 'request' and thread.started_by != current_user.id) %}
+    <form method="post" action="{{ url_for('chat.dm_respond', thread_id=thread.id) }}" class="btn-row" data-confirm-action><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-ghost" name="action" value="block" data-confirm-text="Block {{ other.display_name }}? They won't be able to message you, and you won't see their messages here or in class chat. You can unblock them later on the Chat page.">Block</button>
+      {% if they_sent %}<button class="btn btn-ghost" name="action" value="block_report" data-confirm-text="Block {{ other.display_name }} and report their latest message (even if they deleted it) to moderators?">Block and report</button>{% endif %}</form>
+    {% endif %}
+  </div>
+</div>
+{% if blocked_them %}
+<div class="flash">You blocked {{ other.display_name }}. Neither of you can send messages here. You can still delete your own messages or report theirs.</div>
+{% elif thread.status == 'request' and thread.started_by != current_user.id %}
+<div class="card">
+  <h2>{{ other.display_name }} wants to message you</h2>
+  <p class="small muted">Accept to reply. Decline and they can't message you here again. Block and they can't reach you at all. If something about it is wrong, block and report it.</p>
+  <form method="post" action="{{ url_for('chat.dm_respond', thread_id=thread.id) }}" class="btn-row" data-confirm-action><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn" name="action" value="accept">Accept</button>
+    <button class="btn btn-ghost" name="action" value="decline">Decline</button>
+    <button class="btn btn-ghost" name="action" value="block" data-confirm-text="Block {{ other.display_name }}?">Block</button>
+    <button class="btn btn-ghost" name="action" value="block_report" data-confirm-text="Block {{ other.display_name }} and report this request to moderators?">Block and report</button></form>
+</div>
+{% endif %}
+<div class="card chat">
+  <div class="chat-log" id="log"><p class="muted center small" id="loading">Loading…</p></div>
+  {% if blocked_them %}
+  {% elif thread.status == 'active' and current_user.chat_agreed_at %}
+  <form class="composer" id="composer">
+    <textarea id="input" maxlength="1000" placeholder="Message {{ other.display_name }}…"></textarea>
+    <button class="btn">Send</button>
+  </form>
+  {% elif thread.status == 'request' and thread.started_by == current_user.id %}
+  <p class="small muted center">Request sent. You can send more once {{ other.display_name }} accepts.</p>
+  {% elif thread.status == 'declined' %}
+  <p class="small muted center">{{ other.display_name }} didn't accept this request.</p>
+  {% endif %}
+  <p class="small" id="err" style="color:var(--err)"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const url = "{{ url_for('chat.dm_messages', thread_id=thread.id) }}";
+  const base = "{{ url_for('chat.index') }}dm/messages/";
+  const log = document.getElementById("log"), input = document.getElementById("input"), err = document.getElementById("err");
+  let lastId = 0, firstId = 0, polling = false;
+  const gone = (mine, removed) => removed ? "Removed by a moderator" : mine ? "You deleted this message" : "Message deleted";
+  function markGone(el, removed) {  // keep the spot (and report link), drop the text
+    if (!el || el.dataset.gone) return;
+    el.dataset.gone = "1";
+    el.querySelector("[data-del]")?.remove();
+    el.querySelector(".msg-body").innerHTML = `<em class="muted">${gone(el.classList.contains("mine"), removed)}</em>`;
+  }
+  function add(m) {
+    if (log.querySelector(`[data-id="${m.id}"]`)) return;
+    document.getElementById("loading")?.remove();
+    const div = document.createElement("div");
+    div.className = "msg" + (m.mine ? " mine" : "");
+    div.dataset.id = m.id;
+    const action = m.mine ? (m.deleted ? "" : `<button class="linklike" data-del="${m.id}">delete</button>`) : `<button class="linklike" data-report="${m.id}">report</button>`;
+    const text = m.deleted ? `<em class="muted">${gone(m.mine, m.removed)}</em>` : hh.escape(m.body).replace(/\n/g, "<br>");
+    div.innerHTML = `<div class="meta"><span>${hh.escape(m.date)} ${hh.escape(m.time)}</span>${action}</div><span class="msg-body">${text}</span>`;
+    log.appendChild(div);
+    lastId = Math.max(lastId, m.id);
+    firstId = firstId ? Math.min(firstId, m.id) : m.id;
+  }
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    try {
+      const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+      const data = await hh.get(`${url}${lastId ? `?after=${lastId}&since=${firstId}` : ""}`);
+      data.messages.forEach(add);
+      (data.deleted || []).forEach((id) => markGone(log.querySelector(`[data-id="${id}"]`), (data.removed || []).includes(id)));
+      if (!lastId && !data.messages.length) document.getElementById("loading").textContent = "No messages yet.";
+      if (data.messages.length && nearBottom) log.scrollTop = log.scrollHeight;
+    } catch { /* keep polling */ } finally { polling = false; }
+  }
+  document.getElementById("composer")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    const body = input.value.trim();
+    if (!body) return;
+    try { await hh.post(url, { body }); input.value = ""; await poll(); log.scrollTop = log.scrollHeight; }
+    catch (ex) { err.textContent = ex.message; }
+  });
+  const coarse = matchMedia("(pointer: coarse)").matches;
+  input?.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !coarse) { e.preventDefault(); document.getElementById("composer").requestSubmit(); } });
+  log.addEventListener("click", async (e) => {
+    const del = e.target.dataset.del, rep = e.target.dataset.report;
+    try {
+      if (del && confirm("Delete your message? They'll see that a message was deleted, but not what it said.")) { await hh.post(`${base}${del}/delete`); markGone(e.target.closest(".msg"), false); }
+      if (rep) {
+        const reason = prompt("Why are you reporting this message? Moderators will see it and a few messages around it. (optional)");
+        if (reason === null) return;
+        await hh.post(`${base}${rep}/report`, { reason });
+        e.target.textContent = "reported";
+        e.target.disabled = true;
+      }
+    } catch (ex) { err.textContent = ex.message; }
+  });
+  document.querySelectorAll("[data-confirm-action]").forEach((f) => f.addEventListener("click", (e) => {
+    const text = e.target.closest("button")?.dataset.confirmText;
+    if (text && !confirm(text)) e.preventDefault();
+  }));
+  poll().then(() => { log.scrollTop = log.scrollHeight; });
+  setInterval(poll, 3000);
+})();
+</script>
+{% endblock %}
