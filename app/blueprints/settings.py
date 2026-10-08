@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .. import queries
 from ..extensions import db
-from ..models import (ApiToken, CalendarFeed, ChatMessage, CoinTransaction, Course, Deck, DeckTest, LivePlayer,
+from ..models import (ApiToken, CalendarFeed, ChatMessage, DirectMessage, CoinTransaction, Course, Deck, DeckTest, LivePlayer,
                       PracticeQuiz, StudyPlan, SyncRun, TutorConversation, User, utcnow)
 from ..services import feeds, gcal, integrations
 from ..services.storage import get_storage
@@ -59,9 +59,8 @@ def profile():
         current_user.grade_level = (f.get("grade_level") or "").strip()[:40] or None
         current_user.timezone = valid_timezone(f.get("timezone"))
         current_user.show_on_leaderboards = bool(f.get("show_on_leaderboards"))
-        year = (f.get("birth_year") or "").strip()
-        if year.isdigit() and 1900 < int(year) <= utcnow().year - 13:
-            current_user.birth_year = int(year)
+        # Birth date is set once (sign-up or the age check) and never edited here: it decides who can
+        # message whom (services/dms.py). Corrections go through support.
         db.session.commit()
         flash("Settings saved.", "success")
         return redirect(url_for("settings.profile"))
@@ -317,6 +316,9 @@ def export():
                   for t in db.session.scalars(select(TutorConversation).where(TutorConversation.user_id == u.id))],
         "chat_messages": [{"body": m.body, "at": m.created_at.isoformat()}
                           for m in db.session.scalars(select(ChatMessage).where(ChatMessage.user_id == u.id))],
+        # Your side of your private conversations (what others sent you is theirs).
+        "direct_messages_sent": [{"body": m.body, "at": m.created_at.isoformat(), "deleted": m.deleted}
+                                 for m in db.session.scalars(select(DirectMessage).where(DirectMessage.sender_id == u.id))],
         "coins": [{"amount": t.amount, "reason": t.reason, "at": t.created_at.isoformat()}
                   for t in db.session.scalars(select(CoinTransaction).where(CoinTransaction.user_id == u.id))],
     }

@@ -11,7 +11,7 @@
     {% if ai_available %}
     <form method="post" action="{{ url_for('tutor.new') }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="course_id" value="{{ course.id }}"><button class="btn">Ask about this class</button></form>
     {% endif %}
-    {% if course.account.lms != 'ics' %}<a class="btn btn-ghost" href="{{ url_for('chat.room', course_id=course.id) }}">Class chat</a>{% endif %}
+    {% if course.chat_key and course.enrollment_role == 'student' and not course.hidden and course.active and course.account.lms != 'ics' %}<a class="btn btn-ghost" href="{{ url_for('chat.room', course_id=course.id) }}">Class chat</a>{% endif %}
     {% if course.html_url %}<a class="btn btn-ghost" href="{{ course.html_url }}" target="_blank" rel="noopener">Open in Canvas ↗</a>{% endif %}
   </div>
 </div>
@@ -38,6 +38,7 @@
         <li><div class="grow"><a class="title" href="{{ url_for('shared.view', token=x.share_token) }}">{{ x.title }}</a>
           <div class="small muted">{{ 'Flashcards' if kind == 'deck' else 'Practice quiz' }} · shared {{ x.shared_at|ago }}</div></div></li>
       {% endfor %}</ul>
+      {% elif not course.chat_key %}<p class="small muted">Update the Homework Hatch extension (1.5.2 or newer) and sync to see sets classmates shared with this class.</p>
       {% else %}<p class="small muted">No shared sets for this class yet. Share one of your own from its Share panel, with “My class”.</p>{% endif %}
     </div>
     {% endif %}

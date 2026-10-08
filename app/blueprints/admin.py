@@ -9,9 +9,9 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_, select
 
 from ..extensions import db
-from ..models import (ActivityLog, AIUsage, CalendarFeed, ChatMessage, ChatReport, CoinTransaction, Course, Deck, LmsDiagnostic,
-                      PracticeQuiz, ShareReport, SyncRun, User, utcnow)
-from ..services import ai, billing, coins, diagnostics, sharing
+from ..models import (ActivityLog, AIUsage, CalendarFeed, ChatMessage, ChatReport, CoinTransaction, Course, Deck, DirectReport,
+                      DirectThread, LmsDiagnostic, PracticeQuiz, ShareReport, SyncRun, User, utcnow)
+from ..services import ai, billing, coins, diagnostics, dms, sharing
 from ..utils import admin_required, log_activity, parse_id
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -38,7 +38,8 @@ def overview():
                                          .where(AIUsage.created_at >= ai.month_start())),
         "coins": db.session.scalar(select(func.coalesce(func.sum(CoinTransaction.amount), 0))),
         "open_reports": (db.session.scalar(select(func.count(ChatReport.id)).where(ChatReport.resolved.is_(False))) or 0)
-                        + (db.session.scalar(select(func.count(ShareReport.id)).where(ShareReport.resolved.is_(False))) or 0),
+                        + (db.session.scalar(select(func.count(ShareReport.id)).where(ShareReport.resolved.is_(False))) or 0)
+                        + (db.session.scalar(select(func.count(DirectReport.id)).where(DirectReport.resolved.is_(False))) or 0),
     }
     plans = dict(db.session.execute(select(User.plan, func.count(User.id)).group_by(User.plan)).all())
     pending = db.session.scalars(select(User).where(User.is_approved.is_(False)).order_by(User.created_at)).all()
@@ -151,6 +152,20 @@ def user_detail(user_id: int):
 
 @bp.route("/reports", methods=["GET", "POST"])
 def reports():
+    if request.method == "POST" and request.form.get("kind") == "dm":
+        rid = parse_id(request.form.get("report_id"))
+        r = db.session.get(DirectReport, rid) if rid else None
+        if r is not None:
+            if request.form.get("action") == "remove" and r.message is not None:
+                r.message.deleted = r.message.removed = True
+                dms.message_deleted(db.session.get(DirectThread, r.message.thread_id))
+            same = select(DirectReport).where(DirectReport.message_id == r.message_id) if r.message_id else None
+            for other in (db.session.scalars(same) if same is not None else [r]):
+                other.resolved = True
+            if r.sender_id:
+                log_activity(r.sender_id, f"admin:dm_{request.form.get('action')}", current_user.username)
+            db.session.commit()
+        return redirect(url_for("admin.reports"))
     if request.method == "POST" and request.form.get("kind") in ("deck", "quiz"):
         model = Deck if request.form["kind"] == "deck" else PracticeQuiz
         item_id = parse_id(request.form.get("item_id"))
@@ -193,7 +208,10 @@ def reports():
     for entry in sets.values():
         if entry["kind"] == "deck":
             entry["cards"] = sharing.shown_cards(entry["item"])
-    return render_template("admin/reports.html", reports=rows, sets=list(sets.values()), reasons=sharing.REASONS,
+    dm_reports = [(r, dms.report_context(r), db.session.get(User, r.sender_id) if r.sender_id else None)
+                  for r in db.session.scalars(select(DirectReport).where(DirectReport.resolved.is_(False))
+                                              .order_by(DirectReport.created_at.desc()))]
+    return render_template("admin/reports.html", reports=rows, sets=list(sets.values()), reasons=sharing.REASONS, dm_reports=dm_reports,
                            strikes_to_block=sharing.STRIKES_TO_BLOCK)
 
 

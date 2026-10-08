@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Message {{ other.display_name }}{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="small muted"><a href="{{ url_for('chat.index') }}">Chat</a></div><h1>Message {{ other.display_name }}</h1>
+  <p class="muted">Your first message is a request. {{ other.display_name }} can accept, decline or block it, and you can't send more until they accept.</p></div></div>
+{% if not current_user.chat_agreed_at %}{% with next=request.path %}{% include "chat/_rules.html" %}{% endwith %}
+{% elif why %}<div class="card"><p>{{ why }}</p><a class="btn btn-ghost" href="{{ url_for('chat.index') }}">Back to chat</a></div>
+{% else %}
+<form method="post" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if course %}<p class="small muted">You're both in {{ course.name }}.</p>{% endif %}
+  <label for="body">Your message</label>
+  <textarea id="body" name="body" maxlength="1000" required placeholder="Hey, want to compare notes for the midterm?"></textarea>
+  <div class="btn-row mt"><button class="btn">Send request</button><a class="btn btn-ghost" href="{{ url_for('chat.index') }}">Cancel</a></div>
+</form>
+{% endif %}
+{% endblock %}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 from datetime import timedelta
@@ -195,6 +196,12 @@ BASE_SNAPSHOT = {
     "restricted": [{"endpoint": "/courses/102/files", "status": 403}],
     "errors": [],
 }
+
+# What extension 1.5.2+ sends for each class: the enrollment role, and the hashed Canvas uuid that
+# keys class chat rooms (services/dms.py).
+for _c in BASE_SNAPSHOT["courses"]:
+    _c.setdefault("enrollment_role", "student")
+    _c.setdefault("uuid_hash", hashlib.sha256(f"uuid-of-{_c['id']}".encode()).hexdigest())
 
 BASE_MANIFEST = [
     {"id": "9001", "updated_at": BASE_SNAPSHOT["courses"][0]["files"][0]["updated_at"], "size": 2048,

@@ -1,17 +1,51 @@
 {% extends "base.html" %}
 {% from "_macros.html" import empty %}
-{% block title %}Class chat{% endblock %}
+{% block title %}Chat{% endblock %}
 {% block content %}
-<div class="page-head"><div><h1>Class chat</h1><p class="muted">An opt-in room for each of your classes, shared with other Homework Hatch users whose Canvas includes the same class. We don't collect class rosters, so we can't confirm who's really enrolled: keep it to study talk.</p></div></div>
-{% if courses %}
-<div class="card">
-  <ul class="list">
-    {% for c in courses %}
-    <li><div class="grow"><a class="title" href="{{ url_for('chat.room', course_id=c.id) }}">{{ c.name }}</a>
-      <div class="small muted">{% if c.chat_joined %}Joined · {% endif %}{{ counts.get(c.room_key, 0) }} member{{ 's' if counts.get(c.room_key, 0) != 1 }}{% if last.get(c.room_key) %} · last message {{ last[c.room_key]|ago }}{% endif %}</div></div>
-      <a class="btn btn-ghost btn-sm" href="{{ url_for('chat.room', course_id=c.id) }}">Open</a></li>
-    {% endfor %}
-  </ul>
+<div class="page-head"><div><h1>Chat</h1><p class="muted">A room for each of your classes, shared with everyone who synced the same class to Homework Hatch, plus private messages with classmates.</p></div></div>
+{% if not current_user.chat_agreed_at %}{% with next=url_for('chat.index') %}{% include "chat/_rules.html" %}{% endwith %}{% endif %}
+{% if current_user.age_band == 'edge' and current_user.birth_month is none and current_user.birth_year %}
+<form method="post" action="{{ url_for('chat.birth_month') }}" class="card"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <p class="small">Your account has your birth year but not the month, so we can't tell whether you're 18 yet, and direct messages stay off until we can. Add your birth month (you can set it once):</p>
+  <div class="btn-row"><select name="birth_month" aria-label="Birth month" required><option value="">Month</option>
+    {% for m in ["January","February","March","April","May","June","July","August","September","October","November","December"] %}<option value="{{ loop.index }}">{{ m }}</option>{% endfor %}</select>
+    <button class="btn btn-sm">Save</button></div>
+</form>
+{% endif %}
+{% if needs_update %}<div class="flash">Update the Homework Hatch extension (version 1.5.2 or newer) and sync once to join your class chats. Newer versions show that you're really in each class, which keeps strangers out of class rooms.</div>{% endif %}
+<div class="grid grid-main mt">
+  <div class="card">
+    <h2>Messages</h2>
+    {% if convos %}
+    <ul class="list">
+      {% for t in convos %}{% set other = people.get(t.other(current_user.id)) %}
+      <li><div class="grow"><a class="title" href="{{ url_for('chat.dm', thread_id=t.id) }}">{{ other.display_name if other else 'Someone' }}</a>
+        <div class="small muted">{% if t.status == 'request' %}{{ 'Request sent' if t.started_by == current_user.id else 'Wants to message you' }} · {% elif t.status == 'declined' %}Not accepted · {% endif %}{{ t.last_message_at|ago }}</div></div>
+        {% if is_unread(t, current_user.id) and t.status != 'declined' %}<span class="badge accent">new</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="small muted">No messages yet. To message a classmate, open a class room and tap “Message” on something they posted.</p>{% endif %}
+    <form method="post" action="{{ url_for('chat.settings') }}" class="mt"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="allow_dms" value="{{ '0' if current_user.allow_dms else '1' }}">
+      <p class="small muted">{{ 'Classmates can send you message requests.' if current_user.allow_dms else 'New message requests are off.' }}
+        <button class="linklike">{{ 'Turn off' if current_user.allow_dms else 'Turn on' }}</button></p>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Class rooms</h2>
+    {% if courses %}
+    <ul class="list">
+      {% for c in courses %}
+      <li><div class="grow"><a class="title" href="{{ url_for('chat.room', course_id=c.id) }}"><span class="cdot" style="--c: {{ course_color(c.id) }}"></span>{{ c.name }}</a>
+        <div class="small muted">{{ counts.get(c.chat_key, 0) }} classmate{{ 's' if counts.get(c.chat_key, 0) != 1 }} on Homework Hatch{% if last.get(c.chat_key) %} · last message {{ last[c.chat_key]|ago }}{% endif %}</div></div></li>
+      {% endfor %}
+    </ul>
+    {% else %}{{ empty("💬", "Connect Canvas and your class rooms appear automatically.", url_for('settings.sync'), "Connect Canvas") }}{% endif %}
+    {% if muted %}<details class="mt"><summary class="small">Muted rooms ({{ muted|length }})</summary>
+      <ul class="list">{% for c in muted %}<li><a class="title" href="{{ url_for('chat.room', course_id=c.id) }}">{{ c.name }}</a></li>{% endfor %}</ul></details>{% endif %}
+    {% if blocked %}<details class="mt"><summary class="small">Blocked ({{ blocked|length }})</summary>
+      <ul class="list">{% for u in blocked %}<li><span class="grow">{% if blocked_threads.get(u.id) %}<a href="{{ url_for('chat.dm', thread_id=blocked_threads[u.id]) }}">{{ u.display_name }}</a>{% else %}{{ u.display_name }}{% endif %}</span>
+        <form method="post" action="{{ url_for('chat.unblock', user_id=u.id) }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost btn-sm">Unblock</button></form></li>{% endfor %}</ul></details>{% endif %}
+  </div>
 </div>
-{% else %}<div class="card">{{ empty("💬", "Connect Canvas and your class rooms appear automatically.", url_for('settings.sync'), "Connect Canvas") }}</div>{% endif %}
 {% endblock %}

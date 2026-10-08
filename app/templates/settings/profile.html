@@ -14,7 +14,7 @@
     <label>Email</label><input type="email" value="{{ current_user.email }}" disabled>
     <div class="form-row">
       <div><label for="grade_level">Grade / year</label><input id="grade_level" name="grade_level" type="text" value="{{ current_user.grade_level or '' }}"></div>
-      <div><label for="birth_year">Birth year</label><input id="birth_year" name="birth_year" type="number" value="{{ current_user.birth_year or '' }}"></div>
+      <div><label for="birth_year">Birth year</label><input id="birth_year" type="number" value="{{ current_user.birth_year or '' }}" readonly aria-describedby="birth-help"><p class="help" id="birth-help">Set when you signed up. To correct it, write to us from the Help page.</p></div>
     </div>
     <label for="timezone">Time zone</label>
     <select id="timezone" name="timezone">{% for tz in timezones() %}<option value="{{ tz }}" {{ 'selected' if tz == current_user.timezone }}>{{ tz }}</option>{% endfor %}<option value="UTC" {{ 'selected' if current_user.timezone == 'UTC' }}>UTC</option></select>

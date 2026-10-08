@@ -675,6 +675,8 @@ fieldset.chip-row, fieldset.method-grid { border: 0; padding: 0; margin: 0; min-
 }
 .learn > .flash { margin-bottom: 12px; }
 
+.nav-badge { margin-left: auto; font-size: .66rem; padding: 0 7px; }
+
 /* ---------- Brain Grade (courses/_brain_grade.html) ---------- */
 .brain-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .brain-head h2 { margin: 0; }

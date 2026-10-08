@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from ..extensions import db
 from ..models import User, utcnow
+from ..services import moderation
 from ..utils import log_activity
 
 bp = Blueprint("auth", __name__)
@@ -80,6 +81,8 @@ def register():
             errors.append("Enter a valid email address.")
         if not USERNAME_RE.match(username):
             errors.append("Usernames are 3–30 letters, numbers, dots, dashes or underscores.")
+        elif moderation.name_has_contact(username):  # it's the display name classmates see until changed
+            errors.append("Usernames can't include phone numbers, emails or social handles.")
         if len(password) < 8:
             errors.append("Use a password of at least 8 characters.")
         if session.get("age_blocked"):
@@ -111,7 +114,7 @@ def register():
             make_admin = not db.session.scalar(select(User.id).limit(1)) or (bool(admin_email) and email == admin_email)
         user = User(email=email, username=username, display_name=username,
                     timezone=valid_timezone(form.get("timezone")), accepted_terms_at=utcnow(),
-                    birth_year=int(form["birth_year"]),
+                    birth_year=int(form["birth_year"]), birth_month=int(form["birth_month"]),
                     is_admin=make_admin,
                     is_approved=make_admin or not current_app.config["REQUIRE_APPROVAL"])
         user.set_password(password)

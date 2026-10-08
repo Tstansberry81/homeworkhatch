@@ -239,11 +239,29 @@ function normAssignment(a, now, detail) {
   };
 }
 
+// The course's Canvas uuid, hashed with the school's host. Canvas shows the uuid only to people in
+// the course, so the site can tell real classmates apart (class chat rooms are keyed by it). Only the
+// hash is sent.
+export async function uuidHash(baseUrl, uuid) {
+  if (!uuid) return null;
+  const data = new TextEncoder().encode(`${new URL(baseUrl).host}|${uuid}`);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", data);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// "student", "teacher", "ta", "designer" or "observer": class chat is for students only.
+export function enrollmentRole(enrollments) {
+  const types = (enrollments || []).map((e) => String(e.type || e.role || "").toLowerCase().replace(/enrollment$/, ""));
+  if (types.includes("student")) return "student";
+  return types.find((t) => ["teacher", "ta", "designer", "observer"].includes(t)) || null;
+}
+
 function normCourse(c) {
   const enr = (c.enrollments || []).find((e) => e.type === "student" || e.type === "StudentEnrollment") || c.enrollments?.[0] || {};
   return {
     id: String(c.id),
     name: c.name,
+    enrollment_role: enrollmentRole(c.enrollments),
     course_code: c.course_code,
     class_key: classKey(c),
     on_dashboard: c.is_favorite ?? null,
@@ -323,6 +341,7 @@ export async function syncCanvas({ baseUrl, get, now = Date.now(), concurrency =
     const subsByAssignment = new Map((submissions || []).map((s) => [String(s.assignment_id), s]));
     return {
       ...normCourse({ ...c, __baseUrl: baseUrl }),
+      uuid_hash: await uuidHash(baseUrl, c.uuid).catch(() => null),
       assignment_groups: list(groups, (g) => ({
         id: String(g.id), name: g.name, weight: g.group_weight, position: g.position,
         drop_lowest: g.rules?.drop_lowest ?? 0, drop_highest: g.rules?.drop_highest ?? 0,
