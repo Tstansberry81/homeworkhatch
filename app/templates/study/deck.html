@@ -4,7 +4,7 @@
 {% block content %}
 {% set starred = deck.cards|selectattr('starred')|list|length %}
 <div class="page-head">
-  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · {{ deck.course.name }}{% endif %}{% if deck.source == 'import' %} · imported{% elif deck.source == 'copy' %} · saved from a shared set{% endif %}{% if deck.share_mode != 'private' %} · <a href="#share">shared</a>{% endif %}</div><h1>{{ deck.title }}</h1>
+  <div><div class="small muted"><a href="{{ url_for('study.index') }}">Flashcards</a>{% if deck.course %} · <span class="cdot" style="--c: {{ course_color(deck.course_id) }}"></span>{{ deck.course.name }}{% endif %}{% if deck.source == 'import' %} · imported{% elif deck.source == 'copy' %} · saved from a shared set{% endif %}{% if deck.share_mode != 'private' %} · <a href="#share">shared</a>{% endif %}</div><h1>{{ deck.title }}</h1>
     {% if deck.description %}<p class="muted">{{ deck.description }}</p>{% endif %}</div>
   <div class="btn-row">
     {% if deck.cards %}
@@ -19,7 +19,7 @@
   <h2>{{ deck.cards|length }} cards
     {% if starred %}<a href="{{ url_for('study.learn', deck=deck.id, starred=1) }}">Learn the {{ starred }} starred</a>{% endif %}</h2>
   <div class="table-wrap">
-  <table class="table">
+  <table class="table card-table">
     <thead><tr><th class="star-col"><span class="sr-only">Star</span></th><th style="width:40%">Front</th><th>Back</th><th></th></tr></thead>
     <tbody>
     {% for c in deck.cards %}
@@ -27,7 +27,7 @@
         <td class="star-col"><button type="button" class="star-btn" data-star-url="{{ url_for('study.star_card', card_id=c.id) }}" aria-pressed="{{ 'true' if c.starred else 'false' }}" aria-label="{{ 'Unstar' if c.starred else 'Star' }} card {{ loop.index }}">{{ '★' if c.starred else '☆' }}</button></td>
         <td colspan="2">
           {% if c.share_block and (deck.share_mode != 'private' or c.share_block != 'unchecked') %}<div class="small muted">Not shared: {{ share.notes[c.share_block] }}</div>{% endif %}
-          <form method="post" class="form-row" style="grid-template-columns:1fr 1.4fr auto;align-items:start">
+          <form method="post" class="form-row card-edit">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="edit"><input type="hidden" name="card_id" value="{{ c.id }}">
             <textarea name="front" style="min-height:44px" aria-label="Front of card {{ loop.index }}">{{ c.front }}</textarea>
             <textarea name="back" style="min-height:44px" aria-label="Back of card {{ loop.index }}">{{ c.back }}</textarea>

@@ -318,11 +318,12 @@ def ingest_snapshot(user: User, snapshot: dict, manifest: list[dict]) -> tuple[S
             db.session.add(course)
         term = c.get("term") or {}
         grade = c.get("grade") or {}
-        course.name = (c.get("name") or "Course")[:300]
-        course.course_code = (c.get("course_code") or "")[:200] or None
+        course.canvas_name = (c.get("name") or "Course")[:300]
+        course.canvas_code = (c.get("course_code") or "")[:200] or None
+        course.apply_custom()  # the student's own name and code for the class win over the LMS's
         course.term_id = _clip(term.get("id"), 64)
         course.term_name = _clip(term.get("name"), 200)
-        course.class_key = (c.get("class_key") or f"{course.term_id}::{course.name.lower()}")[:400]
+        course.class_key = (c.get("class_key") or f"{course.term_id}::{course.canvas_name.lower()}")[:400]
         # Class chat joins classmates by room_key. A calendar link's classes come from a guessable
         # name ("Calendar", "Zoom", the school's name), so they get a room only their account can
         # reach: "/" never appears in a host, so no Canvas snapshot can forge this key.

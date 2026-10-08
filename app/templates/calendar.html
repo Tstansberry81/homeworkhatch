@@ -41,19 +41,21 @@
 <div class="page-head">
   <div>
     <h1>{{ title }}</h1>
-    <p class="muted">{% if to_do or done %}{{ to_do }} to do{% if done %} · {{ done }} done{% endif %} · {% endif %}Due dates and {{ source_names(current_user) }} events in your time zone ({{ current_user.timezone }}).</p>
+    <p class="muted">{% if to_do or done %}{{ to_do }} to do{% if done %} · {{ done }} done{% endif %} · {% endif %}<span class="cal-tz">Due dates and {{ source_names(current_user) }} events in your time zone ({{ current_user.timezone }}).</span></p>
   </div>
-  <div class="btn-row">
-    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=prev.isoformat()) }}" aria-label="Previous {{ view }}">←</a>
-    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view) }}">Today</a>
-    <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=nxt.isoformat()) }}" aria-label="Next {{ view }}">→</a>
+  <div class="cal-controls">
+    <div class="btn-row">
+      <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=prev.isoformat()) }}" aria-label="Previous {{ view }}">←</a>
+      <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view) }}">Today</a>
+      <a class="btn btn-ghost" href="{{ url_for('main.calendar_view', view=view, d=nxt.isoformat()) }}" aria-label="Next {{ view }}">→</a>
+    </div>
+    <nav class="tabs cal-views" aria-label="Calendar view">
+      {% for v, label in [('day', 'Day'), ('week', 'Week'), ('month', 'Month')] %}
+      <a href="{{ url_for('main.calendar_view', view=v, d=anchor.isoformat()) }}" class="{{ 'active' if v == view }}"{% if v == view %} aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
   </div>
 </div>
-<nav class="tabs cal-views" aria-label="Calendar view">
-  {% for v, label in [('day', 'Day'), ('week', 'Week'), ('month', 'Month')] %}
-  <a href="{{ url_for('main.calendar_view', view=v, d=anchor.isoformat()) }}" class="{{ 'active' if v == view }}"{% if v == view %} aria-current="page"{% endif %}>{{ label }}</a>
-  {% endfor %}
-</nav>
 
 {% if view == 'month' %}
 <div class="card" style="padding:10px">

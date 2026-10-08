@@ -185,8 +185,15 @@ class Course(db.Model):
     user_id: Mapped[int] = mapped_column(ForeignKey("user.id", ondelete="CASCADE"), index=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("canvas_account.id", ondelete="CASCADE"), index=True)
     canvas_id: Mapped[str] = mapped_column(String(64))
+    # name and course_code are what the app shows everywhere: the student's own name and short code
+    # for the class (Customize tab) when set, else the LMS's. Syncs only update canvas_name/canvas_code.
     name: Mapped[str] = mapped_column(String(300))
     course_code: Mapped[str | None] = mapped_column(String(200))
+    canvas_name: Mapped[str | None] = mapped_column(String(300))
+    canvas_code: Mapped[str | None] = mapped_column(String(200))
+    custom_name: Mapped[str | None] = mapped_column(String(300))
+    custom_code: Mapped[str | None] = mapped_column(String(200))
+    color: Mapped[str | None] = mapped_column(String(7))  # one of utils.CLASS_COLORS, or None for the default
     term_id: Mapped[str | None] = mapped_column(String(64))
     term_name: Mapped[str | None] = mapped_column(String(200))
     # Sections of one class (lecture/discussion shells) share a class_key.
@@ -223,6 +230,11 @@ class Course(db.Model):
                                                              order_by="Announcement.posted_at.desc()")
     discussions: Mapped[list[Discussion]] = relationship(cascade="all, delete-orphan")
     files: Mapped[list[CanvasFile]] = relationship(cascade="all, delete-orphan", order_by="CanvasFile.name")
+
+    def apply_custom(self) -> None:
+        """Show the student's name and code for the class where they set one, else the LMS's."""
+        self.name = (self.custom_name or self.canvas_name or self.name or "Course")[:300]
+        self.course_code = self.custom_code or self.canvas_code
 
     @property
     def code(self) -> str:

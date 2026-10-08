@@ -19,7 +19,7 @@ from ..config import BASE_DIR
 from ..extensions import csrf, db
 from ..models import Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, calendar_token_hash, utcnow
 from ..services import cards_io, feeds, ics, integrations, planner
-from ..utils import local_now, log_activity, to_local, user_zone
+from ..utils import lasting_url, local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
 
 bp = Blueprint("main", __name__)
@@ -351,7 +351,7 @@ def calendar_view():
     # The counts cover what the view is about: the day, the week, or the month without its neighbours' days.
     shown = [anchor] if view == "day" else [d for week in weeks for d in week if view == "week" or d.month == first.month]
     assignments = [item for d in shown for kind, item in by_day.get(d, []) if kind == "assignment"]
-    feed_url = url_for("main.ics_feed", token=current_user.calendar_token, _external=True)
+    feed_url = lasting_url("main.ics_feed", token=current_user.calendar_token)
     return render_template("calendar.html", view=view, title=title, weeks=weeks, anchor=anchor, first=first,
                            today=today, by_day=by_day, prev=prev, nxt=nxt,
                            to_do=sum(1 for a in assignments if not a.excused and queries.still_to_do(a, utcnow())),

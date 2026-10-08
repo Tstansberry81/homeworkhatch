@@ -7,7 +7,7 @@
   <div class="card-flat small">{% if remaining is none %}AI actions: unlimited{% else %}<strong>{{ remaining }}</strong> AI action{{ 's' if remaining != 1 }} left{% if current.monthly %} this month ({{ used }} used){% else %} of your free {{ current.ai_actions }}{% endif %}{% endif %}
     {% if current.key == 'pass' and current_user.plan_expires_at and not current_user.plan_comped %}<br>Pass runs until <strong>{{ current_user.plan_expires_at|dt('date') }}</strong>{% endif %}</div>
 </div>
-{% if not enabled %}<div class="flash">Payments aren't set up on this server yet.</div>{% endif %}
+{% if not enabled %}<div class="flash mb">Payments aren't set up on this server yet.</div>{% endif %}
 <div class="grid grid-3">
   {% for p in plans %}
   <div class="card" style="{{ 'border-color:var(--accent);border-width:2px' if p.key == current.key }}">

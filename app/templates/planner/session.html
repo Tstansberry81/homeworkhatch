@@ -15,7 +15,7 @@
   {% if s.done_at %}<span class="badge done">Done</span>{% endif %}
 </div>
 
-<div class="grid grid-main">
+<div class="grid grid-main session-grid">
   <div>
     <section class="card" aria-labelledby="do-h">
       <h2 id="do-h">What to do</h2>
@@ -96,7 +96,7 @@
         <input type="hidden" name="minutes" id="done-minutes" value="{{ s.minutes_done or 0 }}">
         {% if needs_page %}<input type="hidden" name="notes" value="">{% endif %}
         {% if s.done_at %}<input type="hidden" name="undo" value="1"><button class="linklike small">Mark as not done</button>
-        {% else %}<button class="btn btn-block">I'm done</button>{% endif %}
+        {% else %}<button class="btn btn-ghost btn-block">I'm done</button>{% endif %}
       </form>
       <details class="mt"><summary class="small">Timer style</summary>
         <form method="post" action="{{ plan_url }}" class="mt">{{ csrf() }}<input type="hidden" name="action" value="pacing">

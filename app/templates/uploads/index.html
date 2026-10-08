@@ -4,7 +4,7 @@
 <div class="page-head"><div><h1>My files</h1><p class="muted">Your own notes, readings and study guides, from your computer or Google Drive. File them under a class and use them for flashcards, quizzes and the tutor, just like Canvas files.</p></div>
   <a class="btn" href="{{ url_for('study.generate', course=none) }}">Make flashcards or a quiz</a></div>
 <div class="grid grid-main">
-  <div class="card">
+  <div class="card files-list{{ ' is-empty' if not rows }}">
     <h2>Your files</h2>
     {% if rows %}
     <ul class="list">
@@ -32,7 +32,7 @@
       </li>
       {% endfor %}
     </ul>
-    {% else %}<p class="muted">Nothing here yet. Add files on the right.</p>{% endif %}
+    {% else %}<p class="muted">Nothing here yet. Upload a file to get started.</p>{% endif %}
   </div>
   <div>
     <form method="post" action="{{ url_for('uploads.upload') }}" enctype="multipart/form-data" class="card" id="upload-form">
@@ -40,7 +40,7 @@
       <h2>Upload from your computer</h2>
       <label class="dropzone" id="drop">
         <input type="file" name="files" multiple id="file-input" hidden>
-        <strong>Drop files here</strong> or click to choose<br><span class="small muted">PDF, Word, PowerPoint or text files · up to {{ config.MAX_FILE_MB }} MB each</span>
+        <strong>Choose files</strong><span class="no-touch"> or drop them here</span><br><span class="small muted">PDF, Word, PowerPoint or text files · up to {{ config.MAX_FILE_MB }} MB each</span>
       </label>
       <label for="upload-course">Class <span class="hint">(optional)</span></label>
       <select id="upload-course" name="course_id"><option value="">No class</option>{% for c in courses %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}</select>
@@ -68,7 +68,7 @@
 (() => {
   const input = document.getElementById("file-input"), drop = document.getElementById("drop"), btn = document.getElementById("upload-btn");
   const show = () => { const n = input.files.length; btn.disabled = !n; btn.textContent = n ? `Upload ${n} file${n === 1 ? "" : "s"}` : "Upload";
-    drop.querySelector("strong").textContent = n ? [...input.files].map((f) => f.name).join(", ") : "Drop files here"; };
+    drop.querySelector("strong").textContent = n ? [...input.files].map((f) => f.name).join(", ") : "Choose files"; };
   input.addEventListener("change", show);
   ["dragover", "dragenter"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove("over")));

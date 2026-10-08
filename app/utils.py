@@ -176,6 +176,14 @@ def body_limit(max_bytes: int, message: str, json: bool = False):
 _ID = re.compile(r"[0-9]{1,18}")
 
 
+def lasting_url(endpoint: str, **values) -> str:
+    """An absolute link people keep or pass on, on the site's canonical address when one is set."""
+    from flask import current_app
+
+    base = current_app.config.get("CANONICAL_URL")
+    return base + url_for(endpoint, **values) if base else url_for(endpoint, _external=True, **values)
+
+
 def parse_id(value) -> int | None:
     """A database id from a form, a query string or JSON: plain ASCII digits only ("²" and "٣"
     pass str.isdigit() but aren't ids), else None."""
@@ -193,12 +201,32 @@ def clamp(value, low, high):
     return max(low, min(high, value))
 
 
-# Class colors: fills that read on paper and on ink, paired with an ink outline in the CSS.
-CLASS_COLORS = ("#ffc629", "#ff8a65", "#7b9bff", "#3ddc8a", "#c3a6ff", "#5fd3e0", "#ff7eb6", "#b8e05a")
+# Class colors: fills that read on paper and on ink, paired with an ink outline in the CSS. The first
+# eight are the defaults (picked by class id); a student can choose any of them on a class's Customize tab.
+CLASS_COLORS = ("#ffc629", "#ff8a65", "#7b9bff", "#3ddc8a", "#c3a6ff", "#5fd3e0", "#ff7eb6", "#b8e05a",
+                "#ffe08a", "#ffb38a", "#a9bcff", "#8ff0bd", "#e2d1ff", "#9fe8f0", "#ffb3d4", "#d9f08f")
+
+
+def _custom_colors() -> dict[int, str]:
+    """The signed-in student's chosen class colors, read once per request."""
+    from flask import has_request_context, request
+
+    if not has_request_context() or not current_user or not current_user.is_authenticated:
+        return {}
+    cache = request.environ.get("hh.course_colors")
+    if cache is None:
+        from sqlalchemy import select
+
+        from .models import Course
+
+        cache = dict(db.session.execute(select(Course.id, Course.color).where(
+            Course.user_id == current_user.id, Course.color.is_not(None))).all())
+        request.environ["hh.course_colors"] = cache
+    return cache
 
 
 def course_color(course_id: int | None) -> str:
-    return CLASS_COLORS[(course_id or 0) * 5 % len(CLASS_COLORS)]
+    return _custom_colors().get(course_id) or CLASS_COLORS[(course_id or 0) * 5 % 8]
 
 
 def countdown(dt: datetime | None) -> tuple[str, str]:

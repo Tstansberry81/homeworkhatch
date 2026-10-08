@@ -245,7 +245,8 @@ def _register_cli(app: Flask) -> None:
         user = db.session.scalar(select(User).where(User.username == "demo"))
         if user is None:
             user = User(email="demo@example.com", username="demo", display_name="Demo", accepted_terms_at=utcnow(),
-                        onboarded=True, timezone="America/New_York", keep_all_files=True)  # synthetic files only
+                        onboarded=True, timezone="America/New_York", keep_all_files=True,  # synthetic files only
+                        birth_year=2004)  # an adult, so the one-time age check doesn't stand in front of the demo
             user.set_password("demo12345")
             db.session.add(user)
             db.session.commit()

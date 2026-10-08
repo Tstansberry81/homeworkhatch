@@ -31,6 +31,7 @@ class Source:
     note: str  # why it isn't ready, for the picker
     url: str | None
     size: int | None = None
+    group: str = ""  # the picker's collapsible section: "Files", "Files · Week 1", "Pages", "Your uploads"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -58,23 +59,32 @@ def for_course(user: User, course_id: int | None) -> list[Source]:
         course = db.session.get(Course, course_id)
         if course is None or course.user_id != user.id:
             return []
+        files = []
         for f in course.listed_files:
             status, note = _file_status(f.text_status, bool(f.storage_key))
-            out.append(Source(f"file:{f.id}", "file", f.name, course.id, status, note,
-                              url_for("courses.file_detail", file_id=f.id), f.size))
+            files.append(Source(f"file:{f.id}", "file", f.name, course.id, status, note,
+                                url_for("courses.file_detail", file_id=f.id), f.size, _folder(f.path)))
+        out += sorted(files, key=lambda s: (s.group != "Files", s.group.lower(), s.title.lower()))
         pages = db.session.scalars(select(Page).where(Page.course_id == course.id, Page.body_html.is_not(None))
                                    .order_by(Page.title)).all()
         for p in pages:
             out.append(Source(f"page:{p.id}", "page", p.title, course.id, "ready", "",
-                              url_for("courses.page", page_id=p.id)))
+                              url_for("courses.page", page_id=p.id), group="Pages"))
     uploads = db.session.scalars(select(Upload).where(Upload.user_id == user.id, Upload.course_id.is_(course_id)
                                                       if course_id is None else Upload.course_id == course_id)
                                  .order_by(Upload.created_at.desc())).all()
     for u in uploads:
         status, note = _file_status(u.text_status, bool(u.storage_key))
         out.append(Source(f"upload:{u.id}", "upload", u.name, u.course_id, status, note,
-                          url_for("uploads.download", upload_id=u.id), u.size))
+                          url_for("uploads.download", upload_id=u.id), u.size, "Your uploads"))
     return out
+
+
+def _folder(path: str | None) -> str:
+    """A Canvas file's folder as a picker section: "Calculus I/Week 1/notes.pdf" -> "Files · Week 1"
+    (the first part is the class's own top folder)."""
+    parts = [p for p in (path or "").split("/") if p][1:-1]
+    return "Files · " + " / ".join(parts)[:80] if parts else "Files"
 
 
 def parse(refs) -> list[tuple[str, int]]:

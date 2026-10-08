@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from ..extensions import db
 from ..models import Deck, LiveAnswer, LivePlayer, LiveSession, PracticeQuiz, utcnow
 from ..services import coins, moderation, sharing
+from ..utils import lasting_url
 
 bp = Blueprint("live", __name__, url_prefix="/live")
 
@@ -158,7 +159,8 @@ def host(code: str):
     s = _session(code)
     if s.host_id != current_user.id:
         abort(403)
-    return render_template("live/host.html", s=s, join_url=url_for("live.join", code=s.code, _external=True))
+    return render_template("live/host.html", s=s, join_url=lasting_url("live.join", code=s.code),
+                           join_base=lasting_url("live.join"))
 
 
 @bp.route("/<code>/control", methods=["POST"])

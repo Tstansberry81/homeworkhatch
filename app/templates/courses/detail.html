@@ -5,7 +5,7 @@
 <div class="page-head">
   <div>
     <div class="small muted">{{ course.term_name or '' }}{% if course.code %} · {{ course.code }}{% endif %}</div>
-    <h1>{{ course.name }}</h1>
+    <h1><span class="cdot" style="--c: {{ course_color(course.id) }}"></span>{{ course.name }}</h1>
   </div>
   <div class="btn-row">
     {% if ai_available %}
@@ -17,7 +17,7 @@
 </div>
 
 <nav class="tabs">
-  {% for key, label in [("overview", "Overview"), ("assignments", "Assignments"), ("grades", "Grades"), ("modules", "Modules"), ("pages", "Pages"), ("files", "Files"), ("announcements", "Announcements")] %}
+  {% for key, label in [("overview", "Overview"), ("assignments", "Assignments"), ("grades", "Grades"), ("modules", "Modules"), ("pages", "Pages"), ("files", "Files"), ("announcements", "Announcements"), ("customize", "Customize")] %}
   <a href="{{ url_for('courses.detail', course_id=course.id, tab=key) }}" class="{{ 'active' if tab == key }}">{{ label }}</a>
   {% endfor %}
 </nav>
@@ -56,19 +56,19 @@
 </div>
 
 {% elif tab == "grades" %}
-<div class="grid grid-main">
+<div class="grid grid-main whatif-grid">
   <div class="card">
     <h2>What-if calculator</h2>
     <p class="small muted">Type a hypothetical score for anything (graded or not) to see how your grade would move. Nothing is saved or sent to Canvas.</p>
     <div class="table-wrap">
     <table class="table" id="whatif">
-      <thead><tr><th>Assignment</th><th>Group</th><th class="right">Score</th><th class="right">Out of</th></tr></thead>
+      <thead><tr><th>Assignment</th><th class="col-group">Group</th><th class="right">Score</th><th class="right">Out of</th></tr></thead>
       <tbody>
       {% for a in course.assignments if a.points_possible is not none and not a.excused %}
       <tr>
         <td><a href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a> {% if a.id in (grade.groups|map(attribute='dropped')|sum(start=[])) %}<span class="badge">dropped</span>{% endif %}</td>
-        <td class="small muted">{% for g in course.groups if g.canvas_id == a.group_canvas_id %}{{ g.name }}{% endfor %}</td>
-        <td class="right"><input type="number" step="any" style="width:90px;text-align:right" data-aid="{{ a.id }}" placeholder="{{ '%g' % a.score if a.score is not none and a.status == 'graded' else '—' }}"></td>
+        <td class="small muted col-group">{% for g in course.groups if g.canvas_id == a.group_canvas_id %}{{ g.name }}{% endfor %}</td>
+        <td class="right"><input type="number" step="any" inputmode="decimal" class="whatif-in" data-aid="{{ a.id }}" placeholder="{{ '%g' % a.score if a.score is not none and a.status == 'graded' else '—' }}"></td>
         <td class="right">{{ '%g' % a.points_possible }}</td>
       </tr>
       {% endfor %}
@@ -76,7 +76,7 @@
     </table>
     </div>
   </div>
-  <div>
+  <div class="whatif-side">
     <div class="card stat">
       <div class="label">Calculated from synced scores</div>
       <div class="value" id="calc">{{ '%.2f' % grade.percent ~ '%' if grade.percent is not none else '—' }}</div>
@@ -187,6 +187,27 @@
 <div class="card"><h2>{{ n.title }}</h2><div class="small muted mb">{{ n.author or '' }} · {{ n.posted_at|dt('long') }}</div>
   <div class="prose">{{ n.message_html|canvas_html(base_url)|safe }}</div></div>
 {% else %}<div class="card">{{ empty("📣", "No recent announcements.") }}</div>{% endfor %}
+
+{% elif tab == "customize" %}
+<form method="post" action="{{ url_for('courses.customize', course_id=course.id) }}" class="card customize">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h2>Make it yours</h2>
+  <p class="small muted">Only you see these. They show everywhere this class appears: your dashboard, calendar, flashcards, quizzes, exam planner, tutor and Google Calendar. Syncing never changes them.</p>
+  <div class="form-row">
+    <div><label for="c-name">Name</label>
+      <input id="c-name" name="name" type="text" maxlength="300" value="{{ course.custom_name or '' }}" placeholder="{{ course.canvas_name or course.name }}">
+      <p class="help">From your school: {{ course.canvas_name or course.name }}</p></div>
+    <div><label for="c-code">Short name <span class="hint">(menus and calendar)</span></label>
+      <input id="c-code" name="code" type="text" maxlength="200" value="{{ course.custom_code or '' }}" placeholder="{{ course.canvas_code or 'e.g. CHEM 1410' }}">
+      {% if course.canvas_code %}<p class="help">From your school: {{ course.canvas_code }}</p>{% endif %}</div>
+  </div>
+  <fieldset class="swatches mt"><legend>Color</legend>
+    {% for c in colors %}<label class="swatch" style="--c: {{ c }}" title="{{ c }}"><input type="radio" name="color" value="{{ c }}" {{ 'checked' if current_color == c }}><span class="sr-only">Color {{ loop.index }}</span></label>{% endfor %}
+  </fieldset>
+  <label class="check mt"><input type="hidden" name="hidden" value="0"><input type="checkbox" name="hidden" value="1" {{ 'checked' if course.hidden }}> Hide this class from my dashboard and lists</label>
+  <div class="btn-row mt"><button class="btn">Save</button>
+    {% if course.custom_name or course.custom_code or course.color %}<button class="btn btn-ghost" name="action" value="reset" formnovalidate>Reset to my school's name and color</button>{% endif %}</div>
+</form>
 {% endif %}
 {% endblock %}
 

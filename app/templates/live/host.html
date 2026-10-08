@@ -10,7 +10,7 @@
 <div class="grid grid-main">
   <div class="card" id="stage">
     <div id="lobby" class="center">
-      <p class="muted">Players join at <strong>{{ url_for('live.join', _external=True) }}</strong> with code</p>
+      <p class="muted">Players join at <strong>{{ join_base }}</strong> with code</p>
       <div class="live-code">{{ s.code }}</div>
       <p class="muted small">Or share <span id="joinurl">{{ join_url }}</span> <button class="btn btn-ghost btn-sm" data-copy="#joinurl">Copy link</button></p>
       <p id="names" class="mt"></p>
