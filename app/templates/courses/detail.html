@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import assignment_row, grade_text, status_badge, empty %}
+{% from "_macros.html" import assignment_row, csrf, grade_text, status_badge, empty %}
 {% block title %}{{ course.name }}{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -56,7 +56,8 @@
 </div>
 
 {% elif tab == "grades" %}
-<div class="grid grid-main whatif-grid">
+{% if split %}{% include "courses/_brain_grade.html" %}{% endif %}
+<div class="grid grid-main whatif-grid mt">
   <div class="card">
     <h2>What-if calculator</h2>
     <p class="small muted">Type a hypothetical score for anything (graded or not) to see how your grade would move. Nothing is saved or sent to Canvas.</p>
@@ -66,7 +67,20 @@
       <tbody>
       {% for a in course.assignments if a.points_possible is not none and not a.excused %}
       <tr>
-        <td><a href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a> {% if a.id in (grade.groups|map(attribute='dropped')|sum(start=[])) %}<span class="badge">dropped</span>{% endif %}</td>
+        <td><a href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a> {% if a.id in (grade.groups|map(attribute='dropped')|sum(start=[])) %}<span class="badge">dropped</span>{% endif %}
+          {% set j = split.labels.get(a.id) if split else none %}{% if j %}
+          <details class="label-chip"><summary class="badge {{ 'kind-' ~ j.kind if j.is_test else '' }}" title="Counts toward your {{ 'test grade' if j.is_test else 'everything-else grade' }}: {{ j.why() }}">{{ j.kind|title if j.is_test else 'Other' }}</summary>
+            <form method="post" action="{{ url_for('planner.choice') }}" class="label-pop">{{ csrf() }}
+              <input type="hidden" name="item" value="a:{{ a.id }}"><input type="hidden" name="next" value="{{ url_for('courses.detail', course_id=course.id, tab='grades') }}">
+              <p class="small muted">{{ 'Counts as a test because: ' if j.is_test else 'Counts as everything else: ' }}{{ j.why() }}</p>
+              <label class="check small"><input type="checkbox" name="scope" value="family"> Same for everything like it</label>
+              <div class="btn-row mt">
+                <button class="btn btn-ghost btn-sm" name="kind" value="test">Test</button>
+                <button class="btn btn-ghost btn-sm" name="kind" value="quiz">Quiz</button>
+                <button class="btn btn-ghost btn-sm" name="kind" value="none">Not a test</button>
+              </div>
+            </form>
+          </details>{% endif %}</td>
         <td class="small muted col-group">{% for g in course.groups if g.canvas_id == a.group_canvas_id %}{{ g.name }}{% endfor %}</td>
         <td class="right"><input type="number" step="any" inputmode="decimal" class="whatif-in" data-aid="{{ a.id }}" placeholder="{{ '%g' % a.score if a.score is not none and a.status == 'graded' else '—' }}"></td>
         <td class="right">{{ '%g' % a.points_possible }}</td>
@@ -213,6 +227,7 @@
 
 {% block scripts %}
 {% if tab == "grades" %}
+<script src="{{ url_for('static', filename='js/splitcard.js') }}"></script>
 <script>
 (() => {
   const inputs = document.querySelectorAll("#whatif input[data-aid]");

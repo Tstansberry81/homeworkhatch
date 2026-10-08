@@ -675,6 +675,36 @@ fieldset.chip-row, fieldset.method-grid { border: 0; padding: 0; margin: 0; min-
 }
 .learn > .flash { margin-bottom: 12px; }
 
+/* ---------- Brain Grade (courses/_brain_grade.html) ---------- */
+.brain-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.brain-head h2 { margin: 0; }
+.brain-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.brain-num { border: 1.5px solid var(--hair); border-radius: 12px; padding: 12px 14px; background: var(--surface-2); }
+.brain-num.tests { border-color: var(--line); background: var(--yolk-soft); box-shadow: 2px 2px 0 var(--shadow-color); }
+.brain-num .label { font: 600 .72rem var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.brain-num .value { font: 800 1.9rem/1.1 var(--display); letter-spacing: -.03em; margin: 4px 0 2px; }
+.brain-msg { font-weight: 600; margin: 14px 0 6px; }
+.brain-lost { list-style: none; margin: 8px 0 0; padding: 0; }
+.brain-lost li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1.5px dashed var(--hair); }
+.brain-lost li:last-child { border-bottom: 0; }
+.brain-lost strong { font-family: var(--mono); white-space: nowrap; }
+.label-chip { display: inline-block; position: relative; vertical-align: middle; }
+.table-wrap:has(.label-chip[open]) { overflow: visible; }
+.label-chip > summary { list-style: none; cursor: pointer; }
+.label-chip > summary::-webkit-details-marker { display: none; }
+.label-pop { position: absolute; z-index: 6; left: 0; top: calc(100% + 6px); width: min(300px, 80vw); padding: 12px; background: var(--surface);
+  border: 1.5px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.share-card { border: 0; padding: 0; background: transparent; max-width: min(460px, 94vw); }
+.share-card::backdrop { background: rgb(0 0 0 / .55); }
+.share-card canvas { width: 100%; height: auto; border-radius: 12px; border: 1.5px solid var(--line); margin-top: 6px; }
+@media (max-width: 640px) {
+  .brain-nums { gap: 6px; }
+  .brain-num { padding: 10px 8px; }
+  .brain-num .value { font-size: 1.35rem; }
+  .brain-num .label { font-size: .62rem; letter-spacing: .02em; }
+  .label-pop { position: static; width: auto; margin-top: 6px; }
+}
+
 /* ---------- phones (iPhone pass) ---------- */
 .prose > h1:first-child { margin-top: 0; }
 .shared-set > .flash { margin-bottom: 14px; }

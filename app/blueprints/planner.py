@@ -226,10 +226,24 @@ def choice():
     """"Is this a test?" Yes (with a kind) or No, for one item or the whole series."""
     item = request.form.get("item", "")
     kind = request.form.get("kind", "none")
-    if not (item.startswith(("a:", "e:")) and item[2:].isdigit()) or kind not in KINDS + ("none",):
+    ident = item[2:]
+    if not (item.startswith(("a:", "e:")) and ident.isascii() and ident.isdigit() and len(ident) <= 18) \
+            or kind not in KINDS + ("none",):
         abort(400)
     found = next((f for f in assessments.find(current_user, include_none=True)
                   if f.key == item or (f.event and f"e:{f.event.id}" == item)), None)
+    back = _local_path(request.form.get("next"))
+    if found is None and item.startswith("a:"):
+        # Past or graded work (the Brain Grade labels on a class's Grades tab): not in find()'s window.
+        a = db.session.get(Assignment, int(item[2:]))
+        if a is None or a.course.user_id != current_user.id:
+            abort(404)
+        judged = assessments.judge_course(current_user.id, a.course)[a.id]
+        family = f"family:{assessments.family_id(judged.family, judged.natural)}"
+        _save_choice(a.course_id, family if request.form.get("scope") == "family" else item, kind)
+        db.session.commit()
+        flash(f"Got it: {a.name} {'counts as a test' if kind != 'none' else 'is not a test'}.", "info")
+        return redirect(back or url_for("courses.detail", course_id=a.course_id, tab="grades"))
     if found is None:
         abort(404)
     course_id = found.course.id
@@ -253,9 +267,28 @@ def choice():
                               assignment=found.assignment, event=found.event, share=found.share, hints=found.hints)
         db.session.commit()
         return redirect(url_for("planner.plan", plan_id=plan.id))
-    if kind == "none":
-        flash(f"Got it: {found.title} isn't a test.", "info")
-    return redirect(url_for("planner.index"))
+    flash(f"Got it: {found.title} {'is not a test' if kind == 'none' else 'counts as a test'}.", "info")
+    return redirect(back or url_for("planner.index"))
+
+
+def _local_path(value: str | None) -> str | None:
+    """A same-site path to go back to, or None (no scheme, host, backslash or control characters)."""
+    from urllib.parse import urlsplit
+
+    if not value or not value.startswith("/") or any(ord(ch) < 0x21 or ch == "\\" for ch in value):
+        return None
+    parts = urlsplit(value)
+    return value if not parts.scheme and not parts.netloc else None
+
+
+def _save_choice(course_id: int, key: str, kind: str) -> None:
+    row = db.session.scalar(select(AssessmentChoice).where(AssessmentChoice.user_id == current_user.id,
+                                                           AssessmentChoice.course_id == course_id,
+                                                           AssessmentChoice.item == key))
+    if row is None:
+        row = AssessmentChoice(user_id=current_user.id, course_id=course_id, item=key, kind=kind)
+        db.session.add(row)
+    row.kind = kind
 
 
 @bp.route("/choice/<int:choice_id>/delete", methods=["POST"])

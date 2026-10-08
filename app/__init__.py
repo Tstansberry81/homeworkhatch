@@ -126,6 +126,9 @@ def _register_template_helpers(app: Flask) -> None:
     app.jinja_env.globals["source_names"] = feed_service.source_names  # "Canvas", "Brightspace and Moodle"...
     from .services.study import render_markdown
     app.jinja_env.filters["md"] = render_markdown  # AI text: `code`, **bold**, lists; math stays for KaTeX
+    from .services.split import letter
+
+    app.jinja_env.globals["letter"] = letter  # Brain Grade's share card
     app.jinja_env.globals["now_utc"] = utcnow
 
     @app.context_processor

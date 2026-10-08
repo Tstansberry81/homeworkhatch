@@ -306,6 +306,10 @@ class Assignment(db.Model):
     missing: Mapped[bool] = mapped_column(Boolean, default=False)
     excused: Mapped[bool] = mapped_column(Boolean, default=False)
     workflow_state: Mapped[str | None] = mapped_column(String(40))
+    # Canvas's late policy: points it took off for lateness, and the status a teacher set ("late",
+    # "missing", "extended", "none"). None from extensions older than 1.5.1 (services/split.py copes).
+    points_deducted: Mapped[float | None] = mapped_column(EncryptedFloat("assignment.points_deducted"))
+    late_policy_status: Mapped[str | None] = mapped_column(String(20))
     rubric: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.rubric"), deferred=True, deferred_group="assignment_detail")
     comments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.comments"), deferred=True, deferred_group="assignment_detail")
     attachments: Mapped[list | None] = mapped_column(EncryptedJSON("assignment.attachments"), deferred=True, deferred_group="assignment_detail")

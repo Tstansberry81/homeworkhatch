@@ -716,6 +716,63 @@ def _judge(it: Item, course_id: int, key: str, exact: dict, family: dict) -> tup
 DONE_STATUSES = {"graded", "submitted", "submitted_late", "excused"}
 
 
+def _assignment_item(a, group_names: dict, n_groups: int, shares: dict) -> Item:
+    return Item(name=a.name, submission_types=a.submission_types or [], is_quiz=bool(a.is_quiz),
+                points_possible=a.points_possible, grading_type=a.grading_type,
+                omit_from_final_grade=bool(a.omit_from_final_grade), unlock_at=a.unlock_at, lock_at=a.lock_at,
+                due_at=a.due_at, description_html=a.description_html, rubric=a.rubric,
+                group_name=group_names.get(a.group_canvas_id), group_count=n_groups, share=shares.get(a.id))
+
+
+@dataclass
+class Judged:
+    """One assignment's verdict for the whole course (past items too): what it is, how sure, why."""
+    kind: str  # final / midterm / test / quiz / none
+    confidence: str  # user / high / medium / low
+    family: str
+    natural: str
+    reasons: list
+    share: float | None
+
+    @property
+    def is_test(self) -> bool:
+        return self.kind in KINDS and self.confidence in ("user", "high", "medium")
+
+    def why(self, limit: int = 2) -> str:
+        if self.confidence == "user":
+            return "you said so"
+        reasons = sorted((r for r in self.reasons if r[0] > 0), key=lambda r: -r[0])[:limit]
+        return "; ".join(text for _w, _code, text in reasons) or "looks like regular coursework"
+
+
+def judge_course(user_id: int, course, assignments=None, groups=None) -> dict[int, Judged]:
+    """Every assignment in one course, judged test or not, with the student's own answers winning
+    (services/split.py's Brain Grade). Unlike find(), it covers past and graded work."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import undefer_group
+
+    from ..extensions import db
+    from ..models import Assignment, AssignmentGroup
+
+    if groups is None:
+        groups = db.session.scalars(select(AssignmentGroup).where(AssignmentGroup.course_id == course.id)).all()
+    if assignments is None:
+        assignments = db.session.scalars(select(Assignment).options(undefer_group("assignment_detail"))
+                                         .where(Assignment.course_id == course.id)).all()
+    shares = grade_shares(
+        [{"id": a.id, "points_possible": a.points_possible, "omit_from_final_grade": a.omit_from_final_grade,
+          "group_id": a.group_canvas_id} for a in assignments],
+        [{"id": g.canvas_id, "weight": g.weight, "name": g.name} for g in groups], course.group_weighting)
+    group_names = {g.canvas_id: g.name for g in groups}
+    exact, family = _choices(user_id)
+    out = {}
+    for a in assignments:
+        it = _assignment_item(a, group_names, len(groups), shares)
+        r, natural = _judge(it, course.id, f"a:{a.id}", exact, family)
+        out[a.id] = Judged(r.kind, r.confidence, stem(a.name), natural.kind, r.reasons, shares.get(a.id))
+    return out
+
+
 def find(user, days: int = 60, back_hours: int = 12, include_none: bool = False) -> list[Found]:
     """Upcoming assessments (and undated ones) across the student's visible courses, soonest first.
     With include_none, items judged "not a test" come back too (kind "none"), for the review list."""
@@ -752,11 +809,7 @@ def find(user, days: int = 60, back_hours: int = 12, include_none: bool = False)
                                         .where(Assignment.id.in_(ids))).all()
         pairs = []  # (item, result, natural result, assignment)
         for a in window:
-            it = Item(name=a.name, submission_types=a.submission_types or [], is_quiz=bool(a.is_quiz),
-                      points_possible=a.points_possible, grading_type=a.grading_type,
-                      omit_from_final_grade=bool(a.omit_from_final_grade), unlock_at=a.unlock_at, lock_at=a.lock_at,
-                      due_at=a.due_at, description_html=a.description_html, rubric=a.rubric,
-                      group_name=group_names.get(a.group_canvas_id), group_count=len(groups), share=shares.get(a.id))
+            it = _assignment_item(a, group_names, len(groups), shares)
             r, natural = _judge(it, course.id, f"a:{a.id}", exact, family)
             pairs.append((it, r, natural, a))
         events = []
