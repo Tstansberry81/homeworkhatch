@@ -20,10 +20,14 @@ def _iso(days: float, hour: int = 23, minute: int = 59) -> str:
 
 
 def _assignment(aid, name, group, due, points, status="upcoming", score=None, late=False, kind="online_upload",
-                desc=None, quiz=False, submitted=None):
+                desc=None, quiz=False, submitted=None, missing=None, deducted=None):
+    """`missing` marks graded work Canvas still calls missing (a zero for work never turned in);
+    `deducted` is points Canvas's late policy took off."""
+    missing = status == "missing" if missing is None else missing
     sub = {"workflow_state": "graded" if status == "graded" else ("submitted" if status.startswith("submitted") else "unsubmitted"),
-           "score": score, "late": late, "missing": status == "missing",
-           "submitted_at": submitted or (_iso(due - 0.5) if status in {"graded", "submitted", "submitted_late"} else None)}
+           "score": score, "late": late, "missing": missing, "points_deducted": deducted,
+           "late_policy_status": "missing" if missing and status == "graded" else ("late" if deducted else None),
+           "submitted_at": None if missing else (submitted or (_iso(due - 0.5) if status in {"graded", "submitted", "submitted_late"} else None))}
     return {"id": str(aid), "name": name, "group_id": group, "due_at": _iso(due), "points_possible": points,
             "submission_types": [kind], "status": status, "is_quiz": quiz,
             "html_url": f"{HOST}/courses/{str(aid)[:3]}/assignments/{aid}",
@@ -72,7 +76,10 @@ def snapshot() -> dict:
         ],
         "assignments": [
             _assignment(2101, "HW 1: Limits", "g1", -24, 20, "graded", 19),
-            _assignment(2102, "HW 2: Continuity", "g1", -17, 20, "graded", 12, late=True),
+            _assignment(2102, "HW 2: Continuity", "g1", -17, 20, "graded", 12, late=True, deducted=4),
+            _assignment(2111, "HW 2.5: Related rates", "g1", -13, 20, "graded", 0, missing=True),
+            _assignment(2113, "HW 3.5: Optimization", "g1", -8, 20, "graded", 0, missing=True),  # homework drops 1 zero
+            _assignment(2112, "Quiz 2: Limits", "g2", -15, 10, "graded", 10, kind="online_quiz", quiz=True),
             _assignment(2103, "HW 3: Derivative rules", "g1", -10, 20, "graded", 18),
             _assignment(2104, "HW 4: Chain rule", "g1", -3, 20, "submitted"),
             _assignment(2105, "HW 5: Implicit differentiation", "g1", 2, 20,

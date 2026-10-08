@@ -217,6 +217,9 @@ function normAssignment(a, now, detail) {
       late: Boolean(sub.late),
       missing: Boolean(sub.missing),
       excused: Boolean(sub.excused),
+      // Canvas's late policy (Brain Grade): points taken off for lateness, and a teacher-set status.
+      points_deducted: sub.points_deducted ?? null,
+      late_policy_status: sub.late_policy_status ?? null,
       workflow_state: sub.workflow_state,
       // A null posted_at on a graded submission means the teacher hasn't released it.
       grade_posted: sub.posted_at != null || sub.score != null,

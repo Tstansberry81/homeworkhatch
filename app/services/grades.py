@@ -63,18 +63,17 @@ def _drops(items: list[Scored], drop_lowest: int, drop_highest: int) -> tuple[li
     kept = list(items)
     dropped: list[Scored] = []
 
-    def pct(group: list[Scored]) -> float:
-        possible = sum(s.possible for s in group)
-        return (sum(s.score for s in group) / possible) if possible > 0 else 0.0
-
     for count, keep_best in ((drop_lowest, True), (drop_highest, False)):
         if count <= 0 or len(kept) <= count:
             continue
         if comb(len(kept), count) <= EXHAUSTIVE_LIMIT:  # exhaustive while it's cheap
+            # Running totals: each combination costs O(count), not a pass over the whole group.
+            sc, po = [s.score for s in kept], [s.possible for s in kept]
+            total_e, total_p = sum(sc), sum(po)
             best = None
             for combo in combinations(range(len(kept)), count):
-                rest = [s for i, s in enumerate(kept) if i not in combo]
-                value = pct(rest)
+                p = total_p - sum(po[i] for i in combo)
+                value = (total_e - sum(sc[i] for i in combo)) / p if p > 0 else 0.0
                 if best is None or (value > best[0] if keep_best else value < best[0]):
                     best = (value, combo)
             combo = set(best[1])
@@ -87,9 +86,10 @@ def _drops(items: list[Scored], drop_lowest: int, drop_highest: int) -> tuple[li
 
 
 def compute(groups: list[AssignmentGroup], assignments: list[Assignment],
-            what_if: dict[int, float] | None = None, weighted: bool | None = None) -> dict:
+            what_if: dict[int, float] | None = None, weighted: bool | None = None, drops: bool = True) -> dict:
     """`weighted` is Canvas's "weight final grade based on assignment groups" setting; when
-    unknown (None) it's inferred from whether any group has a weight."""
+    unknown (None) it's inferred from whether any group has a weight. drops=False skips the groups'
+    drop rules, for a subset of assignments whose drops were already chosen on the whole class."""
     what_if = what_if or {}
     by_group: dict[str | None, list[Scored]] = {}
     for a in assignments:
@@ -113,7 +113,7 @@ def compute(groups: list[AssignmentGroup], assignments: list[Assignment],
         g = known.get(group_id)
         items = by_group.get(group_id, [])
         never = {canvas_to_id[c] for c in (getattr(g, "never_drop", None) or []) if c in canvas_to_id} if g else set()
-        kept, dropped = _apply_drops(items, g.drop_lowest if g else 0, g.drop_highest if g else 0, never)
+        kept, dropped = _apply_drops(items, g.drop_lowest if g and drops else 0, g.drop_highest if g and drops else 0, never)
         results.append(GroupResult(group_id, g.name if g else "Other", g.weight if g else None,
                                    sum(s.score for s in kept), sum(s.possible for s in kept),
                                    [s.assignment_id for s in dropped], len(items)))

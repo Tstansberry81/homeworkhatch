@@ -18,7 +18,7 @@ from .. import queries
 from ..config import BASE_DIR
 from ..extensions import csrf, db
 from ..models import Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, calendar_token_hash, utcnow
-from ..services import cards_io, feeds, ics, integrations, planner
+from ..services import cards_io, feeds, ics, integrations, planner, split
 from ..utils import lasting_url, local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
 
@@ -191,8 +191,10 @@ def dashboard():
     last_sync = pill.last_sync_at if pill else None
     soon = [p for p in planner.active_plans(current_user.id) if p.exam_at and p.exam_at <= utcnow() + timedelta(days=21)]
     today_iso = today.isoformat()
+    table = split.points_on_the_table(current_user.id)
     return render_template(
         "dashboard.html", week=week, agenda=agenda, upcoming=upcoming, today=local_now(current_user),
+        table=table, table_ids=[f.assignment.id for _c, f in table],
         exam_plans=soon, study_today={p.id: [s for s in p.sessions if s.day == today_iso and p.exam_at > utcnow()]
                                       for p in soon},
         roles=planner.ROLES,

@@ -1,0 +1,75 @@
+{# Brain Grade (services/split.py) on a class's Grades tab. Needs: course, split. #}
+{% from "_macros.html" import csrf %}
+{% macro pct(v) %}{{ '%.1f' % v ~ '%' if v is not none else '—' }}{% endmacro %}
+<section class="card brain" aria-labelledby="brain-h">
+  <div class="brain-head">
+    <div><p class="kicker">Brain Grade</p><h2 id="brain-h">Your grade, split</h2></div>
+    {% if split.status != 'empty' %}
+    <button type="button" class="btn btn-ghost btn-sm" data-brain-share
+            data-tests="{{ split.tests if split.status == 'ok' and split.tests is not none else '' }}"
+            data-canvas="{{ split.canvas if split.canvas is not none else '' }}"
+            data-lost="{{ split.lost }}" data-late="{{ split.lost_late }}" data-status="{{ split.status }}"
+            data-missed-tests="{{ split.missed_tests }}" data-estimate="{{ '1' if course.current_score is none else '' }}"
+            data-canvas-letter="{{ course.current_grade if course.current_grade and course.current_score is not none and split.canvas is not none and (split.canvas - course.current_score)|abs < 0.5 else '' }}">Share</button>
+    {% endif %}
+  </div>
+  {% if split.status == 'empty' %}
+    <p class="muted">{{ split.message }}</p>
+  {% else %}
+  <div class="brain-nums">
+    <div class="brain-num tests">
+      <div class="label">Test grade</div>
+      <div class="value">{{ pct(split.tests) if split.status == 'ok' else '—' }}</div>
+      <div class="small muted">{% if split.status == 'ok' %}{{ split.n_tests }} tests &amp; quizzes{% if split.missed_tests %} · {{ split.missed_tests }} missed, counted as missing work{% endif %}{% else %}not enough tests yet{% endif %}</div>
+    </div>
+    <div class="brain-num">
+      <div class="label">Everything else</div>
+      <div class="value">{{ pct(split.other) if split.status == 'ok' else '—' }}</div>
+      <div class="small muted">homework, labs, participation</div>
+    </div>
+    <div class="brain-num">
+      <div class="label">{{ 'Estimated grade' if course.current_score is none else 'Class grade' }}</div>
+      <div class="value">{{ pct(split.canvas) }}</div>
+      <div class="small muted">{{ 'your teacher hides the total; may not match' if course.current_score is none else 'on graded work so far' }}</div>
+    </div>
+  </div>
+  <p class="brain-msg">{{ split.message }}</p>
+  {% if split.lost_missing or split.lost_late or split.could_cost %}
+  <ul class="brain-lost">
+    {% if split.lost_missing %}<li><span>Lost to missing work</span><strong>−{{ '%.1f' % split.lost_missing }}%</strong></li>{% endif %}
+    {% if split.lost_late %}<li><span>Lost to late penalties</span><strong>−{{ '%.1f' % split.lost_late }}%</strong></li>{% endif %}
+    {% if split.could_cost %}<li><span>Could still cost, if Canvas grades missing work as zeros</span><strong>−{{ '%.1f' % split.could_cost }}%</strong></li>{% endif %}
+  </ul>
+  <p class="help">Percentage points of your class grade, estimated from your own average on the rest of your work in each group.</p>
+  {% endif %}
+  {% if split.fixes %}
+  <h3 class="mt">Points still on the table</h3>
+  <ul class="list">
+    {% for f in split.fixes %}{% set a = f.assignment %}
+    <li><div class="grow">
+        <a class="title" href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a>
+        <div class="small muted">{% if not f.graded_zero %}Missing, not graded yet{% elif a.score %}Counted as missing ({{ '%g' % a.score }}/{{ '%g' % a.points_possible }}){% else %}Counted as a zero{% endif %}{% if a.lock_at %} · Canvas takes it until {{ a.lock_at|dt }}{% else %} · still open in Canvas{% endif %}</div></div>
+      <div class="btn-row row-actions">
+        {% if f.gain is not none %}{% if f.graded_zero %}<span class="badge ok" title="Estimated, if you turn it in and score like your usual work">up to +{{ '%.1f' % f.gain }}%</span>
+        {% else %}<span class="badge warn" title="If Canvas grades it as a zero; turning it in protects your grade">could cost −{{ '%.1f' % f.gain }}%</span>{% endif %}{% endif %}
+        {% if a.html_url %}<a class="btn btn-sm" href="{{ a.html_url }}" target="_blank" rel="noopener">Open in Canvas ↗</a>{% endif %}
+      </div></li>
+    {% endfor %}
+  </ul>
+  <p class="help">Late penalties may apply; check your syllabus. Handed one in on paper? Mark it done on its page and it drops off this list.</p>
+  {% endif %}
+  <details class="small mt"><summary>How this works</summary>
+    <p>We split your synced grades in two. <strong>Test grade</strong> counts only tests, quizzes, midterms and finals you took. <strong>Everything else</strong> is all the other graded work. Missing work shows up as points lost instead of as a low test score. Each item in the table below shows which side it counts on; tap its label to change it. Both numbers count toward your grade, and nothing here is sent to Canvas or your teacher.</p>
+  </details>
+  {% endif %}
+</section>
+
+<dialog class="share-card" id="brain-dialog" aria-labelledby="brain-dialog-h">
+  <form method="dialog" class="card">
+    <h2 id="brain-dialog-h">Share your Brain Grade</h2>
+    <canvas id="brain-canvas" width="1080" height="1350" role="img" aria-label="Preview of the image"></canvas>
+    <label class="check mt"><input type="checkbox" id="brain-letters"> Show my grades on it</label>
+    <p class="help">Made on your phone or computer; nothing is uploaded. It never shows your class, school or teacher.</p>
+    <div class="btn-row mt"><button type="button" class="btn" id="brain-send">Share</button><button type="button" class="btn btn-ghost" id="brain-save">Save image</button><button class="btn btn-ghost">Close</button></div>
+  </form>
+</dialog>

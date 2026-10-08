@@ -8,7 +8,7 @@ from sqlalchemy.orm import undefer_group
 from .. import queries
 from ..extensions import db
 from ..models import Assignment, CanvasFile, Page, Summary, Upload
-from ..services import ai, gcal, grades, sharing, study
+from ..services import ai, gcal, grades, sharing, split as split_service, study
 from ..services.storage import get_storage
 from ..utils import CLASS_COLORS, course_color
 
@@ -32,9 +32,10 @@ def detail(course_id: int):
     uploads = db.session.scalars(select(Upload).where(Upload.user_id == current_user.id, Upload.course_id == course.id)
                                  .order_by(Upload.name)).all() if tab == "files" else []
     class_sets = sharing.class_sets(current_user, course) if tab == "overview" else []
+    brain = split_service.split(current_user.id, course) if tab == "grades" and course.account.lms != "ics" else None
     return render_template("courses/detail.html", course=course, tab=tab, grade=result, base_url=base_url,
                            upcoming=queries.upcoming_for_course(course), uploads=uploads, class_sets=class_sets,
-                           colors=CLASS_COLORS, current_color=course_color(course.id))
+                           colors=CLASS_COLORS, current_color=course_color(course.id), split=brain)
 
 
 @bp.route("/<int:course_id>/customize", methods=["POST"])

@@ -85,11 +85,36 @@
         {% endfor %}
       {% else %}{{ empty("🐣", "Nothing due in the next two weeks." if accounts else "Your deadlines will show up here.") }}{% endif %}
     </div>
-    {% if missing %}
+    {% if table or missing %}
     <div class="card" style="border-color:var(--err)">
-      <h2>Missing <span class="badge missing">{{ missing|length }}</span></h2>
-      {% for a in missing %}{{ task(a) }}{% endfor %}
-      <p class="small muted mt">Canvas marks these missing. Handed one in on paper? Tick it here; Canvas won't change.</p>
+      {% if table %}
+      <h2>Points still on the table</h2>
+      {% for course, f in table %}{% set a = f.assignment %}
+      <div class="task" style="--c: {{ course_color(a.course_id) }}">
+        <span class="bar"></span>
+        <div>
+          <a class="title" href="{{ url_for('courses.assignment', assignment_id=a.id) }}">{{ a.name }}</a>
+          <div class="meta">{{ course.code or course.name }} · {% if not f.graded_zero %}missing, not graded yet{% elif a.score %}counted as missing{% else %}counted as a zero{% endif %}{% if a.lock_at %} · open until {{ a.lock_at|dt }}{% endif %}</div>
+        </div>
+        <div class="btn-row">
+          {% if f.gain is not none %}{% if f.graded_zero %}<span class="badge ok" title="Estimated, if you turn it in and score like your usual work">up to +{{ '%.1f' % f.gain }}%</span>
+          {% else %}<span class="badge warn" title="If Canvas grades it as a zero; turning it in protects your grade">could cost −{{ '%.1f' % f.gain }}%</span>{% endif %}{% endif %}
+          <form method="post" action="{{ url_for('main.toggle_done', assignment_id=a.id) }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-ghost btn-sm" title="Mark done (e.g. handed in on paper)" aria-label="Mark done">{{ icon('check', 16) }}</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+      <p class="small muted mt">Missing work Canvas still takes: what turning it in could bring back, then what ungraded work could cost as a zero. Estimates use your own average; late penalties may apply. See your <a href="{{ url_for('courses.detail', course_id=table[0][0].id, tab='grades') }}">Brain Grade</a> for the full picture.</p>
+      {% endif %}
+      {% set rest = missing|rejectattr('id', 'in', table_ids)|list %}
+      {% if rest %}
+      <details class="mt" {{ 'open' if not table }}><summary><strong>{{ 'Also missing' if table else 'Missing' }}</strong> <span class="badge missing">{{ rest|length }}</span></summary>
+        {% for a in rest %}{{ task(a) }}{% endfor %}
+        <p class="small muted mt">Canvas marks these missing. Handed one in on paper? Tick it here; Canvas won't change.</p>
+      </details>
+      {% endif %}
     </div>
     {% endif %}
   </div>

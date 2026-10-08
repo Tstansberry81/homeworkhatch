@@ -175,6 +175,8 @@ def _apply_assignment(row: Assignment, a: dict):
     row.late = bool(sub.get("late"))
     row.missing = bool(sub.get("missing"))
     row.excused = bool(sub.get("excused"))
+    row.points_deducted = _float(sub.get("points_deducted"))
+    row.late_policy_status = _clip(sub.get("late_policy_status"), 20)
     row.workflow_state = _clip(sub.get("workflow_state"), 40)
     row.rubric = a.get("rubric") or None
     row.comments = sub.get("comments") or None
