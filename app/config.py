@@ -95,10 +95,11 @@ def engine_options(url: str) -> dict:
 
 
 def env_pairs(name: str) -> dict:
-    """ "a=1, b=2" -> {"a": "1", "b": "2"} """
+    """ "a=1, b=2" -> {"a": "1", "b": "2"}; "a:1, b:2" works too (an easy slip that would otherwise
+    silently drop every pair). """
     out = {}
     for part in (os.environ.get(name) or "").split(","):
-        key, sep, value = part.partition("=")
+        key, sep, value = part.partition("=") if "=" in part else part.partition(":")
         if sep and key.strip() and value.strip():
             out[key.strip()] = value.strip()
     return out

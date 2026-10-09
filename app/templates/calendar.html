@@ -134,7 +134,7 @@
 <script>document.querySelector('.week [aria-current]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });</script>
 {% endif %}
 {% if integrations_available %}{{ gcal_card(gcal, url_for('main.calendar_view')) }}{% endif %}
-<div class="card">
+<div class="card" id="subscribe-card">
   <h2>{{ 'Or subscribe from any calendar app' if integrations_available else "Add to your phone's calendar" }}</h2>
   <p class="small muted">Subscribe to this private link in Google Calendar ("From URL"), Apple Calendar ("New Calendar Subscription") or Outlook. It updates on its own, including what you add here. Anyone with the link can see your due dates and calendar items, so keep it to yourself.</p>
   <div class="btn-row"><code id="feed" style="overflow-wrap:anywhere">{{ feed_url }}</code><button class="btn btn-ghost btn-sm" data-copy="#feed">Copy</button></div>

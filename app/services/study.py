@@ -29,6 +29,17 @@ SYSTEM = (
     "provided material: don't introduce facts that contradict it, and prefer its terminology and notation. "
     "Write clearly for a student audience. Use LaTeX between $...$ for math."
 )
+# For a set made from only a description of what to study (no files or notes to give).
+DESCRIBE_SYSTEM = (
+    "You create study materials for a student who described what they need to study but has no course materials "
+    "to give you. Use accurate, widely accepted knowledge at the level they need (their grade or year when given), "
+    "and follow the focus they describe. Don't invent anything about their particular course: their teacher's "
+    "notation, page numbers, policies, or what will be on their test. If the description is vague, cover the core "
+    "ideas of the topic. If it asks you to do graded work for them (answer a take-home test, write an essay), make "
+    "items that teach the underlying ideas instead. Write clearly for a student audience. Use LaTeX between $...$ "
+    "for math."
+)
+DESCRIBE_MAX_CHARS = 1000  # longer text is notes: "Pasted notes" is for those
 
 
 @dataclass
@@ -38,10 +49,21 @@ class Material:
     truncated: bool
     course_id: int | None
     sources: int = 1
+    described: bool = False  # the text is the student's description of a topic, not material to study
+    level: str | None = None  # their grade or year, for a described topic
+
 
 
 class MaterialError(ValueError):
     pass
+
+
+class NoMatches(MaterialError):
+    """A topic search found nothing in the class's synced material."""
+
+    def __init__(self, message: str, topic: str, course_id: int):
+        super().__init__(message)
+        self.topic, self.course_id = topic, course_id
 
 
 def _cap(text: str) -> tuple[str, bool]:
@@ -97,11 +119,41 @@ def gather_material(user: User, kind: str, ref: str | int | None = None, topic: 
             raise MaterialError("Enter a topic to pull material on.")
         chunks = retrieval.search(user.id, topic, [course.id], k=14)
         if not chunks:
-            raise MaterialError(f"Couldn't find anything about “{topic}” in {course.name}'s synced materials.")
+            raise NoMatches(f"Couldn't find anything about “{topic.strip()}” in {course.name}'s synced materials.",
+                            topic.strip(), course.id)
         text = "\n\n---\n\n".join(f"[{c.title}]\n{c.text}" for c in chunks)
         text, cut = _cap(text)
         return Material(f"{course.name}: {topic.strip()}", text, cut, course.id)
     raise MaterialError("Unknown material type.")
+
+
+def describe_material(user: User, text: str | None, course_id: int | None = None) -> Material:
+    """A topic the student describes ("Krebs cycle for my bio midterm, focus on ATP yield") when they have no
+    files, pages or notes to give: the AI builds from general knowledge (DESCRIBE_SYSTEM)."""
+    text = (text or "").replace("\r\n", "\n").strip()  # a form sends line breaks as two characters
+    if len(text) < 3 or not any(ch.isalpha() for ch in text):
+        raise MaterialError("Describe what you want to study, like “Krebs cycle for my bio midterm, focus on ATP yield”.")
+    if len(text) > DESCRIBE_MAX_CHARS:
+        raise MaterialError(f"Keep the description under {DESCRIBE_MAX_CHARS:,} characters. For longer notes, "
+                            "choose “Pasted notes”.")
+    title = " ".join(text.split())
+    return Material(title[:80] + ("…" if len(title) > 80 else ""), text, False, course_id, described=True,
+                    level=grade_for_ai(user))
+
+
+def grade_for_ai(user: User) -> str | None:
+    """The student's grade or year, when it says something ("Other" doesn't)."""
+    level = (user.grade_level or "").strip()
+    return level if level and level.lower() not in ("other", "none", "n/a") else None
+
+
+def fit_description(text: str) -> str:
+    """Shorten a prefilled description to the limit, at a word boundary."""
+    text = " ".join((text or "").split())
+    if len(text) <= DESCRIBE_MAX_CHARS:
+        return text
+    cut = text[:DESCRIBE_MAX_CHARS - 1]
+    return (cut.rsplit(" ", 1)[0] if " " in cut else cut) + "…"
 
 
 def gather_sources(user: User, refs) -> Material:
@@ -120,6 +172,10 @@ def gather_sources(user: User, refs) -> Material:
 
 
 def _prompt(material: Material, instruction: str) -> str:
+    if material.described:
+        level = f"\n<level>{material.level}</level>" if material.level else ""
+        return (f"<request>\n{material.text}\n</request>{level}\n\n{instruction} Base it on what the student "
+                "described in <request>; there is no other material.")
     if material.sources > 1:
         instruction += (f" The material combines {material.sources} sources, each starting with a === title === line; "
                         "cover all of them, roughly in proportion to how much each one contains.")
@@ -164,8 +220,10 @@ def generate_flashcards(user: User, material: Material, count: int = 15) -> dict
         "formulas, cause-and-effect, and common points of confusion. Fronts are short prompts or questions; backs "
         "are concise, complete answers (one to three sentences). No duplicates. Also give the set a short title."
     )
-    data = ai.complete_json(user, "flashcards", system=SYSTEM, prompt=_prompt(material, instruction),
-                            schema=CARDS_SCHEMA, effort="low", validate=_valid_cards)
+    if material.described:
+        instruction = instruction.replace("in the material", "of the topic the student described")
+    data = ai.complete_json(user, "flashcards", system=DESCRIBE_SYSTEM if material.described else SYSTEM,
+                            prompt=_prompt(material, instruction), schema=CARDS_SCHEMA, effort="low", validate=_valid_cards)
     data["cards"] = data["cards"][:count]
     return data
 
@@ -238,8 +296,13 @@ def generate_quiz(user: User, material: Material, count: int = 10) -> dict:
         "explanation, not the choice. Vary which position holds the correct answer. The explanation says why the "
         "answer is right, using the material's own definitions. Also give the quiz a short title."
     )
-    data = ai.complete_json(user, "quiz", system=SYSTEM, prompt=_prompt(material, instruction),
-                            schema=QUIZ_SCHEMA, effort="medium", validate=_valid_quiz)
+    if material.described:
+        instruction = (instruction.replace("understanding of the material", "understanding of the topic the student described")
+                       .replace("half-understood this material", "half-understood this topic")
+                       .replace(", drawn from the material where possible", "")
+                       .replace("using the material's own definitions", "using standard definitions"))
+    data = ai.complete_json(user, "quiz", system=DESCRIBE_SYSTEM if material.described else SYSTEM,
+                            prompt=_prompt(material, instruction), schema=QUIZ_SCHEMA, effort="medium", validate=_valid_quiz)
     data["questions"] = data["questions"][:count]
     return data
 

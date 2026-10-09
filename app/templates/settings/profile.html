@@ -29,4 +29,9 @@
     <button class="btn mt">Change password</button>
   </form>
 </div>
+<div class="card mt" id="tour-restart">
+  <h2>The walkthrough</h2>
+  <p class="small muted">A short tour of every part of Homework Hatch that also helps you connect your school and your calendar.</p>
+  <form method="post" action="{{ url_for('tour.start') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn btn-ghost btn-sm">{{ 'Restart the tour' if current_user.tour_done_at or current_user.tour_step else 'Take the tour' }}</button></form>
+</div>
 {% endblock %}

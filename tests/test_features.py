@@ -350,3 +350,65 @@ def test_ai_cost_is_logged_with_cache_tokens_and_models_are_per_feature(app, syn
     conv = client.post("/tutor/new", data={}).headers["Location"].rstrip("/").split("/")[-1]
     client.post(f"/tutor/{conv}/message", json={"text": "What is a limit?"}).get_data()
     assert fake_ai.calls[-1]["stream"] and fake_ai.calls[-1]["model"] == "claude-sonnet-5-5", "the tutor follows AI_MODELS too"
+
+
+def test_flashcards_and_quizzes_from_a_description(synced_user, client, fake_ai):
+    """No files or notes: the AI builds from the student's description, and the set is theirs to share."""
+    from app.models import Card, Deck, PracticeQuiz
+
+    synced_user.grade_level = "College sophomore"
+    db.session.commit()
+    course = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
+    r = client.post("/study/generate", data={"mode": "describe", "output": "deck", "count": "10",
+                                             "describe": "Krebs cycle for my bio midterm, focus on ATP yield",
+                                             "describe_course": course.id})
+    assert r.status_code == 302
+    call = fake_ai.calls[-1]
+    assert "no course materials" in call["system"] and "<request>\nKrebs cycle" in call["messages"][0]["content"]
+    assert "<level>College sophomore</level>" in call["messages"][0]["content"] and "<material" not in call["messages"][0]["content"]
+    deck = db.session.scalar(select(Deck).order_by(Deck.id.desc()))
+    assert deck.course_id == course.id and {c.origin for c in deck.cards} == {"ai"}, "shareable like pasted notes"
+    assert deck.description.startswith("Generated from ")
+    client.post("/study/generate", data={"mode": "describe", "output": "quiz", "describe": "Photosynthesis basics"})
+    quiz = db.session.scalar(select(PracticeQuiz).order_by(PracticeQuiz.id.desc()))
+    assert quiz.from_course_files is False and quiz.course_id is None
+    assert "standard definitions" in fake_ai.calls[-1]["messages"][0]["content"]
+    # Too short or too long: no AI call, and what was typed comes back.
+    calls = len(fake_ai.calls)
+    r = client.post("/study/generate", data={"mode": "describe", "describe": "??"})
+    assert r.status_code == 400 and "Describe what you want to study" in r.get_data(as_text=True)
+    r = client.post("/study/generate", data={"mode": "describe", "describe": "x" * 1001})
+    assert r.status_code == 400 and "Pasted notes" in r.get_data(as_text=True) and "x" * 1001 in r.get_data(as_text=True)
+    assert len(fake_ai.calls) == calls
+    # A class topic with nothing synced offers the description route, filled in.
+    r = client.post("/study/generate", data={"mode": "course", "course_id": course.id, "topic": "Byzantine iconoclasm"})
+    page = r.get_data(as_text=True)
+    assert r.status_code == 400 and "Nothing synced matches that topic" in page and ">Byzantine iconoclasm</textarea>" in page
+    assert 'value="describe" checked' in page
+
+
+
+def test_description_edge_cases(synced_user, client, fake_ai):
+    from app.models import StudyPlan
+
+    course = db.session.scalar(select(Course).where(Course.canvas_id == "101"))
+    # A textarea's line breaks arrive as two characters; the limit counts them as one, like the browser.
+    text = "\r\n".join(["x" * 99] * 9) + "y" * 101
+    assert len(text.replace("\r\n", "\n")) == 1000
+    assert client.post("/study/generate", data={"mode": "describe", "describe": text}).status_code == 302
+    # "Other" as a grade says nothing about level.
+    synced_user.grade_level = "Other"
+    db.session.commit()
+    client.post("/study/generate", data={"mode": "describe", "describe": "Mitosis"})
+    assert "<level>" not in fake_ai.calls[-1]["messages"][0]["content"]
+    assert "pitched for" not in client.get("/study/generate?mode=describe").get_data(as_text=True)
+    # "None" stays None after an error (not the hidden picker's first class); the topic tab keeps its class.
+    r = client.post("/study/generate", data={"mode": "describe", "describe": "ab", "describe_course": "", "picker_course": course.id})
+    assert f'<option value="{course.id}" selected' not in r.get_data(as_text=True).split('id="describe_course"', 1)[1]
+    # A long exam scope prefills a description that fits.
+    plan = StudyPlan(user_id=synced_user.id, title="Bio midterm", scope="cells " * 400, course_id=course.id)
+    db.session.add(plan)
+    db.session.commit()
+    page = client.get(f"/study/generate?plan={plan.id}&mode=describe").get_data(as_text=True)
+    prefilled = page.split('id="describe"', 1)[1].split(">", 1)[1].split("</textarea>", 1)[0]
+    assert prefilled.startswith("Bio midterm: cells") and len(prefilled) <= 1000

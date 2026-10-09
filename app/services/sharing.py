@@ -347,7 +347,7 @@ def quiz_refusal(quiz: PracticeQuiz) -> str | None:
     """Why a quiz can never be shared, whatever its questions say now (or None)."""
     if quiz.from_course_files or quiz.pasted_from == "files":
         return ("Quizzes the AI made from class files stay private, including questions pasted from one. Write your "
-                "own quiz, or make one from your own pasted notes, to share it.")
+                "own quiz, or make one from your own pasted notes or a topic you describe, to share it.")
     if quiz.source == "deck":
         return "Live games made from a deck can't be shared. Share the deck itself."
     if quiz.pasted_from == "removed":
