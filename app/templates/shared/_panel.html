@@ -28,7 +28,7 @@
         {% if share.class_course %}<label class="chip-radio"><input type="radio" name="mode" value="class" {{ 'checked' if item.share_mode == 'class' }}> My class ({{ share.class_course.code or share.class_course.name }})</label>{% endif %}
       </fieldset>
       <label class="check mt small"><input type="checkbox" name="own_work" value="1" {{ 'checked' if item.share_mode != 'private' }}>
-        I made this myself or from my own notes. It doesn't copy slides, readings or answer keys word for word, and it has no questions from a real quiz or exam.</label>
+        I made this myself, from my own notes, or from a topic I described. It doesn't copy slides, readings or answer keys word for word, and it has no questions from a real quiz or exam.</label>
       <button class="btn btn-sm mt">Save</button>
     </form>
     <p class="help">Signed-out visitors see a short preview; the rest needs a free account. Your name is never shown. Turning sharing off kills the link, and sharing again makes a new one. When you share or edit, we hold back cards in the AI's wording of your class files, cards you saved from someone else, and anything that copies your synced class materials word for word. Shared sets follow our <a href="{{ url_for('main.terms') }}#sharing">sharing rules</a>.</p>

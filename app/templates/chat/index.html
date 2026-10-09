@@ -30,7 +30,7 @@
         <button class="linklike">{{ 'Turn off' if current_user.allow_dms else 'Turn on' }}</button></p>
     </form>
   </div>
-  <div class="card">
+  <div class="card" id="rooms-card">
     <h2>Class rooms</h2>
     {% if courses %}
     <ul class="list">

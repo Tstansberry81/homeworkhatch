@@ -71,10 +71,10 @@ def create_app(env_name: str | None = None, overrides: dict | None = None) -> Fl
     csrf.init_app(app)
 
     from .blueprints import (admin, api, auth, billing, chat, coins, courses, live, main, myevents, planner, settings, shared,
-                             study, tools, tutor, uploads)
+                             study, tools, tour, tutor, uploads)
 
     for bp in (main.bp, auth.bp, courses.bp, api.bp, study.bp, planner.bp, live.bp, tutor.bp, chat.bp, coins.bp, tools.bp,
-               billing.bp, settings.bp, admin.bp, uploads.bp, shared.bp, myevents.bp):
+               billing.bp, settings.bp, admin.bp, uploads.bp, shared.bp, myevents.bp, tour.bp):
         app.register_blueprint(bp)
     # Token-authenticated / signature-verified endpoints don't use browser CSRF tokens.
     csrf.exempt(api.bp)
@@ -97,6 +97,10 @@ def load_user(user_id: str):
     if user is None or str(user.session_version or 0) != (version or "0"):
         return None
     return user
+
+
+# Pages the walkthrough stays off: sign-up and sign-in steps, and pages shown before the app proper.
+TOURLESS = {"main.onboarding", "main.age", "auth.login", "auth.register", "auth.logout", "main.landing"}
 
 
 def _register_template_helpers(app: Flask) -> None:
@@ -129,6 +133,9 @@ def _register_template_helpers(app: Flask) -> None:
     from .services.split import letter
 
     app.jinja_env.globals["letter"] = letter  # Brain Grade's share card
+    from .services.study import grade_for_ai
+
+    app.jinja_env.globals["grade_for_ai"] = grade_for_ai  # the generator's "pitched for …" note
     app.jinja_env.globals["now_utc"] = utcnow
 
     @app.context_processor
@@ -141,6 +148,10 @@ def _register_template_helpers(app: Flask) -> None:
             from .services import dms
 
             ctx["dm_unread"] = dms.unread_count(current_user.id)
+            if current_user.tour_step and request.endpoint not in TOURLESS:
+                from .services import tour
+
+                ctx["tour"] = tour.config(current_user)
         return ctx
 
 

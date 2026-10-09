@@ -23,7 +23,7 @@
       {% for tz in timezones() %}<option value="{{ tz }}" {{ 'selected' if tz == current_user.timezone }}>{{ tz }}</option>{% endfor %}
       <option value="UTC" {{ 'selected' if current_user.timezone == 'UTC' }}>UTC</option>
     </select>
-    <button class="btn btn-block mt" type="submit">Continue to Canvas setup →</button>
+    <button class="btn btn-block mt" type="submit">Continue →</button>
   </form>
 </div>
 {% endblock %}

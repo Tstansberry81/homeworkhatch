@@ -289,7 +289,9 @@ def export():
     payload = {
         "exported_at": utcnow().isoformat() + "Z",
         "profile": {"email": u.email, "username": u.username, "display_name": u.display_name, "plan": u.plan,
-                    "timezone": u.timezone, "grade_level": u.grade_level},
+                    "timezone": u.timezone, "grade_level": u.grade_level,
+                    "walkthrough": {"step": u.tour_step, "finished_at": u.tour_done_at.isoformat() if u.tour_done_at else None,
+                                    "marks": u.tour_marks or []}},
         "courses": [{
             "name": c.name, "code": c.course_code, "term": c.term_name, "current_score": c.current_score,
             "assignments": [{"name": a.name, "due_at": a.due_at.isoformat() if a.due_at else None, "status": a.status,

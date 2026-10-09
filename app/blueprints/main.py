@@ -19,7 +19,7 @@ from ..config import BASE_DIR
 from ..extensions import csrf, db
 from ..models import (Assignment, CalendarEvent, Course, StudyPlan, StudySession, User, UserEvent, calendar_token_hash,
                       utcnow)
-from ..services import cards_io, feeds, ics, integrations, planner, split
+from ..services import cards_io, feeds, ics, integrations, planner, split, tour
 from ..utils import lasting_url, local_now, log_activity, to_local, user_zone
 from .auth import valid_timezone
 
@@ -155,12 +155,17 @@ def onboarding():
             return render_template("onboarding.html"), 400
         current_user.grade_level = (f.get("grade_level") or "").strip()[:40] or None
         current_user.timezone = valid_timezone(f.get("timezone"))
+        first_time = not current_user.onboarded
         current_user.onboarded = True
+        if first_time and not current_user.tour_done_at:
+            from ..services import tour
+
+            tour.start(current_user)  # the walkthrough begins on Home and gets them connected
         db.session.commit()
         shared_next = session.pop("shared_next", None)  # signed up from a shared set's link
         if isinstance(shared_next, str) and shared_next.startswith("/s/") and "//" not in shared_next:
             return redirect(shared_next)
-        return redirect(url_for("settings.sync"))
+        return redirect(url_for("main.dashboard", tour="start") if current_user.tour_step else url_for("settings.sync"))
     return render_template("onboarding.html")
 
 
@@ -203,6 +208,8 @@ def dashboard():
     return render_template(
         "dashboard.html", week=week, agenda=agenda, upcoming=upcoming, today=local_now(current_user),
         table=table, table_ids=[f.assignment.id for _c, f in table],
+        setup=tour.setup_card(current_user),
+        invite_tour=not current_user.tour_step and not current_user.tour_done_at,
         exam_plans=soon, planned_today=planned_today, study_today={p.id: [s for s in p.sessions if s.day == today_iso and p.exam_at > utcnow()]
                                       for p in soon},
         roles=planner.ROLES,

@@ -39,6 +39,10 @@ def _quiz(quiz_id: int) -> PracticeQuiz:
     return quiz
 
 
+MODES = ("sources", "course", "paste", "describe")
+OWN_MODES = {"paste", "describe"}  # the student's own notes or description, not class files: the AI's sets are shareable
+
+
 def _course_id(value) -> int | None:
     try:
         cid = int(value or 0)
@@ -52,8 +56,9 @@ def _course_id(value) -> int | None:
 
 def _preset(args) -> dict:
     """What the generator opens with: ?course=&refs=file:1,page:2&output= (from a class's Files
-    tab), ?kind=file|page&ref= (the buttons on a file or page), and ?plan= (the exam planner's
-    "Make cards with AI": the new deck or quiz is for that exam)."""
+    tab), ?kind=file|page&ref= (the buttons on a file or page), ?plan= (the exam planner's
+    "Make cards with AI": the new deck or quiz is for that exam, and its description starts from the
+    exam's name and what's on it) and ?mode=describe&describe= (a topic to describe)."""
     refs = [r for r in (args.get("refs") or "").split(",") if r]
     ref_id = parse_id(args.get("ref"))
     if args.get("kind") in ("file", "page") and ref_id is not None:
@@ -62,9 +67,14 @@ def _preset(args) -> dict:
     if not course_id and refs:
         course_id = next((s.course_id for s in sources.describe(current_user, refs) if s.course_id), None)
     plan = _owned_plan(args.get("plan"))
+    describe = args.get("describe") or ""
+    if plan and not describe:
+        describe = plan.title + (f": {plan.scope}" if plan.scope else "")
+    course_id = course_id or (plan.course_id if plan else None)
     return {"course_id": course_id, "refs": refs, "output": args.get("output", "deck"),
-            "mode": args.get("mode") if args.get("mode") in ("sources", "course", "paste") else "sources",
-            "plan_id": plan.id if plan else None}
+            "mode": args.get("mode") if args.get("mode") in MODES else "sources",
+            "plan_id": plan.id if plan else None, "describe": study.fit_description(describe),
+            "describe_course": course_id, "topic_course": course_id}
 
 
 # ---------------------------------------------------------------- hub
@@ -106,21 +116,27 @@ def generate():
     mode = f.get("mode", "sources")
     output = f.get("output", "deck")
     plan = _owned_plan(f.get("plan_id"))
+    # What the student typed survives an error.
     preset = {"course_id": f.get("picker_course", type=int), "refs": f.getlist("refs"), "output": output, "mode": mode,
-              "plan_id": plan.id if plan else None}
+              "plan_id": plan.id if plan else None, "topic": (f.get("topic") or "")[:300],
+              "topic_course": f.get("course_id", type=int), "pasted": f.get("pasted") or "",
+              "describe": (f.get("describe") or "").replace("\r\n", "\n")[:study.DESCRIBE_MAX_CHARS * 2],
+              "describe_course": f.get("describe_course", type=int)}
     try:
         count = int(f.get("count") or (15 if output == "deck" else 10))
         if mode == "course":
             material = study.gather_material(current_user, "course", f.get("course_id"), topic=f.get("topic"))
         elif mode == "paste":
             material = study.gather_material(current_user, "paste", pasted=f.get("pasted"))
+        elif mode == "describe":
+            material = study.describe_material(current_user, f.get("describe"), _course_id(f.get("describe_course")))
         else:
             material = study.gather_sources(current_user, f.getlist("refs"))
         if output == "quiz":
             data = study.generate_quiz(current_user, material, count)
             quiz = PracticeQuiz(user_id=current_user.id, course_id=material.course_id, source="ai",
                                 title=(data["title"] or "Practice quiz")[:200], questions=data["questions"],
-                                from_course_files=mode != "paste", plan_id=plan.id if plan else None)
+                                from_course_files=mode not in OWN_MODES, plan_id=plan.id if plan else None)
             db.session.add(quiz)
             db.session.commit()
             target = url_for("study.take_quiz", quiz_id=quiz.id)
@@ -129,15 +145,19 @@ def generate():
             deck = Deck(user_id=current_user.id, course_id=material.course_id, source="ai",
                         title=(data["title"] or "Flashcards")[:200],
                         description=f"{sharing.AUTO_DESCRIPTION}{material.title}"[:1000], plan_id=plan.id if plan else None)
-            # Cards from the student's own pasted notes are theirs to share; the AI's wording of class
-            # files and uploads isn't, until they rewrite it (services/sharing.py).
-            origin = "ai" if mode == "paste" else "ai_files"
+            # Cards from the student's own pasted notes or description are theirs to share; the AI's
+            # wording of class files and uploads isn't, until they rewrite it (services/sharing.py).
+            origin = "ai" if mode in OWN_MODES else "ai_files"
             deck.cards = [Card(front=c["front"], back=c["back"], position=i, origin=origin,
                                origin_text=sharing.card_text(c["front"], c["back"]) if origin == "ai_files" else None)
                           for i, c in enumerate(data["cards"])]
             db.session.add(deck)
             db.session.commit()
             target = url_for("study.deck", deck_id=deck.id)
+    except study.NoMatches as exc:  # nothing synced on that topic: offer to make it from the description
+        flash(str(exc), "error")
+        return _generate_page(dict(preset, mode="describe", offer_describe=True, describe=exc.topic,
+                                   describe_course=exc.course_id)), 400
     except (study.MaterialError, ai.AIError, ValueError) as exc:
         flash(str(exc), "error")
         return _generate_page(preset), 400

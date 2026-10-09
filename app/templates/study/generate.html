@@ -3,7 +3,7 @@
 {% block title %}Make a study set{% endblock %}
 {% block content %}
 {% include "_study_tabs.html" %}
-<div class="page-head"><div><h1>Make a study set</h1><p class="muted">Pick files and pages from a class (or your own uploads) and get flashcards or a practice quiz built from exactly those.
+<div class="page-head"><div><h1>Make a study set</h1><p class="muted">Get flashcards or a practice quiz built from files and pages you pick, a topic in one of your classes, your own notes, or just a description of what you need to study.
   Already have cards in Quizlet or Anki? <a href="{{ url_for('study.import_deck') }}">Import them</a> (free, no AI actions used).</p></div>
   {% if remaining is not none %}<span class="badge accent">{{ remaining }} AI actions left</span>{% endif %}</div>
 {% if not ai_available %}<div class="flash warning">AI isn't enabled on this server yet.</div>{% endif %}
@@ -15,8 +15,8 @@
     <label class="chip-radio"><input type="radio" name="output" value="quiz" {{ 'checked' if preset.output == 'quiz' }}> Practice quiz</label>
   </div>
   <label>From</label>
-  <div class="chip-row">
-    {% for key, label in [("sources", "Files & pages I pick"), ("course", "A topic in a class"), ("paste", "Pasted notes")] %}
+  <div class="chip-row" id="gen-modes">
+    {% for key, label in [("sources", "Files & pages I pick"), ("course", "A topic in a class"), ("paste", "Pasted notes"), ("describe", "Just describe it")] %}
     <label class="chip-radio"><input type="radio" name="mode" value="{{ key }}" {{ 'checked' if preset.mode == key }}> {{ label }}</label>
     {% endfor %}
   </div>
@@ -26,14 +26,25 @@
   <div data-mode="course">
     <div class="form-row">
       <div><label for="course_id">Class</label>
-        <select id="course_id" name="course_id">{% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if c.id == preset.course_id }}>{{ c.label }}</option>{% endfor %}</select></div>
-      <div><label for="topic">Topic</label><input id="topic" name="topic" type="text" placeholder="e.g. chain rule, Reconstruction, for loops"></div>
+        <select id="course_id" name="course_id">{% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if c.id == (preset.topic_course or preset.course_id) }}>{{ c.label }}</option>{% endfor %}</select></div>
+      <div><label for="topic">Topic</label><input id="topic" name="topic" type="text" maxlength="300" value="{{ preset.topic or '' }}" placeholder="e.g. chain rule, Reconstruction, for loops"></div>
     </div>
     <p class="help">We search that class's synced pages, files and assignments for the topic and build from the best matches.</p>
   </div>
   <div data-mode="paste">
     <label for="pasted">Your notes</label>
-    <textarea id="pasted" name="pasted" placeholder="Paste lecture notes, a reading, a study guide…"></textarea>
+    <textarea id="pasted" name="pasted" placeholder="Paste lecture notes, a reading, a study guide…">{{ preset.pasted or '' }}</textarea>
+  </div>
+  <div data-mode="describe">
+    {% if preset.offer_describe %}<div class="flash info">Nothing synced matches that topic, but the AI can make the set from your description alone. It's filled in below; add any detail, then make it.</div>{% endif %}
+    <label for="describe">What do you want to study?</label>
+    <textarea id="describe" name="describe" maxlength="1000" rows="3" placeholder="e.g. Krebs cycle for my bio midterm, focus on ATP yield and where each step happens">{{ preset.describe or '' }}</textarea>
+    <div class="form-row">
+      <div><label for="describe_course">Class <span class="hint">(optional, to file it under)</span></label>
+        <select id="describe_course" name="describe_course"><option value="">None</option>{% for c in courses %}<option value="{{ c.id }}" {{ 'selected' if c.id == preset.describe_course }}>{{ c.label }}</option>{% endfor %}</select></div>
+    </div>
+    {% set level = grade_for_ai(current_user) %}
+    <p class="help">No files or notes needed: the AI builds it from what it knows about the topic{% if level %}, pitched for {{ level }} (from your profile){% endif %}. Name the topic, what to focus on and what it's for. It doesn't know your class, so check the items against what your teacher covered.</p>
   </div>
   <div class="form-row">
     <div><label for="count">How many</label>

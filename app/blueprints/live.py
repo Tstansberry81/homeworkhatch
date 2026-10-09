@@ -95,7 +95,7 @@ def create(quiz_id: int):
         abort(404)
     if quiz.from_course_files:
         flash("Quizzes made from course files stay private to you, so they can't be hosted live. "
-              "Host a quiz you wrote, or one made from your own pasted notes.", "info")
+              "Host a quiz you wrote, or one made from your own pasted notes or a described topic.", "info")
         return redirect(url_for("study.take_quiz", quiz_id=quiz.id))
     if request.form.get("own_material") != "1":  # the host confirms it's their own material
         abort(400)

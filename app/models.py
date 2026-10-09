@@ -81,6 +81,12 @@ class User(UserMixin, db.Model):
     # and whether classmates may send this student direct-message requests.
     chat_agreed_at: Mapped[datetime | None] = mapped_column(DateTime)
     allow_dms: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    # The walkthrough (services/tour.py): the step the student is on (None when not touring), when they
+    # finished or skipped it (an invitation shows to anyone with neither), and setup steps the server
+    # can't see for itself ("phone_calendar": added the calendar link to a phone; "hide_setup").
+    tour_step: Mapped[str | None] = mapped_column(String(40))
+    tour_done_at: Mapped[datetime | None] = mapped_column(DateTime)
+    tour_marks: Mapped[list | None] = mapped_column(JSON)
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)

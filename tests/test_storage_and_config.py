@@ -266,3 +266,10 @@ def test_encryption_sweep_handles_empty_objects_and_restores_on_a_bad_read_back(
             st.rewrite("u/1/files/again.txt", seal=True)
         monkeypatch.setattr(EncryptedStorage, "open", real_open)
         assert calls["n"] == 1 and st.backend.read("u/1/files/again.txt") == b"keep me", "original restored"
+
+
+def test_per_feature_models_read_with_either_separator(monkeypatch):
+    from app.config import env_pairs
+
+    monkeypatch.setenv("AI_MODELS", "tutor:claude-sonnet-5-5, flashcards=claude-sonnet-5-5,quiz : claude-sonnet-5-5,bad")
+    assert env_pairs("AI_MODELS") == {"tutor": "claude-sonnet-5-5", "flashcards": "claude-sonnet-5-5", "quiz": "claude-sonnet-5-5"}

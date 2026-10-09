@@ -893,3 +893,45 @@ fieldset.chip-row, fieldset.method-grid { border: 0; padding: 0; margin: 0; min-
   .check { align-items: flex-start; }
   .check input[type=checkbox], .check input[type=radio], .choice input { width: 20px; height: 20px; flex: none; margin-top: 1px; }
 }
+
+/* ---------- the walkthrough (js/tour.js) ---------- */
+.tour-spot { position: fixed; z-index: 60; border-radius: var(--radius-sm); pointer-events: none;
+  box-shadow: 0 0 0 3px var(--yolk), 0 0 0 200vmax rgb(0 0 0 / .45); }
+body.tour-room { padding-bottom: var(--tour-room, 0); }
+/* The open menu drawer comes first; the tour steps aside until it closes. */
+body:has(#sidebar.open) :is(.tour-spot, .tour-pop, .tour-pill) { display: none; }
+.tour-pop { position: fixed; z-index: 61; width: min(360px, calc(100vw - 16px)); background: var(--surface); color: var(--text);
+  border: 1.5px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 16px 18px; }
+.tour-pop h2 { font: 700 1.15rem var(--display); margin: 2px 0 6px; outline: none; }
+.tour-pop .tour-body { margin: 0 0 10px; line-height: 1.45; }
+.tour-count { font: 600 .72rem var(--mono); color: var(--muted); margin: 0; text-transform: uppercase; letter-spacing: .04em; }
+.tour-check { margin: 0 0 10px; color: var(--muted); }
+.tour-check.ok { color: var(--text); font-weight: 650; }
+.tour-actions { justify-content: flex-end; }
+.tour-foot { margin: 10px 0 0; color: var(--muted); text-align: right; }
+.tour-center { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100vw - 24px));
+  box-shadow: 0 0 0 200vmax rgb(0 0 0 / .45), var(--shadow-lg); }
+.tour-sheet { left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); top: auto; width: auto; }
+@media (max-height: 520px) {  /* a phone held sideways: keep the explanation short so the page shows above it */
+  .tour-pop { padding: 8px 12px; }
+  .tour-pop h2 { font-size: 1rem; margin: 0 0 2px; }
+  .tour-pop .tour-body { font-size: .86rem; line-height: 1.35; margin-bottom: 6px; }
+  .tour-foot { margin-top: 4px; }
+  .tour-sheet { left: auto; width: min(520px, calc(100vw - 16px)); }
+}
+.tour-pill { position: fixed; z-index: 59; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); display: flex; align-items: stretch;
+  background: var(--yolk); color: #141311; border: 1.5px solid var(--line); border-radius: 999px; box-shadow: var(--shadow); max-width: calc(100vw - 32px); }
+.tour-pill button { background: none; border: 0; color: inherit; font: 600 .85rem var(--font); cursor: pointer; padding: 9px 14px; }
+.tour-pill-go { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.tour-pill-x { border-left: 1.5px solid rgb(0 0 0 / .25) !important; padding: 9px 12px !important; font-size: 1.05rem !important; }
+.tour-toast { position: fixed; z-index: 62; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: 10px 14px; max-width: calc(100vw - 32px); }
+
+/* ---------- Get set up (dashboard) ---------- */
+.setup-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.setup-list li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+.setup-list .tick { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line); display: grid; place-items: center; font-size: .8rem; }
+.setup-list .done .tick { background: var(--mint); color: #141311; }
+.setup-list .done a { text-decoration: line-through; color: var(--muted); }
+.setup-bar { height: 8px; border-radius: 99px; background: var(--surface-2); border: 1px solid var(--hair); overflow: hidden; margin-top: 4px; }
+.setup-bar span { display: block; height: 100%; background: var(--mint); }

@@ -36,7 +36,7 @@
         ("chat.index", "Chat", "chat", ep.startswith("chat.")),
         ("uploads.index", "Files", "files", ep.startswith("uploads.")),
       ] %}
-      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if active }}"{% if active %} aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ label }}</span>{% if endpoint == 'chat.index' and dm_unread %}<span class="badge accent nav-badge" aria-label="{{ dm_unread }} unread">{{ dm_unread }}</span>{% endif %}</a>
+      <a href="{{ url_for(endpoint) }}" data-nav="{{ endpoint }}" class="{{ 'active' if active }}"{% if active %} aria-current="page"{% endif %}>{{ icon(ico) }}<span>{{ label }}</span>{% if endpoint == 'chat.index' and dm_unread %}<span class="badge accent nav-badge" aria-label="{{ dm_unread }} unread">{{ dm_unread }}</span>{% endif %}</a>
       {% endfor %}
     </nav>
     <div class="rail-foot">
@@ -68,5 +68,7 @@
 {% endif %}
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% block scripts %}{% endblock %}
+{% if tour %}<script type="application/json" id="hh-tour">{{ tour|tojson }}</script>
+<script src="{{ url_for('static', filename='js/tour.js') }}"></script>{% endif %}
 </body>
 </html>
